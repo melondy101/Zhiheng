@@ -26,6 +26,35 @@ export interface Report {
   knowledgePoints: string[];
   content: string;
   viewpoints: string[];
+  references: Source[];
+  citations: Record<number, Source>;
+}
+
+// Source interface — a cited origin for a claim in the report.
+// Every field may be null when the origin lacks that information.
+// Null ≠ fabricated — missing fields are left blank, never invented.
+export interface Source {
+  id: string;
+  type: 'zhihu' | 'web' | 'ai_synthesis';
+  author: string | null;
+  title: string | null;
+  url: string | null;
+  excerpt: string | null;
+}
+
+// Progress event emitted by a RetrievalProvider while building a report.
+export type ReportProgressStage =
+  | 'zhihu_search'
+  | 'web_search'
+  | 'history_search'
+  | 'synthesizing'
+  | 'building_graph'
+  | 'complete';
+
+export interface ReportProgress {
+  stage: ReportProgressStage;
+  message: string;
+  timestamp: number;
 }
 
 export interface Session {
@@ -56,7 +85,15 @@ export interface Identity {
 
 // Provider interfaces
 export interface RetrievalProvider {
-  generateReport(question: string): Promise<Report>;
+  /**
+   * Generate a research report for the given question.
+   * @param onProgress Optional callback for progress updates during generation.
+   *   Called at least once with stage 'complete' even on error.
+   */
+  generateReport(
+    question: string,
+    onProgress?: (progress: ReportProgress) => void
+  ): Promise<Report>;
 }
 
 export interface LLMProvider {

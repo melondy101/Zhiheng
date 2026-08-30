@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { FixtureRetrievalProvider, serverStorage } from '@/lib/server-providers';
-import type { Session, Message } from '@/lib/providers';
-
-const retrievalProvider = new FixtureRetrievalProvider();
+import { serverStorage } from '@/lib/server-providers';
+import type { Session, Message, ReportProgress } from '@/lib/providers';
+import { ZhihuSearchProvider, WebSearchProvider } from '@/lib/search-providers';
+import { buildReport } from '@/lib/report-builder';
 
 export const runtime = 'nodejs';
 
@@ -12,7 +12,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Missing question' }, { status: 400 });
   }
 
-  const report = await retrievalProvider.generateReport(question);
+  // Run searches in parallel
+  const zhihuProvider = new ZhihuSearchProvider();
+  const webProvider = new WebSearchProvider();
+
+  const [zhihuSources, webSources] = await Promise.all([
+    zhihuProvider.search(question),
+    webProvider.search(question),
+  ]);
+
+  // Build the report with progress tracking
+  const { report, progress } = await buildReport({
+    question,
+    zhihuSources,
+    webSources,
+  });
+
   const session: Session = {
     id: `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     question,
@@ -27,5 +42,5 @@ export async function POST(request: Request) {
   };
 
   await serverStorage.saveSession(session);
-  return NextResponse.json({ sessionId: session.id, report });
+  return NextResponse.json({ sessionId: session.id, report, progress: progress as ReportProgress[] });
 }

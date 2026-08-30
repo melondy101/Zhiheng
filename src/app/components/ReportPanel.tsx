@@ -1,12 +1,35 @@
 'use client';
 
-import type { Report as ReportType } from '@/lib/providers';
+import type { Report as ReportType, Source } from '@/lib/providers';
 
 interface ReportPanelProps {
   report: ReportType;
 }
 
+/** Group sources by type for display. */
+function groupByType(sources: Source[]): Record<string, Source[]> {
+  const groups: Record<string, Source[]> = {
+    zhihu: [],
+    web: [],
+    ai_synthesis: [],
+  };
+  for (const s of sources) {
+    if (groups[s.type]) {
+      groups[s.type].push(s);
+    }
+  }
+  return groups;
+}
+
+const TYPE_LABELS: Record<string, string> = {
+  zhihu: '知乎来源',
+  web: '外部资料',
+  ai_synthesis: 'AI 综合归纳',
+};
+
 export default function ReportPanel({ report }: ReportPanelProps) {
+  const grouped = groupByType(report.references);
+
   return (
     <div className="flex-1 overflow-y-auto p-6 border-r">
       <h2 className="text-2xl font-bold mb-6">{report.title}</h2>
@@ -24,7 +47,37 @@ export default function ReportPanel({ report }: ReportPanelProps) {
 
       <div className="bg-white rounded-lg border p-6 mb-4">
         <h3 className="font-semibold mb-3">话题概述与主要内容</h3>
-        <p className="text-sm leading-relaxed">{report.content}</p>
+        <div className="text-sm leading-relaxed">
+          {report.content.split('\n').map((line, i) => {
+            if (line.startsWith('## ')) {
+              return (
+                <h4 key={i} className="font-semibold text-base mt-4 mb-2 text-gray-800">
+                  {line.slice(3)}
+                </h4>
+              );
+            }
+            if (line === '') return <br key={i} />;
+            if (/^\d+\./.test(line.trim())) {
+              return (
+                <p key={i} className="ml-4 mb-1">
+                  {renderInlineCitations(line)}
+                </p>
+              );
+            }
+            if (line.trim().startsWith('- ')) {
+              return (
+                <p key={i} className="ml-4 mb-1">
+                  {renderInlineCitations(line.trim().slice(2))}
+                </p>
+              );
+            }
+            return (
+              <p key={i} className="mb-2">
+                {renderInlineCitations(line)}
+              </p>
+            );
+          })}
+        </div>
       </div>
 
       {report.viewpoints.length > 0 && (
@@ -37,6 +90,96 @@ export default function ReportPanel({ report }: ReportPanelProps) {
           </ul>
         </div>
       )}
+
+      {/* References section */}
+      {report.references.length > 0 && (
+        <div className="bg-white rounded-lg border p-6">
+          <h3 className="font-semibold mb-4 text-blue-600">引用来源</h3>
+
+          {Object.entries(grouped).map(([type, sources]) => {
+            if (sources.length === 0) return null;
+            return (
+              <div key={type} className="mb-5 last:mb-0">
+                <h4 className="text-sm font-medium text-gray-500 mb-2 uppercase tracking-wide">
+                  {TYPE_LABELS[type] ?? type}
+                </h4>
+                <div className="space-y-3">
+                  {sources.map((src) => {
+                    const globalIndex = report.references.indexOf(src) + 1;
+                    return (
+                      <div
+                        key={src.id}
+                        className="border rounded-md p-3 text-sm bg-gray-50"
+                      >
+                        <div className="flex items-start gap-2">
+                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0 mt-0.5">
+                            {globalIndex}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-gray-700">
+                              {src.author ?? '未知作者'}
+                            </span>
+                            {src.title && (
+                              <>
+                                <span className="text-gray-400 mx-1">—</span>
+                                <span className="text-gray-900 font-medium">
+                                  {src.title}
+                                </span>
+                              </>
+                            )}
+                            {src.url ? (
+                              <div className="mt-1">
+                                <a
+                                  href={src.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:underline text-xs break-all"
+                                >
+                                  {src.url}
+                                </a>
+                              </div>
+                            ) : (
+                              <div className="text-gray-400 text-xs mt-1">
+                                来源链接：未知
+                              </div>
+                            )}
+                            {src.excerpt && (
+                              <p className="text-gray-600 text-xs mt-1 italic">
+                                {src.excerpt}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
+}
+
+/** Render inline text, converting [N] citation markers to styled superscript badges. */
+function renderInlineCitations(text: string): React.ReactNode {
+  const parts = text.split(/(\[\d+\])/g);
+  return parts.map((part, i) => {
+    const match = part.match(/^\[(\d+)\]$/);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      return (
+        <sup
+          key={i}
+          className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-xs font-bold ml-0.5 cursor-default"
+          title={`引用 #${n}`}
+        >
+          {n}
+        </sup>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
 }

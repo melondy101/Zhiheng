@@ -81,10 +81,25 @@ export default function Home() {
   const handleStart = async (question: string, initialOpinion: string | null) => {
     setLoading(true);
     try {
-      const generatedReport = await retrievalProvider.generateReport(question);
-      const report = await renderingProvider.renderReport(generatedReport);
+      // Call the server API which runs parallel search providers + report builder
+      const res = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`API error: ${res.status}`);
+      }
+
+      const { sessionId, report } = (await res.json()) as {
+        sessionId: string;
+        report: Report;
+        progress: { stage: string; message: string; timestamp: number }[];
+      };
+
       const newSession: Session = {
-        id: `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+        id: sessionId,
         question,
         initialOpinion,
         report,
@@ -95,11 +110,14 @@ export default function Home() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
+
       await storageProvider.saveSession(newSession);
       setSession(newSession);
       setReport(report);
       setPage('session');
-      window.history.pushState({}, '', `?session=${newSession.id}`);
+      window.history.pushState({}, '', `?session=${sessionId}`);
+    } catch (err) {
+      console.error('Failed to generate report:', err);
     } finally {
       setLoading(false);
     }
@@ -205,7 +223,7 @@ export default function Home() {
       <div className="flex h-[calc(100vh-57px)]">
         <ReportPanel report={report!} />
 
-        <div className="flex flex-col">
+        <div className="flex flex-col flex-1 min-w-0">
           {!selectedViewpoint && !completed && (
             <StanceSelector
               viewpoints={report?.viewpoints ?? []}

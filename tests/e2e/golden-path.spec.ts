@@ -17,9 +17,11 @@ test.describe('Golden Path: minimal reasoning loop', () => {
     await page.click('button[type="submit"]');
     await expect(page).toHaveURL(/session=\w+/);
 
-    // Step 3: Verify fixture report appears
+    // Step 3: Verify fixture report appears (wait for API response)
     await expect(page.locator('h2')).toContainText(QUESTION);
-    await expect(page.locator('text=核心知识点')).toBeVisible();
+    // Wait for network idle to ensure report panel has fully rendered
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('h3:has-text("核心知识点")')).toBeVisible({ timeout: 15000 });
 
     // Step 4: Choose a stance (select first viewpoint)
     const viewpoints = page.locator('.space-y-2 button');
