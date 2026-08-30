@@ -1305,3 +1305,37 @@ describe('profile localStorage', () => {
     assert.strictEqual(loadProfile(), null);
   });
 });
+
+// ---- Ticket #13: Demo fixtures ----
+import { DEMO_FIXTURES, getFixtureByTopic } from '../../src/lib/demo-fixtures';
+
+describe('DEMO_FIXTURES', () => {
+  it('has exactly three fixtures', () => {
+    assert.strictEqual(DEMO_FIXTURES.length, 3);
+  });
+  it('covers three required categories', () => {
+    const categories = new Set(DEMO_FIXTURES.map((f) => f.category));
+    assert.ok(categories.has('AI/技术'));
+    assert.ok(categories.has('社会/生活'));
+    assert.ok(categories.has('职场/教育/个人选择'));
+  });
+  it('each fixture has captureTime and normalized sources', () => {
+    DEMO_FIXTURES.forEach((f) => {
+      assert.ok(f.captureTime.length > 0);
+      assert.ok(f.normalized.sources.length >= 2);
+    });
+  });
+  it('getFixtureByTopic returns matching fixture', () => {
+    const f = getFixtureByTopic(DEMO_FIXTURES[0]!.topic);
+    assert.ok(f);
+    assert.strictEqual(f!.category, DEMO_FIXTURES[0]!.category);
+  });
+  it('getFixtureByTopic returns undefined for unknown topic', () => {
+    assert.strictEqual(getFixtureByTopic('不存在的议题'), undefined);
+  });
+  it('graph specs are within 6-10 nodes', () => {
+    DEMO_FIXTURES.forEach((f) => {
+      assert.ok(f.expectedGraph.nodeCount >= 6 && f.expectedGraph.nodeCount <= 10);
+    });
+  });
+});
