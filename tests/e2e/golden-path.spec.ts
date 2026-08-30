@@ -78,6 +78,21 @@ test.describe('Golden Path: five-round interrogation state machine', () => {
     }
   });
 
+  // Ticket #18 negative sensitivity: the result card must never appear
+  // before the user reaches an explicit end (checkpoint end / decision gate /
+  // exit button). After only one answer the session must be in round 2 with
+  // no card and no premature checkpoint.
+  test('after the first answer no result card appears and round 2 begins', async ({ page }) => {
+    await startSession(page, QUESTION, INITIAL_OPINION);
+
+    await answerRound(page, 1, ANSWERS[0]!);
+
+    await expect(page.getByText('前提追问')).toBeVisible();
+    await expect(page.getByText('第 2 轮').first()).toBeVisible();
+    await expect(page.locator('h3:has-text("思辨成果卡")')).toHaveCount(0);
+    await expect(page.getByText('阶段小结')).toHaveCount(0);
+  });
+
   test('checkpoint "continue" -> round 6 question appears', async ({ page }) => {
     await startSession(page, QUESTION, INITIAL_OPINION);
 
@@ -193,6 +208,16 @@ test.describe('Golden Path: five-round interrogation state machine', () => {
     await expect(sources).toBeVisible();
     const links = sources.locator('a');
     await expect(links.first()).toBeVisible();
+
+    // Ticket #18 honesty: the report panel must disclose that this MVP's
+    // report is generated from demo data — never labeled as real-time.
+    const reportState = page.getByTestId('report-source-state');
+    await expect(reportState).toBeVisible();
+    await expect(reportState).toContainText('演示数据');
+    await expect(reportState).not.toContainText('实时检索');
+
+    // Ticket #18: each rendered source carries its honest type label.
+    await expect(sources).toContainText('知乎');
 
     // Every rendered link must point at a URL that exists in the mirrored
     // report citations.

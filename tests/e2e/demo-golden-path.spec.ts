@@ -23,6 +23,9 @@ for (const fixture of DEMO_FIXTURES) {
       await expect(page.locator('text=核心知识点')).toBeVisible({ timeout: 15000 });
       await page.waitForLoadState('networkidle');
 
+      // Ticket #18 honesty: the report panel labels demo data as demo.
+      await expect(page.getByTestId('report-source-state')).toContainText('演示数据');
+
       // Choose a stance
       const viewpoints = page.locator('.space-y-2 button');
       await expect(viewpoints.first()).toBeVisible();

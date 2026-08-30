@@ -79,10 +79,11 @@ export default function ReportPanel({
 
   return (
     <div className="flex-1 overflow-y-auto p-6 border-r">
-      {/* Source state badge */}
+      {/* Source state badge (#18: honest live/cache/demo disclosure) */}
       {overallState && (
         <div className="mb-4">
           <span
+            data-testid="report-source-state"
             className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${SOURCE_STATE_COLORS[overallState].bg} ${SOURCE_STATE_COLORS[overallState].text}`}
           >
             <span
@@ -179,6 +180,9 @@ export default function ReportPanel({
                     const globalIndex = report.references.indexOf(src) + 1;
                     const isHistory = src.type === 'personal_history';
                     const isExcluded = isHistory && src.sourceSessionId ? excludedSet.has(src.sourceSessionId) : false;
+                    // #18: same trim rule as interrogation-context.ts — a
+                    // whitespace-only URL is not a usable link.
+                    const url = src.url?.trim() || null;
 
                     return (
                       <div
@@ -201,15 +205,15 @@ export default function ReportPanel({
                                 </span>
                               </>
                             )}
-                            {src.url ? (
+                            {url ? (
                               <div className="mt-1">
                                 <a
-                                  href={src.url}
+                                  href={url}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-blue-600 hover:underline text-xs break-all"
                                 >
-                                  {src.url}
+                                  {url}
                                 </a>
                               </div>
                             ) : isHistory ? (

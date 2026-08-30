@@ -8,6 +8,7 @@ import type {
   Viewpoint,
   Message,
   ResultCard,
+  SourceState,
   InterrogateAction,
   InterrogateResponseBody,
 } from '@/lib/providers';
@@ -25,6 +26,30 @@ const retrievalProvider = new FixtureRetrievalProvider();
 const storageProvider = new BrowserStorageProvider();
 
 type Page = 'home' | 'session';
+
+/** Retrieval state of the current session's report (#18 honest disclosure). */
+interface ReportSourceState {
+  zhihu: SourceState;
+  web: SourceState;
+}
+
+/** Side-key persisting the report's retrieval state across reloads (#18). */
+const reportStateKey = (sessionId: string): string => `zhiyan_report_state:${sessionId}`;
+
+function loadReportSourceState(sessionId: string): ReportSourceState | null {
+  try {
+    const raw = localStorage.getItem(reportStateKey(sessionId));
+    return raw ? (JSON.parse(raw) as ReportSourceState) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveReportSourceState(sessionId: string, state: ReportSourceState): void {
+  try {
+    localStorage.setItem(reportStateKey(sessionId), JSON.stringify(state));
+  } catch { /* quota exceeded — silent */ }
+}
 
 /**
  * Setters the module-level interrogation helpers push state through. Built
@@ -186,6 +211,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [hotlist, setHotlist] = useState<{ items: { id: string; title: string; url: string }[]; source: 'live' | 'cache' | 'demo'; updatedAt: number } | null>(null);
   const [hotlistLoading, setHotlistLoading] = useState(true);
+  // #18: honest live/cache/demo disclosure for the report panel.
+  const [reportSourceState, setReportSourceState] = useState<ReportSourceState | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const handleCompleteNow = async (sess?: Session) => {
@@ -249,6 +276,8 @@ export default function Home() {
         if (data) {
           setSession(data);
           if (data.report) setReport(data.report);
+          // #18: restore the report's retrieval state for the honest badge.
+          setReportSourceState(loadReportSourceState(sessionId));
           setMessages(data.messages);
           if (data.selectedViewpoint) setSelectedViewpoint(data.selectedViewpoint);
           if (data.resultCard) {
@@ -359,12 +388,22 @@ export default function Home() {
         throw new Error(`API error: ${res.status}`);
       }
 
-      const { sessionId, report, knowledgeGraph } = (await res.json()) as {
+      const { sessionId, report, knowledgeGraph, sourceState } = (await res.json()) as {
         sessionId: string;
         report: Report;
         progress: { stage: string; message: string; timestamp: number }[];
         knowledgeGraph?: import('@/lib/knowledge-graph').KnowledgeGraph | null;
+        sourceState?: ReportSourceState;
       };
+
+      // #18: keep the report's retrieval state for the panel's honest badge,
+      // including across reloads (side-key next to the mirrored session).
+      if (sourceState) {
+        setReportSourceState(sourceState);
+        saveReportSourceState(sessionId, sourceState);
+      } else {
+        setReportSourceState(null);
+      }
 
       const newSession: Session = {
         id: sessionId,
@@ -445,6 +484,7 @@ export default function Home() {
     setCompleted(false);
     setResultCard(null);
     setCurrentSources(null);
+    setReportSourceState(null);
     setAnswer('');
     setPage('home');
     window.history.pushState({}, '', '/');
@@ -477,7 +517,12 @@ export default function Home() {
       </header>
 
       <div className="flex h-[calc(100vh-57px)]">
-        <ReportPanel report={report!} knowledgeGraph={session?.knowledgeGraph ?? null} />
+        <ReportPanel
+          report={report!}
+          zhihuSourceState={reportSourceState?.zhihu}
+          webSourceState={reportSourceState?.web}
+          knowledgeGraph={session?.knowledgeGraph ?? null}
+        />
 
         <div className="flex flex-col flex-1 min-w-0">
           {!selectedViewpoint && !completed && (

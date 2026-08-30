@@ -209,24 +209,7 @@ export function recordStrategy(session: Session, strategy: StrategyId): Session 
   return session;
 }
 
-export interface InterrogationResult {
-  strategy: StrategyId;
-  question: string;
-  isCheckpoint: boolean;
-  round: number;
-}
-
-/** Plan the next round. The LLM is responsible only for filling in the question text. */
-export function planNextRound(
-  session: Session,
-  generateQuestion: (strategy: StrategyId, session: Session) => Promise<string>
-): Promise<InterrogationResult> {
-  const round = roundCount(session) + 1;
-  const strategy = pickNextStrategy(session);
-  return generateQuestion(strategy, session).then((q) => ({
-    strategy,
-    question: q || STRATEGIES[strategy].fallbackTemplate(session),
-    isCheckpoint: isCheckpointRound(round),
-    round,
-  }));
-}
+// Ticket #18 dead-code cleanup: `InterrogationResult` and `planNextRound`
+// were removed — since #15 the orchestration API (interrogation-orchestrator)
+// owns round planning with its own planner, so this session-level planner had
+// zero production callers (only its own tests referenced it).

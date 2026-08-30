@@ -21,7 +21,7 @@ import { HistorySearchProvider } from '../../src/lib/history-search';
 import { getDemoSources } from '../../src/lib/demo-sources';
 import { buildReport } from '../../src/lib/report-builder';
 import { buildGraph } from '../../src/lib/knowledge-graph';
-import { FIXTURE_QUESTION, type Session, type Source } from '../../src/lib/providers';
+import { type Message, type Session, type Source } from '../../src/lib/providers';
 
 // Minimal localStorage mock for Node.js environment
 type Store = Record<string, string>;
@@ -51,7 +51,6 @@ function makeProvider(): { provider: BrowserStorageProvider; store: Store } {
     key: (i: number) => Object.keys(store)[i] ?? null,
   };
   // Use direct assignment to set globalThis.localStorage
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).localStorage = isolatedLS;
   return { provider: new BrowserStorageProvider(), store };
 }
@@ -62,7 +61,6 @@ function clearCache(): void {
 
 // For search provider tests: set up localStorage mock pointing to shared storage
 function setupSearchProviderStorage(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).localStorage = mockLocalStorage;
 }
 
@@ -101,11 +99,13 @@ describe('ZhihuSearchProvider', () => {
     assert.deepStrictEqual(a.sources, b.sources);
   });
 
-  it('returns source=live on first call (live fetch)', async () => {
+  // Ticket #18 honesty contract: no external retrieval is wired in this MVP,
+  // so hardcoded fixture content must never be reported as 'live'.
+  it('reports demo on the first uncached call — fixture content is never labeled live', async () => {
     setupSearchProviderStorage();
     const provider = new ZhihuSearchProvider();
     const result = await provider.search('live test');
-    assert.strictEqual(result.source, 'live');
+    assert.strictEqual(result.source, 'demo');
   });
 
   it('returns source=cache when cache is fresh', async () => {
@@ -152,13 +152,15 @@ describe('ZhihuSearchProvider', () => {
     assert.strictEqual(result.stale, true);
   });
 
-  it('fallback chain order: live → fresh cache → stale cache → demo', async () => {
+  // Ticket #18: the chain starts at demo — the fetch that serves fixture
+  // content must be labeled demo, so 'live' is never emitted for fixtures.
+  it('fallback chain order: demo → fresh cache → stale cache → demo', async () => {
     setupSearchProviderStorage();
 
-    // Step 1: First call — live
+    // Step 1: First call — uncached fixture content, honestly labeled demo
     const p1 = new ZhihuSearchProvider();
     const r1 = await p1.search('chain question');
-    assert.strictEqual(r1.source, 'live');
+    assert.strictEqual(r1.source, 'demo');
 
     // Step 2: Second call — fresh cache
     const p2 = new ZhihuSearchProvider();
@@ -212,11 +214,13 @@ describe('WebSearchProvider', () => {
     assert.deepStrictEqual(a.sources, b.sources);
   });
 
-  it('returns source=live on first call', async () => {
+  // Ticket #18 honesty contract: no external retrieval is wired in this MVP,
+  // so hardcoded fixture content must never be reported as 'live'.
+  it('reports demo on the first uncached call — fixture content is never labeled live', async () => {
     setupSearchProviderStorage();
     const provider = new WebSearchProvider();
     const result = await provider.search('web live test');
-    assert.strictEqual(result.source, 'live');
+    assert.strictEqual(result.source, 'demo');
   });
 
   it('returns source=cache when cache is fresh', async () => {
@@ -296,10 +300,10 @@ describe('Source state reporting', () => {
   it('ZhihuSearchProvider reports correct source state', async () => {
     setupSearchProviderStorage();
 
-    // live
-    const live = new ZhihuSearchProvider();
-    const liveResult = await live.search('source state test');
-    assert.strictEqual(liveResult.source, 'live');
+    // demo (first uncached call — fixture content, never 'live') (#18)
+    const first = new ZhihuSearchProvider();
+    const firstResult = await first.search('source state test');
+    assert.strictEqual(firstResult.source, 'demo');
 
     // cache
     const cache = new ZhihuSearchProvider();
@@ -316,9 +320,10 @@ describe('Source state reporting', () => {
   it('WebSearchProvider reports correct source state', async () => {
     setupSearchProviderStorage();
 
-    const live = new WebSearchProvider();
-    const liveResult = await live.search('web source state test');
-    assert.strictEqual(liveResult.source, 'live');
+    // demo (first uncached call — fixture content, never 'live') (#18)
+    const first = new WebSearchProvider();
+    const firstResult = await first.search('web source state test');
+    assert.strictEqual(firstResult.source, 'demo');
 
     const cache = new WebSearchProvider();
     const cacheResult = await cache.search('web source state test');
@@ -464,27 +469,10 @@ describe('FixtureRetrievalProvider', () => {
   });
 });
 
-describe('FixtureLLMProvider', () => {
-  it('returns the first template for an empty session', async () => {
-    const provider = new FixtureLLMProvider();
-    const session: Parameters<typeof provider.generateQuestion>[0] = {
-      id: 's', question: 'q', initialOpinion: null, report: null,
-      selectedViewpoint: null, messages: [], resultCard: null,
-      completed: false, createdAt: 0, updatedAt: 0,
-    };
-    assert.strictEqual(await provider.generateQuestion(session), FIXTURE_QUESTION);
-  });
-
-  it('returns the same deterministic question after one user message', async () => {
-    const provider = new FixtureLLMProvider();
-    const session: Parameters<typeof provider.generateQuestion>[0] = {
-      id: 's', question: 'q', initialOpinion: null, report: null,
-      selectedViewpoint: null, messages: [{ id: 'u1', role: 'user', text: 'a', timestamp: 0 }],
-      resultCard: null, completed: false, createdAt: 0, updatedAt: 0,
-    };
-    assert.strictEqual(await provider.generateQuestion(session), FIXTURE_QUESTION);
-  });
-});
+// Ticket #18 dead-code cleanup: the two tests for FixtureLLMProvider.
+// generateQuestion were removed together with that method — it was dropped
+// from the LLMProvider contract in #15 and has zero production callers.
+// generateStrategyQuestion (the live contract) is covered further below.
 
 describe('BrowserStorageProvider', () => {
   it('roundtrips a session', async () => {
@@ -686,7 +674,6 @@ describe('HistorySearchProvider', () => {
       get length() { return Object.keys(store).length; },
       key: (i: number) => Object.keys(store)[i] ?? null,
     };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (globalThis as any).localStorage = isolatedLS;
     return { provider: new HistorySearchProvider(), store };
   }
@@ -963,7 +950,10 @@ describe('buildStructuredViewpoints', () => {
 });
 
 // ---- Ticket #9: Strategy engine ----
-import { pickNextStrategy, isCheckpointRound, STRATEGIES, planNextRound } from '../../src/lib/strategy-engine';
+// Ticket #18 dead-code cleanup: `planNextRound` was removed from the import —
+// it was superseded by the orchestration API's own planner in #15 and has no
+// production callers. Its two tests were removed with it.
+import { pickNextStrategy, isCheckpointRound, STRATEGIES } from '../../src/lib/strategy-engine';
 
 const makeSession = (userCount: number, _strategyHistory: string[] = []): Session => {
   const messages: Message[] = [];
@@ -1009,18 +999,7 @@ describe('isCheckpointRound', () => {
   it('returns false for round 7', () => assert.strictEqual(isCheckpointRound(7), false));
 });
 
-describe('planNextRound', () => {
-  it('uses fallback template when generator returns empty', async () => {
-    const result = await planNextRound(makeSession(0), async () => '');
-    assert.strictEqual(result.strategy, 'M1_evidence');
-    assert.ok(result.question.length > 0);
-    assert.strictEqual(result.isCheckpoint, false);
-  });
-  it('returns checkpoint=true at round 5', async () => {
-    const result = await planNextRound(makeSession(4), async () => 'Q');
-    assert.strictEqual(result.round, 5);
-    assert.strictEqual(result.isCheckpoint, true);
-  });
+describe('strategy fallback templates', () => {
   it('each strategy has a non-empty fallback template', () => {
     const session = makeSession(0);
     for (const id of Object.keys(STRATEGIES) as Array<keyof typeof STRATEGIES>) {
@@ -1403,12 +1382,10 @@ describe('resumePlan (#14 refresh restore)', () => {
 });
 
 describe('five-round contract (#14)', () => {
-  it('after five answers the next round is 6, not a checkpoint round, back to M1', async () => {
-    const result = await planNextRound(makeSession(5), async () => 'Q6');
-    assert.strictEqual(result.round, 6);
-    assert.strictEqual(result.isCheckpoint, false);
-    assert.strictEqual(result.strategy, 'M1_evidence');
-  });
+  // Ticket #18 dead-code cleanup: the former first test here asserted round-6
+  // rotation through `strategy-engine.planNextRound`, which was removed with
+  // that dead function. Rotation after round 5 is covered by the
+  // pickNextStrategy 'round 6+' test above and by the E2E round-6 flow.
   it('fixture LLM produces the five standard questions in order', async () => {
     const provider = new FixtureLLMProvider();
     // Ticket #16: the fixture question is keyed by the strategy being asked
