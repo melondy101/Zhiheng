@@ -48,6 +48,18 @@ const STRATEGY_LABELS: Record<StrategyId, string> = {
 };
 
 /**
+ * Honest type labels (#18): every rendered source shows its provenance, so an
+ * `ai_synthesis` entry can never masquerade as an external fact link
+ * (PRD 3.4: AI 综合分析不得伪装成事实引用).
+ */
+const SOURCE_TYPE_LABELS: Record<CitedSource['source']['type'], string> = {
+  zhihu: '知乎',
+  web: '全网',
+  ai_synthesis: 'AI 综合分析',
+  personal_history: '历史报告',
+};
+
+/**
  * Report evidence under the current question (#16). Sources are the exact
  * citation objects from the session report: a source without a URL renders
  * as plain text, never as a link with an invented href. When no usable
@@ -67,11 +79,15 @@ function SourcesSection({ sources }: { sources: CitedSource[] | null | undefined
       <ul className="mt-1 space-y-1">
         {sources.map(({ index, source }) => {
           const label = source.title ?? source.author ?? `来源 ${index}`;
+          // #18: same trim rule as interrogation-context.ts — a
+          // whitespace-only URL is not a usable link and renders as plain
+          // text, never as a link.
+          const url = source.url?.trim() || null;
           return (
             <li key={`${index}-${source.id}`} className="text-xs">
-              {source.url ? (
+              {url ? (
                 <a
-                  href={source.url}
+                  href={url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-blue-600 underline hover:text-blue-800"
@@ -81,6 +97,9 @@ function SourcesSection({ sources }: { sources: CitedSource[] | null | undefined
               ) : (
                 <span className="text-gray-600">{label}</span>
               )}
+              <span className="ml-1.5 px-1 py-0.5 rounded bg-gray-100 text-gray-500">
+                {SOURCE_TYPE_LABELS[source.type]}
+              </span>
             </li>
           );
         })}

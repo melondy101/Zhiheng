@@ -7,7 +7,6 @@ import type {
   Session,
   Source,
 } from './providers';
-import { FIXTURE_QUESTION } from './providers';
 import { STRATEGY_QUESTION_TEMPLATES } from './strategy-engine';
 import type { StrategyId } from './strategy-engine';
 import { buildInterrogationContext, contextClaimFragment } from './interrogation-context';
@@ -39,10 +38,10 @@ export class FixtureRetrievalProvider implements RetrievalProvider {
 }
 
 export class FixtureLLMProvider implements LLMProvider {
-  async generateQuestion(_session: Session): Promise<string> {
-    return FIXTURE_QUESTION;
-  }
-
+  // Ticket #18 dead-code cleanup: the session-level `generateQuestion` method
+  // was removed — it was dropped from the LLMProvider contract in #15, has
+  // zero production callers, and its tests were removed with it. Only the
+  // strategy-aware `generateStrategyQuestion` remains, matching the interface.
   /**
    * Fixture question generation (#16): deterministic and context-driven.
    * The question quotes a claim fragment extracted from the user's latest

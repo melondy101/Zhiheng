@@ -1,4 +1,6 @@
-// Search providers with honest degradation: live → cache → demo.
+// Search providers with honest degradation (#18): cache → demo.
+// No external retrieval is wired in this MVP — the simulated fetch serves
+// hardcoded fixture content, which must be labeled 'demo', never 'live'.
 // Supports simulateFailure flag for testing degradation paths.
 
 import type { Source } from './providers';
@@ -107,7 +109,7 @@ export class ZhihuSearchProvider {
     this.simulateFailure = options.simulateFailure ?? false;
   }
 
-  /** Search with degradation: fresh cache → stale cache → live → demo. */
+  /** Search with degradation: fresh cache → stale cache → demo (fixture content is never labeled 'live' — #18). */
   async search(question: string): Promise<SearchResult> {
     // 1. Check fresh cache first
     const cached = readCache(question);
@@ -122,12 +124,15 @@ export class ZhihuSearchProvider {
       return { sources: cached.sources, source: 'cache', stale: true };
     }
 
-    // 2. Try live (if not simulating failure)
+    // 2. Simulated fetch (#18 honesty): this MVP has no external retrieval,
+    //    so fetchLive serves hardcoded fixture content. Labeling it 'live'
+    //    would disguise fixture data as real-time retrieval, so it is
+    //    reported as demo data.
     if (!this.simulateFailure) {
       try {
         const sources = await this.fetchLive(question);
         writeCache(question, sources);
-        return { sources, source: 'live' };
+        return { sources, source: 'demo' };
       } catch {
         // fall through to demo
       }
@@ -138,7 +143,7 @@ export class ZhihuSearchProvider {
     return { sources: demoSources, source: 'demo' };
   }
 
-  /** Simulate live fetch (throws in MVP). */
+  /** Simulated fetch: serves fixture content after a short delay (#18 — labeled demo, never live). */
   private async fetchLive(question: string): Promise<Source[]> {
     // Simulate network delay (200-400ms)
     const delay = 200 + Math.abs(this.hashCode(question)) % 200;
@@ -213,7 +218,7 @@ export class WebSearchProvider {
     this.simulateFailure = options.simulateFailure ?? false;
   }
 
-  /** Search with degradation: fresh cache → stale cache → live → demo. */
+  /** Search with degradation: fresh cache → stale cache → demo (fixture content is never labeled 'live' — #18). */
   async search(question: string): Promise<SearchResult> {
     // 1. Check fresh cache first
     const cached = readCache(question);
@@ -228,12 +233,15 @@ export class WebSearchProvider {
       return { sources: cached.sources, source: 'cache', stale: true };
     }
 
-    // 2. Try live (if not simulating failure)
+    // 2. Simulated fetch (#18 honesty): this MVP has no external retrieval,
+    //    so fetchLive serves hardcoded fixture content. Labeling it 'live'
+    //    would disguise fixture data as real-time retrieval, so it is
+    //    reported as demo data.
     if (!this.simulateFailure) {
       try {
         const sources = await this.fetchLive(question);
         writeCache(question, sources);
-        return { sources, source: 'live' };
+        return { sources, source: 'demo' };
       } catch {
         // fall through to demo
       }
