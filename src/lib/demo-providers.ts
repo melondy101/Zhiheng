@@ -2,7 +2,7 @@
 // These run only in the browser; do not import in server-side code.
 
 import type { StorageProvider, RenderingProvider, Report, Session, ResultCard } from './providers';
-import { buildDetailedResultCard } from './result-card-builder';
+import { buildSimpleResultCard } from './result-card-builder';
 
 // ---------------------------------------------------------------------------
 // Browser Storage Provider (localStorage adapter)
@@ -73,12 +73,7 @@ export const resultCardRenderer = new StaticReportRenderer();
 // ---------------------------------------------------------------------------
 
 export function buildResultCard(session: Session): ResultCard {
-  const detailed = buildDetailedResultCard(session);
-  return {
-    sessionId: detailed.sessionId,
-    initialStance: detailed.initialStance,
-    selectedStartingStance: detailed.selectedStartingStance,
-    finalPosition: detailed.finalPosition ? detailed.finalPosition.text : null,
-    messageIds: detailed.messageIds,
-  };
+  // #17: the simple card shape now lives in the pure result-card-builder
+  // module so the server-side complete action can build it too.
+  return buildSimpleResultCard(session);
 }

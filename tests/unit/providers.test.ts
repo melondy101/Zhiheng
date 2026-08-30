@@ -1253,6 +1253,14 @@ describe('buildProfileFromSession', () => {
       assert.ok(c.confidence > 0 && c.confidence <= 1);
     });
   });
+  it('does not attribute thinking_style to an uncertain input (#17)', () => {
+    const s = makeCompleted();
+    s.messages.push({ id: 'm2', role: 'user', text: '不太确定', timestamp: 2, uncertain: true });
+    const conclusions = buildProfileFromSession(s);
+    const ts = conclusions.find((c) => c.field === 'thinking_style');
+    assert.ok(ts, 'real answer m1 still yields a thinking_style conclusion');
+    assert.notStrictEqual(ts.sourceMessageId, 'm2', 'must not cite the uncertain message');
+  });
 });
 
 describe('updateProfile', () => {

@@ -6,6 +6,7 @@
 // fragment from the user's input (or selected stance) instead of fixed text.
 
 import type { Session, Message } from './providers';
+import { isRoundAnswer } from './providers';
 import {
   buildInterrogationContext,
   contextClaimFragment,
@@ -87,8 +88,10 @@ function templateQuestion(
   return `${TEMPLATE_FALLBACK_DISCLOSURE}${claim ? template.withClaim(claim) : template.plain}`;
 }
 
+// #17: the round count only counts round-advancing answers — uncertain
+// inputs stay in the current round and are never counted here.
 const roundCount = (session: Session): number =>
-  session.messages.filter((m) => m.role === 'user').length;
+  session.messages.filter(isRoundAnswer).length;
 
 const strategyHistory = (session: Session): StrategyId[] => {
   // For MVP, use session messages to derive strategy history if not stored
@@ -191,7 +194,8 @@ export interface ResumePlan {
  * decision; otherwise it resumes by planning the next round's question.
  */
 export function resumePlan(session: Session): ResumePlan {
-  const answeredRounds = session.messages.filter((m) => m.role === 'user').length;
+  // #17: only round-advancing answers count (uncertain inputs stay in round).
+  const answeredRounds = session.messages.filter(isRoundAnswer).length;
   return { action: actionAfterAnswer(answeredRounds), answeredRounds };
 }
 

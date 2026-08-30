@@ -1,6 +1,7 @@
 'use client';
 
 import type { CitedSource, Message } from '@/lib/providers';
+import { isRoundAnswer } from '@/lib/providers';
 import type { StrategyId } from '@/lib/strategy-engine';
 
 interface QAPanelProps {
@@ -10,6 +11,12 @@ interface QAPanelProps {
   currentRound?: number;
   /** True while the checkpoint decision (继续 / 结束) is pending (#14). */
   isCheckpoint?: boolean;
+  /**
+   * True while the explicit 继续/结束 decision after the third consecutive
+   * uncertain answer is pending (#17). The answer form is hidden and the
+   * user must choose — the session never auto-completes.
+   */
+  pendingDecision?: boolean;
   usedFallback?: boolean;
   hintMessage?: string | null;
   hintOptions?: string[] | null;
@@ -18,10 +25,16 @@ interface QAPanelProps {
    * explicit no-source notice — never a fabricated link.
    */
   sources?: CitedSource[] | null;
+  /** #17: visible when the completion API failed; offers a retry entry. */
+  completeError?: string | null;
   answer: string;
   onAnswerChange: (text: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   onContinue?: () => void;
+  /** #17: continue from the uncertainty decision gate. */
+  onDecisionContinue?: () => void;
+  /** #17: retry the failed completion. */
+  onRetryComplete?: () => void;
   onExit?: () => void;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
 }
@@ -82,14 +95,18 @@ export default function QAPanel({
   currentStrategy,
   currentRound = 0,
   isCheckpoint = false,
+  pendingDecision = false,
   usedFallback = false,
   hintMessage,
   hintOptions,
   sources,
+  completeError,
   answer,
   onAnswerChange,
   onSubmit,
   onContinue,
+  onDecisionContinue,
+  onRetryComplete,
   onExit,
   messagesEndRef,
 }: QAPanelProps) {
@@ -97,7 +114,7 @@ export default function QAPanel({
     <div className="w-[450px] flex flex-col bg-white">
       <div className="px-4 py-2 border-b flex items-center justify-between bg-gray-50">
         <span className="text-xs text-gray-600">
-          第 {currentRound || messages.filter((m) => m.role === 'user').length + 1} 轮
+          第 {currentRound || messages.filter(isRoundAnswer).length + 1} 轮
           {currentStrategy && (
             <span className="ml-2 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
               {STRATEGY_LABELS[currentStrategy]}
@@ -190,6 +207,52 @@ export default function QAPanel({
               </div>
             </div>
           )}
+
+          {pendingDecision && (
+            <div
+              data-testid="decision-gate"
+              className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm mb-4"
+            >
+              <p className="font-medium text-blue-700 mb-1">是否结束本次思辨？</p>
+              <p className="text-gray-600">
+                你可以继续从其他角度讨论，也可以结束并生成成果卡。
+              </p>
+              <div className="flex gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={onDecisionContinue}
+                  className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs hover:bg-blue-700"
+                >
+                  继续
+                </button>
+                <button
+                  type="button"
+                  onClick={onExit}
+                  className="px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg text-xs hover:bg-blue-100"
+                >
+                  结束并生成成果卡
+                </button>
+              </div>
+            </div>
+          )}
+
+          {completeError && (
+            <div
+              data-testid="complete-error"
+              className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm mb-4"
+            >
+              <p className="text-red-600">{completeError}</p>
+              {onRetryComplete && (
+                <button
+                  type="button"
+                  onClick={onRetryComplete}
+                  className="mt-2 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs hover:bg-red-700"
+                >
+                  重试生成成果卡
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -199,7 +262,7 @@ export default function QAPanel({
         </div>
       )}
 
-      {!isCheckpoint && (
+      {!isCheckpoint && !pendingDecision && (
         <form onSubmit={onSubmit} className="p-4 border-t">
           <div className="flex gap-2">
             <input

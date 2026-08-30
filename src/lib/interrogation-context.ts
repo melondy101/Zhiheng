@@ -14,6 +14,7 @@
 //   so no URL can ever be fabricated downstream.
 
 import type { CitedSource, Session, Viewpoint } from './providers';
+import { isRoundAnswer } from './providers';
 import type { StrategyId } from './strategy-engine';
 
 export interface InterrogationContext {
@@ -56,11 +57,15 @@ export function extractClaimFragment(text: string, maxChars = CLAIM_MAX_CHARS): 
   return truncate(best);
 }
 
-/** The last user message text, or null when the user has not answered yet. */
+/**
+ * The most recent round-advancing user answer text, or null when the user has
+ * not answered yet (#17: uncertain inputs are not claims — they are skipped
+ * so questions never quote an "I don't know" as the user's claim).
+ */
 function lastUserAnswer(session: Session): string | null {
   for (let i = session.messages.length - 1; i >= 0; i--) {
     const m = session.messages[i]!;
-    if (m.role === 'user') return m.text;
+    if (isRoundAnswer(m)) return m.text;
   }
   return null;
 }
@@ -105,7 +110,8 @@ export function buildInterrogationContext(
   session: Session,
   strategy: StrategyId
 ): InterrogationContext {
-  const answered = session.messages.filter((m) => m.role === 'user').length;
+  // #17: only round-advancing answers count toward the round number.
+  const answered = session.messages.filter(isRoundAnswer).length;
   const stance = session.selectedViewpoint
     ? { text: session.selectedViewpoint.text, source: session.selectedViewpoint.source }
     : null;
@@ -131,4 +137,25 @@ export function contextClaimFragment(context: InterrogationContext): string | nu
   }
   if (context.stance) return extractClaimFragment(context.stance.text);
   return null;
+}
+
+/**
+ * The narrowed rewrite of the current question after the user's first
+ * uncertain answer (#17). Deterministic and context-driven: it quotes a claim
+ * fragment of the question the user could not answer (falling back to the
+ * user's stance claim), so the narrowing always stays anchored to the real
+ * conversation — never fixed text.
+ */
+export function buildNarrowedQuestion(
+  session: Session,
+  currentQuestion: string | null
+): string {
+  // contextClaimFragment only reads lastAnswer/stance; the strategy id is
+  // required by buildInterrogationContext but unused for claim selection.
+  const focus =
+    (currentQuestion ? extractClaimFragment(currentQuestion) : null) ??
+    contextClaimFragment(buildInterrogationContext(session, 'M1_evidence'));
+  return focus
+    ? `让我们把问题缩小一些：先聚焦"${focus}"——你能否举一个具体的小例子或熟悉的场景来说明？`
+    : '让我们把问题缩小一些：你能否举一个具体的小例子或熟悉的场景来说明？';
 }

@@ -7,8 +7,14 @@ import {
   answeredRounds,
   evaluateStreak,
   interrogationStateOf,
+  handleInterrogate,
 } from '../../src/lib/interrogation-orchestrator';
-import type { InterrogationState, Message, Session } from '../../src/lib/providers';
+import type {
+  InterrogationState,
+  Message,
+  Session,
+  StorageProvider,
+} from '../../src/lib/providers';
 
 function makeSession(userCount: number, assistantCount = 0): Session {
   const messages: Message[] = [];
@@ -101,5 +107,75 @@ describe('evaluateStreak (#15 streak math, #10 semantics)', () => {
 
   it('reaches the auto-complete boundary at 3 consecutive uncertain answers', () => {
     assert.strictEqual(evaluateStreak(2, '不确定'), 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ticket #17: the explicit complete action. A failed completion must never
+// corrupt the stored session.
+// ---------------------------------------------------------------------------
+
+function completeFixtureSession(): Session {
+  const session = makeSession(1);
+  session.id = 's_complete';
+  return session;
+}
+
+/** In-memory StorageProvider whose saveSession can be made to fail. */
+function makeStorage(initial: Session, failSave = false): { storage: StorageProvider; snapshot: () => Session | null } {
+  let store: Session | null = { ...initial };
+  const storage: StorageProvider = {
+    async loadSession() {
+      return store ? { ...store } : null;
+    },
+    async saveSession(next: Session) {
+      if (failSave) throw new Error('disk full');
+      store = { ...next };
+    },
+    async listSessions() {
+      return store ? [store] : [];
+    },
+    async deleteSession() {
+      store = null;
+    },
+  };
+  return { storage, snapshot: () => (store ? { ...store } : null) };
+}
+
+const noopGenerate = async () => '问题文本';
+
+describe('handleInterrogate: complete action (#17)', () => {
+  it('marks the session completed and persists the result card', async () => {
+    const session = completeFixtureSession();
+    const { storage } = makeStorage(session);
+    const result = await handleInterrogate({
+      sessionId: session.id,
+      action: 'complete',
+      storage,
+      generateQuestion: noopGenerate,
+    });
+    assert.ok(result.ok);
+    assert.strictEqual(result.body.completed, true);
+    assert.ok(result.body.session.resultCard);
+    assert.strictEqual(result.body.session.resultCard!.finalPosition, 'ans 0');
+  });
+
+  it('returns 500 and leaves the stored session untouched when persistence fails', async () => {
+    const session = completeFixtureSession();
+    const { storage, snapshot } = makeStorage(session, true);
+    const result = await handleInterrogate({
+      sessionId: session.id,
+      action: 'complete',
+      storage,
+      generateQuestion: noopGenerate,
+    });
+    assert.ok(!result.ok);
+    assert.strictEqual(result.ok ? 0 : result.status, 500);
+    assert.ok(result.ok ? '' : result.error.includes('disk full'));
+    // The stored session was not corrupted by the failed completion.
+    const stored = snapshot();
+    assert.ok(stored);
+    assert.strictEqual(stored.completed, false);
+    assert.strictEqual(stored.resultCard, null);
   });
 });
