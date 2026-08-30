@@ -89,7 +89,11 @@ test.describe('Golden Path: five-round interrogation state machine', () => {
     // Continue -> the next round's question is generated (no result card).
     await page.getByRole('button', { name: '继续' }).click();
     await expect(page.getByText('第 6 轮').first()).toBeVisible();
-    await expect(page.getByText('请进一步阐述你的观点')).toBeVisible();
+    // Ticket #16: the round 6 question is context-driven — it quotes the
+    // user's round 5 answer (the latest answer) instead of the old
+    // round-fixed template text.
+    await expect(page.getByText('你提到"第五个回答：综合以上讨论').first()).toBeVisible();
+    await expect(page.getByText('这个主张有具体的数据或例子支持吗').first()).toBeVisible();
     await expect(page.getByText('证据追问')).toBeVisible();
     await expect(page.locator('h3:has-text("思辨成果卡")')).toHaveCount(0);
   });
@@ -130,9 +134,11 @@ test.describe('Golden Path: five-round interrogation state machine', () => {
 
     await page.reload();
     // Restored to the pending round 6 question — no checkpoint replay, no
-    // result card.
+    // result card. The restored question is the context-driven round 6
+    // question (#16).
     await expect(page.getByText('第 6 轮').first()).toBeVisible();
-    await expect(page.getByText('请进一步阐述你的观点')).toBeVisible();
+    await expect(page.getByText('你提到"第五个回答：综合以上讨论').first()).toBeVisible();
+    await expect(page.getByText('这个主张有具体的数据或例子支持吗').first()).toBeVisible();
     await expect(page.getByText('证据追问')).toBeVisible();
     await expect(page.getByText('阶段小结')).toHaveCount(0);
     await expect(page.locator('h3:has-text("思辨成果卡")')).toHaveCount(0);
@@ -174,5 +180,83 @@ test.describe('Golden Path: five-round interrogation state machine', () => {
     await expect(page.locator('h4:has-text("最终观点")')).toBeVisible();
     await expect(page.getByText(ANSWERS[0]!).first()).toBeVisible();
     await expect(page.getByText(ANSWERS[1]!).first()).toBeVisible();
+  });
+
+  // Ticket #16: with report citations available, the question panel renders
+  // clickable sources whose hrefs come verbatim from the report — never
+  // fabricated.
+  test('question panel shows clickable sources taken from the report citations', async ({ page }) => {
+    await startSession(page, QUESTION, INITIAL_OPINION);
+
+    await expect(page.getByText('证据追问')).toBeVisible();
+    const sources = page.getByTestId('qa-sources');
+    await expect(sources).toBeVisible();
+    const links = sources.locator('a');
+    await expect(links.first()).toBeVisible();
+
+    // Every rendered link must point at a URL that exists in the mirrored
+    // report citations.
+    const citationUrls: string[] = await page.evaluate((topic) => {
+      const urls: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith('zhiyan_sessions:')) continue;
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw) as {
+          question?: string;
+          report?: { citations?: Record<string, { url?: string | null }> };
+        };
+        if (parsed.question !== topic) continue;
+        const citations = parsed.report?.citations ?? {};
+        for (const c of Object.values(citations)) {
+          if (typeof c.url === 'string' && c.url.length > 0) urls.push(c.url);
+        }
+      }
+      return urls;
+    }, QUESTION);
+    expect(citationUrls.length).toBeGreaterThan(0);
+
+    const count = await links.count();
+    expect(count).toBeGreaterThan(0);
+    expect(count).toBeLessThanOrEqual(3);
+    for (let i = 0; i < count; i++) {
+      const href = await links.nth(i).getAttribute('href');
+      expect(href, `rendered href must be a real citation URL: ${href}`).toBeTruthy();
+      expect(citationUrls).toContain(href);
+    }
+  });
+
+  // Ticket #16: with no report citations available, the panel says so
+  // explicitly and renders no links at all.
+  test('sessions without report citations show an explicit no-source notice, never fabricated links', async ({ page }) => {
+    // Serve a citation-less report so the session starts without any sources.
+    await page.route('**/api/report', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessionId: 's_e2e_nosource',
+          report: {
+            question: QUESTION,
+            title: QUESTION,
+            knowledgePoints: ['核心知识点：演示用'],
+            content: '演示报告内容',
+            viewpoints: ['观点A：这是一种代表性立场', '观点B：这是另一种代表性立场'],
+            references: [],
+            citations: {},
+          },
+          knowledgeGraph: null,
+        }),
+      })
+    );
+
+    await startSession(page, QUESTION, INITIAL_OPINION);
+
+    await expect(page.getByText('证据追问')).toBeVisible();
+    const sources = page.getByTestId('qa-sources');
+    await expect(sources).toBeVisible();
+    await expect(sources).toContainText('无可引用来源');
+    await expect(sources.locator('a')).toHaveCount(0);
   });
 });

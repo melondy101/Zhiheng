@@ -25,6 +25,7 @@ import type {
 import { actionAfterAnswer, pickNextStrategy, recordStrategy } from './strategy-engine';
 import type { StrategyId } from './strategy-engine';
 import { isUncertainAnswer, uncertainResponse, withFallback } from './llm-fallback';
+import { selectRoundSources } from './interrogation-context';
 
 export interface HandleInterrogateInput {
   sessionId: string;
@@ -98,6 +99,9 @@ function toResponseBody(
     usedFallback: state.usedFallback,
     uncertainStreak: state.uncertainStreak,
     hint,
+    // #16: report evidence relevant to the current question, deterministically
+    // selected from the session's own report citations (empty when none).
+    sources: selectRoundSources(session),
     suggestComplete,
     completed: session.completed,
     session,

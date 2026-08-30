@@ -1403,18 +1403,21 @@ describe('five-round contract (#14)', () => {
   });
   it('fixture LLM produces the five standard questions in order', async () => {
     const provider = new FixtureLLMProvider();
-    const expected = [
-      '具体的数据或例子',
-      '隐含的前提',
-      '对立观点重新论证',
-      '相反的立场辩护',
-      '重新表述你当前的观点',
+    // Ticket #16: the fixture question is keyed by the strategy being asked
+    // (the orchestrator's pick), not by the round number alone.
+    const planned: Array<{ strategy: import('../../src/lib/strategy-engine').StrategyId; phrase: string }> = [
+      { strategy: 'M1_evidence', phrase: '具体的数据或例子' },
+      { strategy: 'M2_premise', phrase: '隐含的前提' },
+      { strategy: 'M4_steelman', phrase: '对立观点重新论证' },
+      { strategy: 'M6_reversal', phrase: '相反的立场辩护' },
+      { strategy: 'M5_restate', phrase: '重新表述你当前的观点' },
     ];
-    for (let i = 0; i < 5; i++) {
-      const q = await provider.generateStrategyQuestion('M1_evidence', makeSession(i));
+    for (let i = 0; i < planned.length; i++) {
+      const { strategy, phrase } = planned[i]!;
+      const q = await provider.generateStrategyQuestion(strategy, makeSession(i));
       assert.ok(
-        q.includes(expected[i]!),
-        `round ${i + 1} question should contain "${expected[i]}" but was "${q}"`
+        q.includes(phrase),
+        `round ${i + 1} (${strategy}) question should contain "${phrase}" but was "${q}"`
       );
     }
   });

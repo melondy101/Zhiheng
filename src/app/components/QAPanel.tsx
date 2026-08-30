@@ -1,6 +1,6 @@
 'use client';
 
-import type { Message } from '@/lib/providers';
+import type { CitedSource, Message } from '@/lib/providers';
 import type { StrategyId } from '@/lib/strategy-engine';
 
 interface QAPanelProps {
@@ -13,6 +13,11 @@ interface QAPanelProps {
   usedFallback?: boolean;
   hintMessage?: string | null;
   hintOptions?: string[] | null;
+  /**
+   * Report evidence for the current question (#16). Empty/null renders an
+   * explicit no-source notice — never a fabricated link.
+   */
+  sources?: CitedSource[] | null;
   answer: string;
   onAnswerChange: (text: string) => void;
   onSubmit: (e: React.FormEvent) => void;
@@ -29,6 +34,48 @@ const STRATEGY_LABELS: Record<StrategyId, string> = {
   M5_restate: '观点重述',
 };
 
+/**
+ * Report evidence under the current question (#16). Sources are the exact
+ * citation objects from the session report: a source without a URL renders
+ * as plain text, never as a link with an invented href. When no usable
+ * sources exist the panel says so explicitly.
+ */
+function SourcesSection({ sources }: { sources: CitedSource[] | null | undefined }) {
+  if (!sources || sources.length === 0) {
+    return (
+      <div data-testid="qa-sources" className="mt-2">
+        <p className="text-xs text-gray-500">本会话暂无可引用来源。</p>
+      </div>
+    );
+  }
+  return (
+    <div data-testid="qa-sources" className="mt-2">
+      <p className="text-xs text-gray-500">相关报告来源：</p>
+      <ul className="mt-1 space-y-1">
+        {sources.map(({ index, source }) => {
+          const label = source.title ?? source.author ?? `来源 ${index}`;
+          return (
+            <li key={`${index}-${source.id}`} className="text-xs">
+              {source.url ? (
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 underline hover:text-blue-800"
+                >
+                  {label}
+                </a>
+              ) : (
+                <span className="text-gray-600">{label}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export default function QAPanel({
   messages,
   currentQuestion,
@@ -38,6 +85,7 @@ export default function QAPanel({
   usedFallback = false,
   hintMessage,
   hintOptions,
+  sources,
   answer,
   onAnswerChange,
   onSubmit,
@@ -66,28 +114,34 @@ export default function QAPanel({
         )}
       </div>
 
-      {messages.length > 0 && (
+      {/* The question area also renders before the first answer (#16): the
+          round 1 question quotes the selected stance and carries the report
+          sources, so it must be visible while messages is still empty. */}
+      {(messages.length > 0 || currentQuestion) && (
         <div className="flex-1 overflow-y-auto p-6">
-          <div className="space-y-4 mb-4">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`p-4 rounded-lg ${
-                  msg.role === 'user'
-                    ? 'bg-blue-600 text-white ml-8'
-                    : 'bg-gray-100 mr-8'
-                }`}
-              >
-                <p className="text-sm mb-1">{msg.text}</p>
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
+          {messages.length > 0 && (
+            <div className="space-y-4 mb-4">
+              {messages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`p-4 rounded-lg ${
+                    msg.role === 'user'
+                      ? 'bg-blue-600 text-white ml-8'
+                      : 'bg-gray-100 mr-8'
+                  }`}
+                >
+                  <p className="text-sm mb-1">{msg.text}</p>
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
 
           {currentQuestion && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
               <p className="text-sm font-medium mb-2">追问:</p>
               <p className="text-sm">{currentQuestion}</p>
+              <SourcesSection sources={sources} />
               {usedFallback && (
                 <p className="text-xs text-orange-600 mt-2">⚠️ AI 服务异常，已使用策略模板</p>
               )}
