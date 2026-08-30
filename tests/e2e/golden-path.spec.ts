@@ -157,6 +157,10 @@ test.describe('Golden Path: five-round interrogation state machine', () => {
     await expect(page.getByText('证据追问')).toBeVisible();
     await expect(page.getByText('阶段小结')).toHaveCount(0);
     await expect(page.locator('h3:has-text("思辨成果卡")')).toHaveCount(0);
+
+    // Ticket #18: the honest report source badge must survive the reload too.
+    await expect(page.getByTestId('report-source-state')).toBeVisible();
+    await expect(page.getByTestId('report-source-state')).toContainText('演示数据');
   });
 
   test('reload mid-session restores the correct round, then finishes five rounds', async ({ page }) => {
