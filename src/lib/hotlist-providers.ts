@@ -11,6 +11,7 @@ export interface HotlistResult {
   items: HotlistItem[];
   source: 'live' | 'cache' | 'demo';
   updatedAt: number;
+  stale?: boolean;
 }
 
 const CACHE_KEY = 'zhiyan_hotlist_cache';
@@ -40,13 +41,21 @@ export class HotlistProvider {
     throw new Error('Live API not available in MVP');
   }
 
-  /** Read cached result from localStorage. Returns null if no cache or stale. */
+  /** Read cached result from localStorage.
+   *  Returns fresh cache, stale cache (with stale:true), or null if empty. */
   private readCache(): HotlistResult | null {
     try {
       const raw = localStorage.getItem(CACHE_KEY);
       if (!raw) return null;
       const cached: HotlistResult = JSON.parse(raw);
-      if (Date.now() - cached.updatedAt > TTL_MS) return null;
+      const age = Date.now() - cached.updatedAt;
+      if (age > TTL_MS) {
+        // Return stale cache so the caller can surface last-known data;
+        // also fire-and-forget a background refresh attempt.
+        const stale = { ...cached, source: 'cache' as const, stale: true };
+        this.refreshInBackground();
+        return stale;
+      }
       return { ...cached, source: 'cache' };
     } catch {
       return null;
@@ -71,7 +80,7 @@ export class HotlistProvider {
     };
   }
 
-  /** Fetch hotlist with fallback: live → cache → demo. */
+  /** Fetch hotlist with fallback: live → fresh cache → stale cache → demo. */
   async fetchHotlist(): Promise<HotlistResult> {
     // 1. Try live (always fails in MVP, but keep the path)
     try {
@@ -84,16 +93,34 @@ export class HotlistProvider {
       // fall through to cache
     }
 
-    // 2. Try cache
+    // 2. Try fresh cache
     const cached = this.readCache();
-    if (cached) {
+    if (cached && !cached.stale) {
       return cached;
     }
 
-    // 3. Fall back to demo
+    // 3. Try stale cache (last-success fallback)
+    if (cached && cached.stale) {
+      // Background refresh was already triggered inside readCache().
+      return cached;
+    }
+
+    // 4. Fall back to demo
     const demo = this.buildDemo();
     this.writeCache(demo);
     return demo;
+  }
+
+  /** Fire-and-forget: attempt a live fetch to refresh the cache silently. */
+  private refreshInBackground(): void {
+    // Don't await — we don't want to block the caller.
+    this.fetchLive()
+      .then(live => {
+        if (live) this.writeCache(live);
+      })
+      .catch(() => {
+        // Silently swallow — stale data is still shown.
+      });
   }
 }
 

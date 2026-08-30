@@ -221,7 +221,7 @@ describe('HotlistProvider', () => {
     assert.deepStrictEqual(second.items, first.items);
   });
 
-  it('treats cache as stale after 24h', async () => {
+  it('returns stale cache with stale:true instead of falling back to demo', async () => {
     const store: Record<string, string> = {};
     const { provider: p1 } = makeHotlistProvider(store);
     const first = await p1.fetchHotlist();
@@ -233,9 +233,27 @@ describe('HotlistProvider', () => {
 
     const { provider: p2 } = makeHotlistProvider(store);
     const second = await p2.fetchHotlist();
-    // Stale cache should be replaced with fresh demo
-    assert.strictEqual(second.source, 'demo');
-    assert.ok(second.updatedAt > stale.updatedAt);
+    // Stale cache is preserved, not replaced with demo
+    assert.strictEqual(second.source, 'cache');
+    assert.strictEqual(second.stale, true);
+    assert.deepStrictEqual(second.items, first.items);
+  });
+
+  it('returns stale cache with stale flag', async () => {
+    const store: Record<string, string> = {};
+    const { provider: p1 } = makeHotlistProvider(store);
+    const first = await p1.fetchHotlist();
+    assert.strictEqual(first.source, 'demo');
+
+    // Write cache with an old timestamp (no stale flag in stored JSON)
+    const staleEntry = { ...first, updatedAt: Date.now() - 100_000_000 };
+    store['zhiyan_hotlist_cache'] = JSON.stringify(staleEntry);
+
+    const { provider: p2 } = makeHotlistProvider(store);
+    const result = await p2.fetchHotlist();
+    assert.strictEqual(result.source, 'cache');
+    assert.strictEqual(result.stale, true);
+    assert.deepStrictEqual(result.items, first.items);
   });
 
   it('roundtrips cache correctly', async () => {

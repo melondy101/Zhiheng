@@ -12,6 +12,7 @@ interface HotlistResult {
   items: HotlistItem[];
   source: 'live' | 'cache' | 'demo';
   updatedAt: number;
+  stale?: boolean;
 }
 
 type Page = 'home' | 'session';
@@ -28,10 +29,10 @@ function formatTime(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function sourceLabel(source: 'live' | 'cache' | 'demo', ts: number): string {
+function sourceLabel(source: 'live' | 'cache' | 'demo', ts: number, stale?: boolean): string {
   switch (source) {
     case 'live': return '实时检索';
-    case 'cache': return `缓存 · ${formatTime(ts)}`;
+    case 'cache': return stale ? `缓存（已过期）· ${formatTime(ts)}` : `缓存 · ${formatTime(ts)}`;
     case 'demo': return '演示数据';
   }
 }
@@ -74,7 +75,7 @@ export default function HomePage({ onStart, hotlist, hotlistLoading }: HomePageP
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">知乎热榜</h2>
               <span className="text-xs text-gray-500">
-                {sourceLabel(hotlist.source, hotlist.updatedAt)}
+                {sourceLabel(hotlist.source, hotlist.updatedAt, hotlist.stale)}
                 <span className="text-gray-400 ml-1">{formatTime(hotlist.updatedAt)}</span>
               </span>
             </div>
