@@ -20,6 +20,7 @@ import {
 import { HistorySearchProvider } from '../../src/lib/history-search';
 import { getDemoSources } from '../../src/lib/demo-sources';
 import { buildReport } from '../../src/lib/report-builder';
+import { buildGraph } from '../../src/lib/knowledge-graph';
 import { FIXTURE_QUESTION, type Session, type Source } from '../../src/lib/providers';
 
 // Minimal localStorage mock for Node.js environment
@@ -835,3 +836,97 @@ function hashQuestion(question: string): string {
   }
   return Math.abs(hash).toString(36);
 }
+
+// ---- KnowledgeGraph contract ----
+describe('buildGraph', () => {
+  const makeSource = (id: string, type: Source['type'], title: string, excerpt: string): Source => ({
+    id,
+    type,
+    author: 'Test Author',
+    title,
+    url: 'https://example.com',
+    excerpt,
+  });
+
+  const makeReport = (sources: Source[]) => {
+    const citations: Record<number, Source> = {};
+    sources.forEach((s, i) => { citations[i + 1] = s; });
+    return {
+      question: 'AI 创造力',
+      title: 'AI 创造力',
+      knowledgePoints: ['point'],
+      content: 'body',
+      viewpoints: ['view'],
+      references: sources,
+      citations,
+    };
+  };
+
+  it('returns 6-10 nodes', () => {
+    const sources = [
+      makeSource('s1', 'zhihu', 'AI 创造力的边界', 'AI 改变创作'),
+      makeSource('s2', 'web', 'How AI Changes Programming', 'A study'),
+    ];
+    const graph = buildGraph(makeReport(sources), sources);
+    assert.ok(graph.nodes.length >= 6 && graph.nodes.length <= 10,
+      `expected 6-10 nodes, got ${graph.nodes.length}`);
+  });
+
+  it('all nodes have label and description', () => {
+    const sources = [makeSource('s1', 'zhihu', 'AI 创造力', '内容')];
+    const graph = buildGraph(makeReport(sources), sources);
+    graph.nodes.forEach(n => {
+      assert.ok(n.label.length > 0);
+      assert.ok(n.description.length > 0);
+    });
+  });
+
+  it('supported edges have citationId', () => {
+    const sources = [
+      makeSource('s1', 'zhihu', 'AI 创造力', 'A'),
+      makeSource('s2', 'web', 'Web Study', 'B'),
+    ];
+    const graph = buildGraph(makeReport(sources), sources);
+    const supported = graph.edges.filter(e => e.type === 'supported');
+    supported.forEach(e => {
+      assert.ok(typeof e.citationId === 'number', 'supported edge needs citationId');
+      assert.ok(e.citationId! >= 1);
+    });
+  });
+
+  it('inferred edges do not have citationId', () => {
+    const sources = [
+      makeSource('s1', 'zhihu', 'AI', 'A'),
+      makeSource('s2', 'web', 'Web', 'B'),
+      makeSource('s3', 'zhihu', 'Code', 'C'),
+    ];
+    const graph = buildGraph(makeReport(sources), sources);
+    const inferred = graph.edges.filter(e => e.type === 'inferred');
+    inferred.forEach(e => {
+      assert.strictEqual(e.citationId, undefined);
+    });
+  });
+
+  it('is deterministic: same inputs => same graph', () => {
+    const sources = [
+      makeSource('s1', 'zhihu', 'AI 创造力 编程', '内容 A'),
+      makeSource('s2', 'web', 'Web Article', 'B'),
+    ];
+    const g1 = buildGraph(makeReport(sources), sources);
+    const g2 = buildGraph(makeReport(sources), sources);
+    assert.deepStrictEqual(g1, g2);
+  });
+
+  it('all edge endpoints reference valid node ids', () => {
+    const sources = [
+      makeSource('s1', 'zhihu', 'AI', 'A'),
+      makeSource('s2', 'web', 'Web', 'B'),
+    ];
+    const graph = buildGraph(makeReport(sources), sources);
+    const ids = new Set(graph.nodes.map(n => n.id));
+    graph.edges.forEach(e => {
+      assert.ok(ids.has(e.from), `invalid from: ${e.from}`);
+      assert.ok(ids.has(e.to), `invalid to: ${e.to}`);
+    });
+  });
+});

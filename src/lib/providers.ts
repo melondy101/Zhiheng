@@ -70,6 +70,7 @@ export interface Session {
   question: string;
   initialOpinion: string | null;
   report: Report | null;
+  knowledgeGraph?: import('./knowledge-graph').KnowledgeGraph | null;
   selectedViewpoint: Viewpoint | null;
   messages: Message[];
   resultCard: ResultCard | null;

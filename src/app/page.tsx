@@ -92,10 +92,11 @@ export default function Home() {
         throw new Error(`API error: ${res.status}`);
       }
 
-      const { sessionId, report } = (await res.json()) as {
+      const { sessionId, report, knowledgeGraph } = (await res.json()) as {
         sessionId: string;
         report: Report;
         progress: { stage: string; message: string; timestamp: number }[];
+        knowledgeGraph?: import('@/lib/knowledge-graph').KnowledgeGraph | null;
       };
 
       const newSession: Session = {
@@ -103,6 +104,7 @@ export default function Home() {
         question,
         initialOpinion,
         report,
+        knowledgeGraph: knowledgeGraph ?? null,
         selectedViewpoint: null,
         messages: [],
         resultCard: null,
@@ -221,7 +223,7 @@ export default function Home() {
       </header>
 
       <div className="flex h-[calc(100vh-57px)]">
-        <ReportPanel report={report!} />
+        <ReportPanel report={report!} knowledgeGraph={session?.knowledgeGraph ?? null} />
 
         <div className="flex flex-col flex-1 min-w-0">
           {!selectedViewpoint && !completed && (

@@ -4,6 +4,7 @@ import type { Session, ReportProgress, SourceState } from '@/lib/providers';
 import { ZhihuSearchProvider, WebSearchProvider, SearchResult } from '@/lib/search-providers';
 import { HistorySearchProvider } from '@/lib/history-search';
 import { buildReport } from '@/lib/report-builder';
+import { buildGraph } from '@/lib/knowledge-graph';
 
 export const runtime = 'nodejs';
 
@@ -87,6 +88,15 @@ export async function POST(request: Request) {
     webSourceState,
   });
 
+  // Build knowledge graph from report sources (non-blocking if it fails)
+  let knowledgeGraph = null;
+  try {
+    knowledgeGraph = buildGraph(report, report.references);
+  } catch {
+    // Graph failure must not break the report
+    knowledgeGraph = null;
+  }
+
   const session: Session = {
     id: `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     question,
@@ -115,5 +125,6 @@ export async function POST(request: Request) {
     report,
     progress: enrichedProgress,
     sourceState: { zhihu: zhihuSourceState, web: webSourceState },
+    knowledgeGraph,
   });
 }

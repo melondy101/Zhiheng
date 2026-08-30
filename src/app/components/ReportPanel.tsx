@@ -1,6 +1,8 @@
 'use client';
 
 import type { Report as ReportType, Source, SourceState } from '@/lib/providers';
+import type { KnowledgeGraph } from '@/lib/knowledge-graph';
+import KnowledgeGraphView from './KnowledgeGraphView';
 
 interface ReportPanelProps {
   report: ReportType;
@@ -14,6 +16,7 @@ interface ReportPanelProps {
   excludedHistoryIds?: string[];
   /** Called when user toggles a history source checkbox */
   onHistorySourceToggle?: (sourceSessionId: string, excluded: boolean) => void;
+  knowledgeGraph?: KnowledgeGraph | null;
 }
 
 const SOURCE_STATE_LABELS: Record<SourceState, string> = {
@@ -59,6 +62,7 @@ export default function ReportPanel({
   degradationMessage,
   excludedHistoryIds = [],
   onHistorySourceToggle,
+  knowledgeGraph,
 }: ReportPanelProps) {
   const grouped = groupByType(report.references);
   const excludedSet = new Set(excludedHistoryIds);
@@ -154,6 +158,9 @@ export default function ReportPanel({
           </ul>
         </div>
       )}
+
+      {/* Knowledge Graph */}
+      <KnowledgeGraphView graph={knowledgeGraph ?? null} />
 
       {/* References section */}
       {report.references.length > 0 && (
