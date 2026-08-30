@@ -101,6 +101,35 @@ export function isCheckpointRound(round: number): boolean {
   return round === 5 || (round > 5 && (round - 5) % 3 === 0);
 }
 
+// ---------------------------------------------------------------------------
+// Ticket #14: five-round state machine helpers.
+// The checkpoint decision appears AFTER the user answers a checkpoint round
+// (5, 8, 11, 14…), not when the question of that round is asked.
+// ---------------------------------------------------------------------------
+
+/** What should happen after the user answers `justAnsweredRound`. */
+export type AfterAnswerAction = 'checkpoint' | 'next_round';
+
+export function actionAfterAnswer(justAnsweredRound: number): AfterAnswerAction {
+  return isCheckpointRound(justAnsweredRound) ? 'checkpoint' : 'next_round';
+}
+
+export interface ResumePlan {
+  action: AfterAnswerAction;
+  /** Number of user answers already preserved in the session. */
+  answeredRounds: number;
+}
+
+/**
+ * How a restored (e.g. after refresh) session should resume: a session whose
+ * last answered round is a checkpoint round resumes at the checkpoint
+ * decision; otherwise it resumes by planning the next round's question.
+ */
+export function resumePlan(session: Session): ResumePlan {
+  const answeredRounds = session.messages.filter((m) => m.role === 'user').length;
+  return { action: actionAfterAnswer(answeredRounds), answeredRounds };
+}
+
 /** Record a strategy on the session for future picks. */
 export function recordStrategy(session: Session, strategy: StrategyId): Session {
   const history = strategyHistory(session);

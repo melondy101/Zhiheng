@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Session, Report, Viewpoint, Message, ResultCard } from '@/lib/providers';
+import type { StrategyId } from '@/lib/strategy-engine';
+import { actionAfterAnswer, resumePlan } from '@/lib/strategy-engine';
 import { FixtureRetrievalProvider, FixtureLLMProvider } from '@/lib/fixture-providers';
 import { BrowserStorageProvider, StaticReportRenderer, buildResultCard } from '@/lib/demo-providers';
 import HomePage from './components/HomePage';
@@ -16,6 +18,37 @@ const storageProvider = new BrowserStorageProvider();
 const renderingProvider = new StaticReportRenderer();
 
 type Page = 'home' | 'session';
+
+interface QuestionPlanHooks {
+  setCurrentQuestion: (q: string | null) => void;
+  setCurrentStrategy: (s: StrategyId | null) => void;
+  setCurrentRound: (r: number) => void;
+  setUsedFallback: (u: boolean) => void;
+  setIsCheckpoint: (v: boolean) => void;
+}
+
+/**
+ * Plan the next round for `sess` and push the question into page state.
+ * Module-level so it can be called from the restore effect without adding
+ * component-scope dependencies (react-hooks/exhaustive-deps).
+ */
+async function planAndSetQuestion(sess: Session, hooks: QuestionPlanHooks) {
+  const { planNextRound, recordStrategy } = await import('@/lib/strategy-engine');
+  const { withFallback } = await import('@/lib/llm-fallback');
+  const result = await planNextRound(sess, (strategy, s) =>
+    llmProvider.generateStrategyQuestion(strategy, s)
+  );
+  const fb = await withFallback(result.strategy, sess, () =>
+    llmProvider.generateStrategyQuestion(result.strategy, sess)
+  );
+  recordStrategy(sess, result.strategy);
+  hooks.setCurrentQuestion(fb.question);
+  hooks.setCurrentStrategy(result.strategy);
+  hooks.setCurrentRound(result.round);
+  hooks.setUsedFallback(fb.usedFallback);
+  // Planning a question clears any pending checkpoint decision (#14).
+  hooks.setIsCheckpoint(false);
+}
 
 export default function Home() {
   const [page, setPage] = useState<Page>('home');
@@ -54,6 +87,25 @@ export default function Home() {
           if (data.resultCard) {
             setResultCard(data.resultCard);
             setCompleted(true);
+          } else if (data.selectedViewpoint) {
+            // Ticket #14: resume the interrogation at the correct round.
+            // If the session was interrupted right after a checkpoint-round
+            // answer (5, 8, 11…), resume at the checkpoint decision so the
+            // gate cannot be bypassed by refreshing.
+            const plan = resumePlan(data);
+            if (plan.action === 'checkpoint') {
+              setCurrentRound(plan.answeredRounds);
+              setCurrentQuestion(null);
+              setIsCheckpoint(true);
+            } else {
+              await planAndSetQuestion(data, {
+                setCurrentQuestion,
+                setCurrentStrategy,
+                setCurrentRound,
+                setUsedFallback,
+                setIsCheckpoint,
+              });
+            }
           }
           setPage('session');
         }
@@ -152,25 +204,19 @@ export default function Home() {
   };
 
   const generateQuestion = async (sess: Session) => {
-    const { planNextRound, recordStrategy } = await import('@/lib/strategy-engine');
-    const { withFallback } = await import('@/lib/llm-fallback');
-    const result = await planNextRound(sess, (strategy, s) =>
-      llmProvider.generateStrategyQuestion(strategy, s)
-    );
-    const fb = await withFallback(result.strategy, sess, () =>
-      llmProvider.generateStrategyQuestion(result.strategy, sess)
-    );
-    recordStrategy(sess, result.strategy);
-    setCurrentQuestion(fb.question);
-    setCurrentStrategy(result.strategy);
-    setIsCheckpoint(result.isCheckpoint);
-    setCurrentRound(result.round);
-    setUsedFallback(fb.usedFallback);
+    await planAndSetQuestion(sess, {
+      setCurrentQuestion,
+      setCurrentStrategy,
+      setCurrentRound,
+      setUsedFallback,
+      setIsCheckpoint,
+    });
   };
 
   const handleSendAnswer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!session || !answer.trim()) return;
+    if (isCheckpoint) return; // checkpoint decision pending — answer form is hidden
 
     const userAnswer = answer.trim();
     setAnswer('');
@@ -206,22 +252,37 @@ export default function Home() {
     const updatedMessages = [...messages, userMsg];
     setMessages(updatedMessages);
 
-    const updatedSession: Session = { ...session, messages: updatedMessages };
-    setSession(updatedSession);
-
-    // MVP: complete after first user answer to keep demo flow short
-    const card: ResultCard = await renderingProvider.renderResultCard(buildResultCard(updatedSession));
-    const completedSession: Session = {
-      ...updatedSession,
-      completed: true,
-      resultCard: card,
+    // Ticket #14: keep the session and move to the next round instead of
+    // completing after the first answer.
+    const justAnsweredRound =
+      currentRound > 0
+        ? currentRound
+        : updatedMessages.filter((m) => m.role === 'user').length;
+    const updatedSession: Session = {
+      ...session,
+      messages: updatedMessages,
       updatedAt: Date.now(),
     };
-    await storageProvider.saveSession(completedSession);
-    setResultCard(card);
-    setCompleted(true);
-    setCurrentQuestion(null);
-    setSession(completedSession);
+    setSession(updatedSession);
+    await storageProvider.saveSession(updatedSession);
+
+    // After a checkpoint-round answer (5, 8, 11…) show the checkpoint
+    // decision instead of planning the next question.
+    if (actionAfterAnswer(justAnsweredRound) === 'checkpoint') {
+      setCurrentQuestion(null);
+      setIsCheckpoint(true);
+      return;
+    }
+
+    await generateQuestion(updatedSession);
+  };
+
+  // Ticket #14: continue from the checkpoint decision into the next round.
+  const handleCheckpointContinue = async () => {
+    if (!session) return;
+    setHintMessage(null);
+    setHintOptions(null);
+    await generateQuestion(session);
   };
 
   // User-triggered exit at any round
@@ -255,6 +316,12 @@ export default function Home() {
     setMessages([]);
     setSelectedViewpoint(null);
     setCurrentQuestion(null);
+    setCurrentStrategy(null);
+    setCurrentRound(0);
+    setIsCheckpoint(false);
+    setUncertainStreak(0);
+    setHintMessage(null);
+    setHintOptions(null);
     setCompleted(false);
     setResultCard(null);
     setAnswer('');
@@ -314,6 +381,7 @@ export default function Home() {
               answer={answer}
               onAnswerChange={setAnswer}
               onSubmit={handleSendAnswer}
+              onContinue={handleCheckpointContinue}
               onExit={handleCompleteNow}
               messagesEndRef={messagesEndRef}
             />
