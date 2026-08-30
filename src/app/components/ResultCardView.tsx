@@ -7,6 +7,20 @@ interface ResultCardViewProps {
   onNewSession: () => void;
 }
 
+const SOURCE_LABELS: Record<string, string> = {
+  user_authored: '用户原创',
+  ai_suggested_and_selected: 'AI 建议（已选择）',
+  ai_authored: 'AI 生成（未选择）',
+};
+
+function SourceLabel({ source }: { source: string }) {
+  return (
+    <span className="inline-block px-2 py-0.5 text-[10px] rounded bg-gray-100 text-gray-600 mt-1">
+      {SOURCE_LABELS[source] ?? source}
+    </span>
+  );
+}
+
 export default function ResultCardView({ card, onNewSession }: ResultCardViewProps) {
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -16,7 +30,7 @@ export default function ResultCardView({ card, onNewSession }: ResultCardViewPro
         <div className="mb-4">
           <h4 className="text-sm font-semibold text-gray-600 mb-1">最初立场</h4>
           <p className="text-sm bg-gray-50 p-3 rounded">{card.initialStance.text}</p>
-          <p className="text-xs text-gray-500 mt-1">来源: {card.initialStance.source}</p>
+          <SourceLabel source={card.initialStance.source} />
         </div>
       )}
 
@@ -24,7 +38,7 @@ export default function ResultCardView({ card, onNewSession }: ResultCardViewPro
         <div className="mb-4">
           <h4 className="text-sm font-semibold text-gray-600 mb-1">选择的初始立场</h4>
           <p className="text-sm bg-blue-50 p-3 rounded">{card.selectedStartingStance.text}</p>
-          <p className="text-xs text-gray-500 mt-1">来源: {card.selectedStartingStance.source}</p>
+          <SourceLabel source={card.selectedStartingStance.source} />
         </div>
       )}
 

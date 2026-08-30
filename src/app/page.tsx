@@ -229,6 +229,7 @@ export default function Home() {
           {!selectedViewpoint && !completed && (
             <StanceSelector
               viewpoints={report?.viewpoints ?? []}
+              structuredViewpoints={report?.structuredViewpoints}
               onSelect={handleViewpointSelect}
               onCustom={handleCustomViewpoint}
             />

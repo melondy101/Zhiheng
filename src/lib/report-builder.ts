@@ -226,6 +226,35 @@ function buildViewpoints(allSources: Source[]): string[] {
 }
 
 /**
+ * Generate three structurally distinct viewpoint suggestions (ticket #8).
+ * These are NOT synonyms — they cover different positions, premises, or practical angles.
+ * Each Viewpoint is marked with source='ai_authored' until the user selects one.
+ */
+export function buildStructuredViewpoints(
+  question: string,
+  allSources: Source[]
+): import('./providers').Viewpoint[] {
+  const q = question.trim();
+  return [
+    {
+      id: 'vp_progress',
+      text: `渐进视角：关于"${q.slice(0, 20)}${q.length > 20 ? '…' : ''}"，应优先考虑逐步演进和风险可控的路径。`,
+      source: 'ai_authored',
+    },
+    {
+      id: 'vp_reform',
+      text: `变革视角：现状难以解决该问题，必须从结构上重新思考"${q.slice(0, 16)}${q.length > 16 ? '…' : ''}"的前提与边界。`,
+      source: 'ai_authored',
+    },
+    {
+      id: 'vp_evidence',
+      text: `证据视角：在形成结论前，需要先收集更多具体数据和实例来验证关键假设，而非依赖直觉。`,
+      source: 'ai_authored',
+    },
+  ];
+}
+
+/**
  * Build a research report with real citations.
  *
  * Progress stages:
@@ -269,6 +298,7 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
   const title = buildTitle(options.question);
   const knowledgePoints = buildKnowledgePoints(grouped);
   const viewpoints = buildViewpoints(grouped);
+  const structuredViewpoints = buildStructuredViewpoints(options.question, grouped);
 
   // Stage 4: Complete
   const p4 = progress('complete', '报告生成完成');
@@ -279,6 +309,7 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
     knowledgePoints,
     content,
     viewpoints,
+    structuredViewpoints,
     references: grouped,
     citations,
   };

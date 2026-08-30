@@ -17,7 +17,9 @@ export interface Message {
 export interface Viewpoint {
   id: string;
   text: string;
-  source: 'user_authored' | 'ai_authored';
+  source: 'user_authored' | 'ai_suggested_and_selected' | 'ai_authored';
+  /** If selected, when it was selected (timestamp). */
+  selectedAt?: number;
 }
 
 export interface Report {
@@ -25,7 +27,10 @@ export interface Report {
   title: string;
   knowledgePoints: string[];
   content: string;
+  /** Plain-text viewpoints (legacy, used by #2/#3) */
   viewpoints: string[];
+  /** Structured viewpoints with provenance (used by #8) */
+  structuredViewpoints?: Viewpoint[];
   references: Source[];
   citations: Record<number, Source>;
 }
@@ -84,7 +89,7 @@ export interface Session {
 export interface ResultCard {
   sessionId: string;
   initialStance: { text: string; source: 'user_authored' } | null;
-  selectedStartingStance: { text: string; source: 'user_authored' | 'ai_authored' } | null;
+  selectedStartingStance: { text: string; source: 'user_authored' | 'ai_suggested_and_selected' | 'ai_authored' } | null;
   finalPosition: string | null;
   messageIds: string[];
 }

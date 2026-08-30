@@ -930,3 +930,34 @@ describe('buildGraph', () => {
     });
   });
 });
+
+// ---- Ticket #8: Three distinct viewpoint suggestions ----
+import { buildStructuredViewpoints } from '../../src/lib/report-builder';
+
+describe('buildStructuredViewpoints', () => {
+  it('returns exactly three viewpoints', () => {
+    const vps = buildStructuredViewpoints('AI 创造力', []);
+    assert.strictEqual(vps.length, 3);
+  });
+
+  it('all viewpoints have source="ai_authored" before selection', () => {
+    const vps = buildStructuredViewpoints('test', []);
+    vps.forEach((vp) => {
+      assert.strictEqual(vp.source, 'ai_authored');
+    });
+  });
+
+  it('viewpoints are not synonyms (distinct text)', () => {
+    const vps = buildStructuredViewpoints('test', []);
+    const texts = new Set(vps.map((v) => v.text));
+    assert.strictEqual(texts.size, 3, 'viewpoints must be distinct');
+  });
+
+  it('all viewpoints have non-empty text and id', () => {
+    const vps = buildStructuredViewpoints('test', []);
+    vps.forEach((vp) => {
+      assert.ok(vp.id.length > 0);
+      assert.ok(vp.text.length > 0);
+    });
+  });
+});
