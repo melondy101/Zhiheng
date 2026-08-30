@@ -239,6 +239,14 @@ export default function Home() {
     setCompleted(true);
     setCurrentQuestion(null);
     setSession(completedSession);
+
+    // Update profile (ticket #12)
+    const { buildProfileFromSession, updateProfile, loadProfile, saveProfile } = await import('@/lib/lifecycle');
+    const conclusions = buildProfileFromSession(completedSession);
+    if (conclusions.length > 0) {
+      const next = updateProfile(loadProfile(), conclusions);
+      saveProfile(next);
+    }
   };
 
   const handleNewSession = () => {

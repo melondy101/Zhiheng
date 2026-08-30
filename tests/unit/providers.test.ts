@@ -1187,3 +1187,121 @@ describe('buildDetailedResultCard', () => {
     assert.strictEqual(card.finalPosition, null);
   });
 });
+
+// ---- Ticket #12: Session lifecycle and profile ----
+import {
+  isReadOnly,
+  continueFromCompleted,
+  buildProfileFromSession,
+  updateProfile,
+  loadProfile,
+  saveProfile,
+  deleteProfile,
+  type UserProfile,
+} from '../../src/lib/lifecycle';
+
+const makeCompleted = (): Session => ({
+  id: 's1', question: 'q', initialOpinion: 'op',
+  report: null, knowledgeGraph: null,
+  selectedViewpoint: { id: 'v1', text: '立场', source: 'user_authored' },
+  messages: [
+    { id: 'm0', role: 'assistant', text: 'q?', timestamp: 0 },
+    { id: 'm1', role: 'user', text: '一个详细回答', timestamp: 1 },
+  ],
+  resultCard: null, completed: true, createdAt: 0, updatedAt: 0,
+});
+
+describe('isReadOnly', () => {
+  it('completed session is read-only', () => assert.strictEqual(isReadOnly(makeCompleted()), true));
+  it('in-progress session is not read-only', () => {
+    const s = makeCompleted();
+    assert.strictEqual(isReadOnly({ ...s, completed: false }), false);
+  });
+});
+
+describe('continueFromCompleted', () => {
+  it('creates a new independent session', () => {
+    const result = continueFromCompleted(makeCompleted(), '新问题');
+    assert.notStrictEqual(result.newSession.id, 's1');
+    assert.strictEqual(result.newSession.question, '新问题');
+    assert.strictEqual(result.newSession.completed, false);
+    assert.strictEqual(result.newSession.messages.length, 0);
+  });
+  it('does not modify the original completed session', () => {
+    const original = makeCompleted();
+    continueFromCompleted(original, 'next');
+    assert.strictEqual(original.completed, true);
+    assert.strictEqual(original.messages.length, 2);
+  });
+});
+
+describe('buildProfileFromSession', () => {
+  it('returns empty for incomplete session', () => {
+    const s = makeCompleted();
+    assert.deepStrictEqual(buildProfileFromSession({ ...s, completed: false }), []);
+  });
+  it('produces interest and thinking_style conclusions', () => {
+    const conclusions = buildProfileFromSession(makeCompleted());
+    const fields = conclusions.map((c) => c.field);
+    assert.ok(fields.includes('interest'));
+    assert.ok(fields.includes('thinking_style'));
+  });
+  it('each conclusion has sourceSessionId and confidence', () => {
+    const conclusions = buildProfileFromSession(makeCompleted());
+    conclusions.forEach((c) => {
+      assert.ok(c.sourceSessionId);
+      assert.ok(c.confidence > 0 && c.confidence <= 1);
+    });
+  });
+});
+
+describe('updateProfile', () => {
+  it('merges new conclusions into existing', () => {
+    const initial: UserProfile = { conclusions: [], updatedAt: 0, deletedAt: null };
+    const next = updateProfile(initial, [
+      { field: 'interest', value: 'AI', confidence: 0.5, sourceSessionId: 's1', sourceMessageId: null, updatedAt: 1 },
+    ]);
+    assert.strictEqual(next.conclusions.length, 1);
+  });
+  it('does not rebuild if profile is deleted', () => {
+    const initial: UserProfile = { conclusions: [], updatedAt: 0, deletedAt: Date.now() };
+    const next = updateProfile(initial, [
+      { field: 'interest', value: 'AI', confidence: 0.5, sourceSessionId: 's1', sourceMessageId: null, updatedAt: 1 },
+    ]);
+    assert.strictEqual(next.conclusions.length, 0, 'must not auto-rebuild after delete');
+  });
+  it('replaces lower confidence conclusion for same field+value', () => {
+    const initial: UserProfile = {
+      conclusions: [
+        { field: 'interest', value: 'AI', confidence: 0.3, sourceSessionId: 's1', sourceMessageId: null, updatedAt: 0 },
+      ],
+      updatedAt: 0,
+      deletedAt: null,
+    };
+    const next = updateProfile(initial, [
+      { field: 'interest', value: 'AI', confidence: 0.7, sourceSessionId: 's1', sourceMessageId: null, updatedAt: 1 },
+    ]);
+    assert.strictEqual(next.conclusions[0]!.confidence, 0.7);
+  });
+});
+
+describe('profile localStorage', () => {
+  it('saves and loads profile', () => {
+    const store: Record<string, string> = {};
+    Object.defineProperty(globalThis, 'localStorage', { value: {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v; },
+      removeItem: (k: string) => { delete store[k]; },
+      clear: () => {},
+      get length() { return Object.keys(store).length; },
+      key: (i: number) => Object.keys(store)[i] ?? null,
+    }, configurable: true });
+    const p: UserProfile = { conclusions: [], updatedAt: 0, deletedAt: null };
+    saveProfile(p);
+    const loaded = loadProfile();
+    assert.ok(loaded);
+    assert.strictEqual(loaded!.deletedAt, null);
+    deleteProfile();
+    assert.strictEqual(loadProfile(), null);
+  });
+});
