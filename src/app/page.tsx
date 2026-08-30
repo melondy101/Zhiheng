@@ -254,7 +254,10 @@ export default function Home() {
 
     // Ticket #14: keep the session and move to the next round instead of
     // completing after the first answer.
-    const justAnsweredRound = currentRound > 0 ? currentRound : updatedMessages.length;
+    const justAnsweredRound =
+      currentRound > 0
+        ? currentRound
+        : updatedMessages.filter((m) => m.role === 'user').length;
     const updatedSession: Session = {
       ...session,
       messages: updatedMessages,
