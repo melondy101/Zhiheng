@@ -105,9 +105,23 @@ export default function ResultCardView({ card, onNewSession }: ResultCardViewPro
         </section>
       )}
 
+      {card.uncertainAnswers.length > 0 && (
+        <section className="mb-4">
+          <h4 className="text-sm font-semibold text-gray-600 mb-1">6. 保留的不确定回答</h4>
+          <ul className="text-sm space-y-1">
+            {card.uncertainAnswers.map((a) => (
+              <li key={a.messageId} className="bg-gray-50 p-2 rounded">
+                {a.text}
+                <TraceLink id={a.messageId} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {card.unresolved.length > 0 && (
         <section className="mb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-1">6. 未解决问题</h4>
+          <h4 className="text-sm font-semibold text-gray-600 mb-1">7. 未解决问题</h4>
           <ul className="text-sm list-disc list-inside">
             {card.unresolved.map((u, i) => (
               <li key={i}>{u}</li>

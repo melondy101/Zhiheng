@@ -4,6 +4,7 @@
 
 import { STRATEGIES, type StrategyId } from './strategy-engine';
 import type { Session } from './providers';
+import { extractClaimFragment, selectRoundSources } from './interrogation-context';
 
 export interface FallbackEvent {
   type: 'retry' | 'template' | 'success';
@@ -41,32 +42,65 @@ export interface UncertainResponse {
   hint?: string[];
 }
 
-const PROMPTS: Record<0 | 1 | 2 | 3, (session: Session) => UncertainResponse> = {
+type UncertainPromptBuilder = (
+  session: Session,
+  currentQuestion: string | null
+) => UncertainResponse;
+
+/**
+ * #17: the focus a narrowing prompt quotes — the current pending question
+ * (the one the user could not answer), falling back to the session topic.
+ * Deterministic; never invented.
+ */
+function narrowingFocus(session: Session, currentQuestion: string | null): string {
+  return extractClaimFragment(currentQuestion ?? session.question) ?? '当前问题';
+}
+
+/**
+ * #17: the uncertain responses are context-driven. Level 1 quotes the current
+ * question it narrows; level 2 anchors both directions in the current
+ * question and, when the report has usable citations, in a real source title.
+ */
+const PROMPTS: Record<0 | 1 | 2 | 3, UncertainPromptBuilder> = {
   0: () => ({ level: 0, message: '' }),
-  1: (s) => ({
-    level: 1,
-    message: `让我们把问题缩小一些。能否举一个具体的小例子来帮助理解"${s.question}"？`,
-  }),
-  2: (s) => ({
-    level: 2,
-    message: '这里有两个思考方向供你参考：',
-    hint: [
-      '方向 A：从你的个人经验出发，描述你曾经遇到的具体情形。',
-      '方向 B：参考报告中提到的某个来源，看看该来源的核心论点是否启发了你。',
-    ],
-  }),
+  1: (s, q) => {
+    const focus = narrowingFocus(s, q);
+    return {
+      level: 1,
+      message: `看来这个问题有点宽泛。我们把它缩小一些：能否举一个具体的小例子来帮助理解"${focus}"？`,
+    };
+  },
+  2: (s, q) => {
+    const focus = narrowingFocus(s, q);
+    const sourceTitle = selectRoundSources(s)[0]?.source.title ?? null;
+    return {
+      level: 2,
+      message: '没关系。这里有两个思考方向供你参考：',
+      hint: [
+        `方向 A：回到"${focus}"，从你的个人经验出发，描述你曾经遇到的具体情形。`,
+        sourceTitle
+          ? `方向 B：参考报告来源"${sourceTitle}"的核心论点，看看它是否启发了你。`
+          : '方向 B：参考报告中的某个来源，看看它的核心论点是否启发了你。',
+      ],
+    };
+  },
   3: () => ({
     level: 3,
-    message: '看起来这个话题目前对你来说确实有难度。建议结束本次诘问并生成成果卡。',
+    message:
+      '看起来这个话题目前对你来说确实有难度。建议结束本次诘问并生成成果卡；也可以选择继续，换个角度讨论。',
   }),
 };
 
-/** Determine response for consecutive uncertain answers. */
-export function uncertainResponse(uncertainStreak: number, session: Session): UncertainResponse {
-  if (uncertainStreak <= 0) return PROMPTS[0](session);
-  if (uncertainStreak === 1) return PROMPTS[1](session);
-  if (uncertainStreak === 2) return PROMPTS[2](session);
-  return PROMPTS[3](session);
+/** Determine response for consecutive uncertain answers (#17 semantics). */
+export function uncertainResponse(
+  uncertainStreak: number,
+  session: Session,
+  currentQuestion: string | null = null
+): UncertainResponse {
+  if (uncertainStreak <= 0) return PROMPTS[0](session, currentQuestion);
+  if (uncertainStreak === 1) return PROMPTS[1](session, currentQuestion);
+  if (uncertainStreak === 2) return PROMPTS[2](session, currentQuestion);
+  return PROMPTS[3](session, currentQuestion);
 }
 
 /**

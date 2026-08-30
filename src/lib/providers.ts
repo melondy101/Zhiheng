@@ -12,6 +12,22 @@ export interface Message {
   role: 'user' | 'assistant';
   text: string;
   timestamp: number;
+  /**
+   * True when this user input was recorded while the user was uncertain
+   * (#17). Uncertain inputs stay traceable in the conversation but never
+   * advance the interrogation round.
+   */
+  uncertain?: boolean;
+}
+
+/**
+ * A user message that counts as a completed interrogation round (#17).
+ * Uncertain inputs (`uncertain: true`) are preserved in the conversation but
+ * do not advance the round, so every round derivation must use this predicate
+ * instead of counting all user messages.
+ */
+export function isRoundAnswer(m: Message): boolean {
+  return m.role === 'user' && m.uncertain !== true;
 }
 
 export interface Viewpoint {
@@ -116,10 +132,16 @@ export interface InterrogationState {
   usedFallback: boolean;
   pendingCheckpoint: boolean;
   uncertainStreak: number;
+  /**
+   * True while the explicit 继续/结束 decision after the third consecutive
+   * uncertain answer is pending (#17). The session never auto-completes;
+   * the user must choose.
+   */
+  pendingDecision?: boolean;
 }
 
-/** Actions accepted by the interrogation orchestration API (#15). */
-export type InterrogateAction = 'start' | 'answer' | 'continue';
+/** Actions accepted by the interrogation orchestration API (#15, #17). */
+export type InterrogateAction = 'start' | 'answer' | 'continue' | 'complete';
 
 /** Uncertain-answer hint returned by the orchestration API (#10 semantics). */
 export interface InterrogateHint {
@@ -147,6 +169,12 @@ export interface InterrogateResponseBody {
   sources: CitedSource[];
   /** True when three consecutive uncertain answers suggest ending (#10). */
   suggestComplete: boolean;
+  /**
+   * True while the explicit 继续/结束 decision after the third consecutive
+   * uncertain answer is pending (#17). While set, the client must render the
+   * choice UI and must never complete the session automatically.
+   */
+  decisionPending: boolean;
   completed: boolean;
   /** The full updated session; the client mirrors it into local storage. */
   session: Session;

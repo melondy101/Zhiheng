@@ -10,7 +10,7 @@ import type { InterrogateAction, Session, Viewpoint } from '@/lib/providers';
 
 export const runtime = 'nodejs';
 
-const ACTIONS: InterrogateAction[] = ['start', 'answer', 'continue'];
+const ACTIONS: InterrogateAction[] = ['start', 'answer', 'continue', 'complete'];
 
 function isInterrogateAction(value: unknown): value is InterrogateAction {
   return typeof value === 'string' && ACTIONS.includes(value as InterrogateAction);
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   }
   if (!isInterrogateAction(body.action)) {
     return NextResponse.json(
-      { error: 'Invalid action, expected start | answer | continue' },
+      { error: 'Invalid action, expected start | answer | continue | complete' },
       { status: 400 }
     );
   }

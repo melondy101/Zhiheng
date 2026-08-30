@@ -260,3 +260,140 @@ test.describe('Golden Path: five-round interrogation state machine', () => {
     await expect(sources.locator('a')).toHaveCount(0);
   });
 });
+
+// Ticket #17: uncertainty loop, explicit completion and result card retry.
+test.describe('Uncertainty loop and explicit completion', () => {
+  const UNCERTAIN = ['不知道', '我不清楚', '不确定'];
+
+  async function answerUncertain(page: Page, text: string) {
+    await page.fill('input[placeholder="输入你的回答..."]', text);
+    await page.click('button:has-text("发送")');
+  }
+
+  test('three uncertain answers stay in round 1, keep every input, and offer an explicit choice', async ({ page }) => {
+    await startSession(page, QUESTION, INITIAL_OPINION);
+
+    // 1st uncertain answer: the round must NOT advance, the input must stay
+    // visible, and the question must be narrowed (a rewrite of the current
+    // question, not fixed text).
+    await answerUncertain(page, UNCERTAIN[0]!);
+    await expect(page.getByText('第 1 轮').first()).toBeVisible();
+    await expect(page.getByText('证据追问')).toBeVisible();
+    await expect(page.getByText(UNCERTAIN[0]!).first()).toBeVisible();
+    await expect(page.getByText(/缩小/).first()).toBeVisible();
+    await expect(page.getByText(/先聚焦/).first()).toBeVisible();
+
+    // 2nd uncertain answer: still round 1, two directions offered.
+    await answerUncertain(page, UNCERTAIN[1]!);
+    await expect(page.getByText('第 1 轮').first()).toBeVisible();
+    await expect(page.getByText(UNCERTAIN[1]!).first()).toBeVisible();
+    await expect(page.getByText('方向 A').first()).toBeVisible();
+    await expect(page.getByText('方向 B').first()).toBeVisible();
+
+    // 3rd uncertain answer: an explicit 继续/结束 choice — never an automatic
+    // result card, never a discarded input.
+    await answerUncertain(page, UNCERTAIN[2]!);
+    await expect(page.getByText(UNCERTAIN[2]!).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: '继续' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '结束并生成成果卡' })).toBeVisible();
+    await expect(page.locator('h3:has-text("思辨成果卡")')).toHaveCount(0);
+    await expect(page.locator('input[placeholder="输入你的回答..."]')).toHaveCount(0);
+
+    // Refresh: the decision gate and all three inputs are restored.
+    await page.reload();
+    await expect(page.getByRole('button', { name: '继续' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '结束并生成成果卡' })).toBeVisible();
+    for (const u of UNCERTAIN) {
+      await expect(page.getByText(u).first()).toBeVisible();
+    }
+
+    // Choose "continue": a fresh question in the same round, streak reset.
+    await page.getByRole('button', { name: '继续' }).click();
+    await expect(page.getByText('第 1 轮').first()).toBeVisible();
+    await expect(page.getByText('证据追问')).toBeVisible();
+    await expect(page.locator('input[placeholder="输入你的回答..."]')).toHaveCount(1);
+
+    // Answer substantively and finish the normal five-round flow.
+    await answerRound(page, 1, ANSWERS[0]!);
+    for (let i = 1; i < 5; i++) {
+      await answerRound(page, i + 1, ANSWERS[i]!);
+    }
+    await expect(page.getByText('阶段小结')).toBeVisible();
+    await page.getByRole('button', { name: '结束并生成成果卡' }).click();
+    await expect(page.locator('h3:has-text("思辨成果卡")')).toBeVisible({ timeout: 10000 });
+
+    // Every answer — the three uncertain inputs and the five substantive
+    // ones — is traceable in the result card.
+    for (const u of UNCERTAIN) {
+      await expect(page.getByText(u).first()).toBeVisible();
+    }
+    for (const a of ANSWERS) {
+      await expect(page.getByText(a).first()).toBeVisible();
+    }
+  });
+
+  test('choosing "end" at the decision gate completes explicitly and the card traces the uncertain inputs', async ({ page }) => {
+    await startSession(page, QUESTION, INITIAL_OPINION);
+
+    for (const u of UNCERTAIN) {
+      await answerUncertain(page, u);
+    }
+    await expect(page.getByRole('button', { name: '结束并生成成果卡' })).toBeVisible();
+
+    await page.getByRole('button', { name: '结束并生成成果卡' }).click();
+    await expect(page.locator('h3:has-text("思辨成果卡")')).toBeVisible({ timeout: 10000 });
+
+    // The card is built from the saved conversation only: the three uncertain
+    // inputs are kept traceable and the unanswered question is listed.
+    await expect(page.locator('h4:has-text("保留的不确定回答")')).toBeVisible();
+    await expect(page.locator('h4:has-text("未解决问题")')).toBeVisible();
+    for (const u of UNCERTAIN) {
+      await expect(page.getByText(u).first()).toBeVisible();
+    }
+
+    // Reload: the completed session still shows the card with every input.
+    await page.reload();
+    await expect(page.locator('h3:has-text("思辨成果卡")')).toBeVisible({ timeout: 10000 });
+    for (const u of UNCERTAIN) {
+      await expect(page.getByText(u).first()).toBeVisible();
+    }
+  });
+
+  test('a failed completion shows a retry entry and never damages the saved session', async ({ page }) => {
+    await startSession(page, QUESTION, INITIAL_OPINION);
+    await answerRound(page, 1, ANSWERS[0]!);
+    await expect(page.getByText('前提追问')).toBeVisible();
+
+    // Fail every completion attempt with a 500 until the interception is removed.
+    await page.route('**/api/interrogate', (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) })
+    );
+    await page.getByRole('button', { name: '结束本次思辨' }).click();
+
+    // The failure is visible and offers a retry entry; no card is produced.
+    await expect(page.getByTestId('complete-error')).toBeVisible();
+    await expect(page.getByRole('button', { name: '重试生成成果卡' })).toBeVisible();
+    await expect(page.locator('h3:has-text("思辨成果卡")')).toHaveCount(0);
+    // The saved session is intact: the answer is still there and not completed.
+    await expect(page.getByText(ANSWERS[0]!).first()).toBeVisible();
+    const mirrored = await page.evaluate(() => {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith('zhiyan_sessions:')) continue;
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw) as { completed?: boolean; messages?: unknown[] };
+        if (Array.isArray(parsed.messages) && parsed.messages.length > 0) return parsed;
+      }
+      return null;
+    });
+    expect(mirrored).not.toBeNull();
+    expect(mirrored!.completed).toBe(false);
+
+    // Retry succeeds and the card appears.
+    await page.unroute('**/api/interrogate');
+    await page.getByRole('button', { name: '重试生成成果卡' }).click();
+    await expect(page.locator('h3:has-text("思辨成果卡")')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(ANSWERS[0]!).first()).toBeVisible();
+  });
+});

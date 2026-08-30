@@ -14,7 +14,7 @@ import type {
 import type { StrategyId } from '@/lib/strategy-engine';
 import { selectRoundSources } from '@/lib/interrogation-context';
 import { FixtureRetrievalProvider } from '@/lib/fixture-providers';
-import { BrowserStorageProvider, StaticReportRenderer, buildResultCard } from '@/lib/demo-providers';
+import { BrowserStorageProvider } from '@/lib/demo-providers';
 import HomePage from './components/HomePage';
 import ReportPanel from './components/ReportPanel';
 import StanceSelector from './components/StanceSelector';
@@ -23,7 +23,6 @@ import ResultCardView, { ResultCardViewFromSession } from './components/ResultCa
 
 const retrievalProvider = new FixtureRetrievalProvider();
 const storageProvider = new BrowserStorageProvider();
-const renderingProvider = new StaticReportRenderer();
 
 type Page = 'home' | 'session';
 
@@ -45,6 +44,10 @@ interface InterrogateViewHooks {
   setUsedFallback: (u: boolean) => void;
   setCurrentSources: (s: CitedSource[] | null) => void;
   setIsCheckpoint: (v: boolean) => void;
+  /** #17: the explicit 继续/结束 decision gate after the third uncertain answer. */
+  setPendingDecision: (v: boolean) => void;
+  /** #17: visible error when the completion API fails (with a retry entry). */
+  setCompleteError: (e: string | null) => void;
   setCompleted: (v: boolean) => void;
   setResultCard: (c: ResultCard | null) => void;
 }
@@ -77,30 +80,39 @@ async function postInterrogate(
 }
 
 /**
- * Complete a session: build the result card from the recorded user messages,
- * persist the completed session, and update the profile (#12).
+ * Complete a session through the explicit complete action of the orchestration
+ * API (#17). The server builds the result card from the saved conversation,
+ * marks the session completed and persists the card; the client only mirrors
+ * the returned session. On failure nothing is persisted and a visible error
+ * with a retry entry is shown — the saved session is never corrupted.
+ * Returns true when the card is ready.
  */
-async function completeSession(sess: Session, hooks: InterrogateViewHooks): Promise<void> {
-  const card: ResultCard = await renderingProvider.renderResultCard(buildResultCard(sess));
-  const completedSession: Session = {
-    ...sess,
-    completed: true,
-    resultCard: card,
-    updatedAt: Date.now(),
-  };
-  await storageProvider.saveSession(completedSession);
-  hooks.setResultCard(card);
+async function completeSession(sess: Session, hooks: InterrogateViewHooks): Promise<boolean> {
+  const data = await postInterrogate(sess, { action: 'complete' });
+  if (!data || !data.session.resultCard) {
+    hooks.setCompleteError('生成成果卡失败，请重试。');
+    return false;
+  }
+  hooks.setCompleteError(null);
+  hooks.setSession(data.session);
+  hooks.setMessages(data.session.messages);
   hooks.setCompleted(true);
+  hooks.setResultCard(data.session.resultCard);
   hooks.setCurrentQuestion(null);
-  hooks.setSession(completedSession);
+  hooks.setIsCheckpoint(false);
+  hooks.setPendingDecision(false);
+  hooks.setHintMessage(null);
+  hooks.setHintOptions(null);
+  await storageProvider.saveSession(data.session);
 
-  // Update profile (ticket #12)
+  // Update profile (ticket #12) — stays client-side (#17).
   const { buildProfileFromSession, updateProfile, loadProfile, saveProfile } = await import('@/lib/lifecycle');
-  const conclusions = buildProfileFromSession(completedSession);
+  const conclusions = buildProfileFromSession(data.session);
   if (conclusions.length > 0) {
     const next = updateProfile(loadProfile(), conclusions);
     saveProfile(next);
   }
+  return true;
 }
 
 /**
@@ -116,14 +128,22 @@ async function applyInterrogateResponse(
   hooks.setMessages(data.session.messages);
   if (data.session.selectedViewpoint) hooks.setSelectedViewpoint(data.session.selectedViewpoint);
   hooks.setUncertainStreak(data.uncertainStreak);
+  hooks.setCompleteError(null);
   await storageProvider.saveSession(data.session);
 
-  if (data.suggestComplete) {
-    // Three consecutive uncertain answers (#10 behavior preserved): hint,
-    // then build the result card from the recorded user messages.
-    hooks.setHintMessage(data.hint?.message ?? '建议结束本次诘问并生成成果卡。');
-    hooks.setHintOptions(null);
-    await completeSession(data.session, hooks);
+  if (data.decisionPending) {
+    // #17: after the third uncertain answer the user must explicitly choose
+    // 继续 or 结束 — the session is never completed automatically and the
+    // third input is never discarded.
+    hooks.setPendingDecision(true);
+    hooks.setIsCheckpoint(false);
+    hooks.setHintMessage(data.hint?.message ?? null);
+    hooks.setHintOptions(data.hint?.hint ?? null);
+    hooks.setCurrentQuestion(data.question);
+    hooks.setCurrentStrategy(data.strategy);
+    hooks.setCurrentRound(data.round);
+    hooks.setUsedFallback(data.usedFallback);
+    hooks.setCurrentSources(data.sources ?? []);
     return;
   }
 
@@ -134,6 +154,7 @@ async function applyInterrogateResponse(
     hooks.setHintMessage(null);
     hooks.setHintOptions(null);
   }
+  hooks.setPendingDecision(false);
   hooks.setCurrentQuestion(data.question);
   hooks.setCurrentStrategy(data.strategy);
   hooks.setCurrentRound(data.round);
@@ -151,6 +172,8 @@ export default function Home() {
   const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
   const [currentStrategy, setCurrentStrategy] = useState<StrategyId | null>(null);
   const [isCheckpoint, setIsCheckpoint] = useState(false);
+  const [pendingDecision, setPendingDecision] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
   const [currentRound, setCurrentRound] = useState(0);
   const [usedFallback, setUsedFallback] = useState(false);
   const [currentSources, setCurrentSources] = useState<CitedSource[] | null>(null);
@@ -181,6 +204,8 @@ export default function Home() {
       setUsedFallback,
       setCurrentSources,
       setIsCheckpoint,
+      setPendingDecision,
+      setCompleteError,
       setCompleted,
       setResultCard,
     });
@@ -205,6 +230,8 @@ export default function Home() {
         setUsedFallback,
         setCurrentSources,
         setIsCheckpoint,
+        setPendingDecision,
+        setCompleteError,
         setCompleted,
         setResultCard,
       });
@@ -240,6 +267,16 @@ export default function Home() {
               setCurrentSources(selectRoundSources(data));
               setUncertainStreak(st.uncertainStreak);
               setIsCheckpoint(true);
+            } else if (st?.pendingDecision) {
+              // Refreshed while the 继续/结束 decision gate was pending (#17).
+              setCurrentRound(st.round);
+              setCurrentStrategy(st.strategy);
+              setCurrentQuestion(st.assistantQuestion);
+              setUsedFallback(st.usedFallback);
+              setCurrentSources(selectRoundSources(data));
+              setUncertainStreak(st.uncertainStreak);
+              setIsCheckpoint(false);
+              setPendingDecision(true);
             } else if (st?.assistantQuestion) {
               // Refreshed while round N's question was pending.
               setCurrentRound(st.round);
@@ -266,6 +303,8 @@ export default function Home() {
                 setUsedFallback,
                 setCurrentSources,
                 setIsCheckpoint,
+                setPendingDecision,
+                setCompleteError,
                 setCompleted,
                 setResultCard,
               };
@@ -370,6 +409,7 @@ export default function Home() {
     e.preventDefault();
     if (!session || !answer.trim()) return;
     if (isCheckpoint) return; // checkpoint decision pending — answer form is hidden
+    if (pendingDecision) return; // #17: complete/continue decision pending
 
     const userAnswer = answer.trim();
     setAnswer('');
@@ -379,7 +419,8 @@ export default function Home() {
     await runInterrogate(session, { action: 'answer', answer: userAnswer });
   };
 
-  // Ticket #14/#15: continue from the checkpoint decision into the next round.
+  // Ticket #14/#17: continue from the checkpoint decision (or the #17
+  // decision gate) into the next round; the server decides streak handling.
   const handleCheckpointContinue = async () => {
     if (!session) return;
     setHintMessage(null);
@@ -396,6 +437,8 @@ export default function Home() {
     setCurrentStrategy(null);
     setCurrentRound(0);
     setIsCheckpoint(false);
+    setPendingDecision(false);
+    setCompleteError(null);
     setUncertainStreak(0);
     setHintMessage(null);
     setHintOptions(null);
@@ -453,14 +496,18 @@ export default function Home() {
               currentStrategy={currentStrategy}
               currentRound={currentRound}
               isCheckpoint={isCheckpoint}
+              pendingDecision={pendingDecision}
               usedFallback={usedFallback}
               hintMessage={hintMessage}
               hintOptions={hintOptions}
               sources={currentSources}
+              completeError={completeError}
               answer={answer}
               onAnswerChange={setAnswer}
               onSubmit={handleSendAnswer}
               onContinue={handleCheckpointContinue}
+              onDecisionContinue={handleCheckpointContinue}
+              onRetryComplete={() => { void handleCompleteNow(); }}
               onExit={() => { void handleCompleteNow(); }}
               messagesEndRef={messagesEndRef}
             />

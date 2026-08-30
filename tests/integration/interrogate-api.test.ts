@@ -460,11 +460,16 @@ describe('POST /api/interrogate: report evidence sources (#16)', () => {
   });
 });
 
-describe('POST /api/interrogate: uncertain streak persistence (#10 semantics preserved)', () => {
-  it('counts consecutive uncertain answers, returns hints, and persists the streak', async () => {
+describe('POST /api/interrogate: uncertainty loop (#17)', () => {
+  /** The user messages recorded while uncertain (role=user + uncertain flag). */
+  const uncertainInputs = (messages: Message[]): Message[] =>
+    messages.filter((m) => m.role === 'user' && m.uncertain === true);
+
+  it('keeps uncertain inputs 1-2 in the current round, persists them, and narrows the question', async () => {
     const session = seedSession();
     await serverStorage.saveSession(session);
-    await startSession(session);
+    const started = await startSession(session);
+    const round1Question = started.question!;
 
     const first = await postInterrogate({
       sessionId: session.id,
@@ -473,8 +478,30 @@ describe('POST /api/interrogate: uncertain streak persistence (#10 semantics pre
     });
     assert.strictEqual(first.status, 200);
     assert.strictEqual(first.body.uncertainStreak, 1);
+    assert.strictEqual(first.body.round, 1, 'a streak-1 answer must NOT advance the round');
+    assert.strictEqual(first.body.strategy, 'M1_evidence', 'no re-plan while uncertain');
     assert.ok(first.body.hint && first.body.hint.message.includes('缩小'));
-    assert.strictEqual(first.body.round, 2, 'a streak-1 answer still advances the round');
+    // #17: the narrowing question is a context-driven rewrite of the current
+    // question (quotes the stance claim), not fixed text.
+    assert.ok(first.body.question, 'a narrowed question stays pending');
+    assert.ok(
+      first.body.question!.includes('先聚焦'),
+      `narrowed question must rewrite the current question, got: ${first.body.question}`
+    );
+    assert.ok(
+      first.body.question!.includes(VIEWPOINT.text),
+      `narrowed question must still quote the stance claim, got: ${first.body.question}`
+    );
+
+    // The first input is persisted as an uncertain user message.
+    const stored1 = await serverStorage.loadSession(session.id);
+    assert.ok(stored1);
+    assert.deepStrictEqual(
+      uncertainInputs(stored1.messages).map((m) => m.text),
+      ['不知道']
+    );
+    assert.strictEqual(stored1.interrogation?.round, 1);
+    assert.strictEqual(stored1.interrogation?.uncertainStreak, 1);
 
     const second = await postInterrogate({
       sessionId: session.id,
@@ -483,12 +510,29 @@ describe('POST /api/interrogate: uncertain streak persistence (#10 semantics pre
     });
     assert.strictEqual(second.status, 200);
     assert.strictEqual(second.body.uncertainStreak, 2);
+    assert.strictEqual(second.body.round, 1, 'a streak-2 answer must NOT advance the round');
     assert.ok(second.body.hint && Array.isArray(second.body.hint.hint));
     assert.strictEqual(second.body.hint?.hint?.length, 2);
+    assert.strictEqual(
+      second.body.question,
+      first.body.question,
+      'the narrowed question is kept for the second uncertain answer'
+    );
 
-    const storedMid = await serverStorage.loadSession(session.id);
-    assert.ok(storedMid);
-    assert.strictEqual(storedMid.interrogation?.uncertainStreak, 2);
+    const stored2 = await serverStorage.loadSession(session.id);
+    assert.ok(stored2);
+    assert.deepStrictEqual(
+      uncertainInputs(stored2.messages).map((m) => m.text),
+      ['不知道', '我不清楚']
+    );
+  });
+
+  it('the third uncertain answer is persisted and returns an explicit decision gate, never auto-complete', async () => {
+    const session = seedSession();
+    await serverStorage.saveSession(session);
+    await startSession(session);
+    await postInterrogate({ sessionId: session.id, action: 'answer', answer: '不知道' });
+    await postInterrogate({ sessionId: session.id, action: 'answer', answer: '我不清楚' });
 
     const third = await postInterrogate({
       sessionId: session.id,
@@ -496,23 +540,68 @@ describe('POST /api/interrogate: uncertain streak persistence (#10 semantics pre
       answer: '不确定',
     });
     assert.strictEqual(third.status, 200);
+    assert.strictEqual(third.body.decisionPending, true, 'explicit decision gate');
     assert.strictEqual(third.body.suggestComplete, true);
     assert.strictEqual(third.body.uncertainStreak, 3);
+    assert.strictEqual(third.body.round, 1);
     assert.ok(third.body.hint && third.body.hint.message.includes('建议结束'));
 
-    // #10 observable behavior: the third uncertain answer is NOT recorded,
-    // and completion is not performed by the API (the client owns the card).
+    // #17: the THIRD input must be persisted too — never discarded — and the
+    // session must NOT be completed automatically.
     const stored = await serverStorage.loadSession(session.id);
     assert.ok(stored);
-    assert.deepStrictEqual(userTexts(stored.messages), [
-      '不知道',
-      '我不清楚',
-    ]);
-    assert.strictEqual(stored.interrogation?.uncertainStreak, 3);
+    assert.deepStrictEqual(
+      uncertainInputs(stored.messages).map((m) => m.text),
+      ['不知道', '我不清楚', '不确定']
+    );
+    assert.strictEqual(stored.interrogation?.pendingDecision, true);
     assert.strictEqual(stored.completed, false);
   });
 
-  it('resets the streak when a substantive answer arrives', async () => {
+  it('continue from the decision gate resets the streak and plans a fresh question in the same round', async () => {
+    const session = seedSession();
+    await serverStorage.saveSession(session);
+    const started = await startSession(session);
+    await postInterrogate({ sessionId: session.id, action: 'answer', answer: '不知道' });
+    await postInterrogate({ sessionId: session.id, action: 'answer', answer: '我不清楚' });
+    await postInterrogate({ sessionId: session.id, action: 'answer', answer: '不确定' });
+
+    const cont = await postInterrogate({ sessionId: session.id, action: 'continue' });
+    assert.strictEqual(cont.status, 200);
+    assert.strictEqual(cont.body.decisionPending, false);
+    assert.strictEqual(cont.body.uncertainStreak, 0, 'the streak resets on explicit continue');
+    assert.strictEqual(cont.body.round, 1, 'still round 1: no round was completed');
+    assert.ok(cont.body.question && cont.body.question.length > 0);
+    assert.notStrictEqual(
+      cont.body.question,
+      '让我们把问题缩小一些',
+      'a fresh question replaces the narrowed one'
+    );
+
+    // The user can answer again and rounds advance normally from here.
+    const ans = await postInterrogate({
+      sessionId: session.id,
+      action: 'answer',
+      answer: ANSWER_ROUND(1),
+    });
+    assert.strictEqual(ans.status, 200);
+    assert.strictEqual(ans.body.round, 2, 'a substantive answer advances the round');
+    assert.strictEqual(ans.body.strategy, 'M2_premise');
+  });
+
+  it('rejects answers with 409 while the decision gate is pending', async () => {
+    const session = seedSession();
+    await serverStorage.saveSession(session);
+    await startSession(session);
+    await postInterrogate({ sessionId: session.id, action: 'answer', answer: '不知道' });
+    await postInterrogate({ sessionId: session.id, action: 'answer', answer: '我不清楚' });
+    await postInterrogate({ sessionId: session.id, action: 'answer', answer: '不确定' });
+
+    const ans = await postInterrogate({ sessionId: session.id, action: 'answer', answer: '随便答一下' });
+    assert.strictEqual(ans.status, 409);
+  });
+
+  it('a substantive answer after uncertainty resets the streak and advances the round', async () => {
     const session = seedSession();
     await serverStorage.saveSession(session);
     await startSession(session);
@@ -526,6 +615,63 @@ describe('POST /api/interrogate: uncertain streak persistence (#10 semantics pre
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.uncertainStreak, 0);
     assert.strictEqual(res.body.hint, null);
-    assert.strictEqual(res.body.round, 3);
+    assert.strictEqual(res.body.round, 2, 'the round advances only via substantive answers');
+  });
+});
+
+describe('POST /api/interrogate: explicit complete action (#17)', () => {
+  it('completes server-side: builds and persists the result card, then start returns 409', async () => {
+    const session = seedSession();
+    await serverStorage.saveSession(session);
+    await startSession(session);
+    await answerRounds(session, 2);
+
+    const res = await postInterrogate({ sessionId: session.id, action: 'complete' });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.completed, true);
+
+    const card = res.body.session!.resultCard;
+    assert.ok(card, 'the response must carry the persisted result card');
+    assert.strictEqual(card!.finalPosition, ANSWER_ROUND(2));
+    assert.ok(card!.messageIds.length >= 2, 'every answer is traced');
+
+    const stored = await serverStorage.loadSession(session.id);
+    assert.ok(stored);
+    assert.strictEqual(stored.completed, true);
+    assert.ok(stored.resultCard);
+    assert.strictEqual(stored.resultCard!.finalPosition, ANSWER_ROUND(2));
+
+    // #15 P2-1 fix evidence: a completed session rejects start with 409.
+    const again = await postInterrogate({
+      sessionId: session.id,
+      action: 'start',
+      viewpoint: VIEWPOINT,
+    });
+    assert.strictEqual(again.status, 409);
+
+    // Completion is idempotent: re-posting complete returns the same card.
+    const retry = await postInterrogate({ sessionId: session.id, action: 'complete' });
+    assert.strictEqual(retry.status, 200);
+    assert.deepStrictEqual(retry.body.session!.resultCard, card);
+  });
+
+  it('returns 500 without corrupting the session when persistence fails', async () => {
+    const session = seedSession();
+    await serverStorage.saveSession(session);
+    const original = serverStorage.saveSession.bind(serverStorage);
+    serverStorage.saveSession = async () => {
+      throw new Error('disk full');
+    };
+    try {
+      const res = await postInterrogate({ sessionId: session.id, action: 'complete' });
+      assert.strictEqual(res.status, 500);
+    } finally {
+      serverStorage.saveSession = original;
+    }
+
+    const stored = await serverStorage.loadSession(session.id);
+    assert.ok(stored, 'the session must survive a failed completion');
+    assert.strictEqual(stored.completed, false);
+    assert.strictEqual(stored.resultCard, null);
   });
 });

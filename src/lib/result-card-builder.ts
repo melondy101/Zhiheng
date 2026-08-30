@@ -1,8 +1,9 @@
-// Result card builder for ticket #11.
+// Result card builder for ticket #11, extended by #17.
 // Strictly traces each item to a user message or selected viewpoint.
 // Assistant messages cannot be misattributed as user views.
 
 import type { Session, Message, Viewpoint, ResultCard } from './providers';
+import { isRoundAnswer } from './providers';
 
 interface MessageTrace {
   messageId: string;
@@ -24,21 +25,34 @@ export interface DetailedResultCard extends Omit<ResultCard, 'finalPosition' | '
   newEvidence: MessageTrace[];
   /** Pairs of (before, after) user messages indicating stance shifts. */
   stanceRevisions: Array<{ from: MessageTrace; to: MessageTrace }>;
-  /** Last user message is treated as the final position. */
+  /** Last round-advancing user message is treated as the final position. */
   finalPosition: MessageTrace | null;
-  /** All user message ids (used by other UI components). */
+  /** All user message ids — including uncertain inputs (#17). */
   messageIds: string[];
-  /** Open questions the user did not address. */
+  /** #17: inputs recorded while uncertain, kept for full traceability. */
+  uncertainAnswers: MessageTrace[];
+  /** #17: questions the user left unanswered (the pending question, if any). */
   unresolved: string[];
 }
 
 const userMessages = (session: Session): Message[] =>
   session.messages.filter((m) => m.role === 'user');
 
+/** Round-advancing answers only — uncertain inputs are excluded (#17). */
+const roundAnswers = (session: Session): Message[] =>
+  session.messages.filter(isRoundAnswer);
+
 const isSubstantive = (m: Message): boolean => m.text.trim().length >= 8;
+
+const trace = (m: Message): MessageTrace => ({
+  messageId: m.id,
+  text: m.text,
+  timestamp: m.timestamp,
+});
 
 export function buildDetailedResultCard(session: Session): DetailedResultCard {
   const users = userMessages(session);
+  const answers = roundAnswers(session);
   const initialExpression = session.initialOpinion
     ? {
         messageId: 'initial_opinion',
@@ -58,32 +72,32 @@ export function buildDetailedResultCard(session: Session): DetailedResultCard {
       }
     : null;
 
-  const newEvidence: MessageTrace[] = users
+  const newEvidence: MessageTrace[] = answers
     .filter(isSubstantive)
-    .filter((m) => users.indexOf(m) !== users.length - 1) // exclude final position
-    .map((m) => ({ messageId: m.id, text: m.text, timestamp: m.timestamp }));
+    .filter((m) => answers.indexOf(m) !== answers.length - 1) // exclude final position
+    .map(trace);
 
-  // Detect stance revisions: pairs of consecutive user messages where the topic shifted
+  // Detect stance revisions: pairs of consecutive round answers where the
+  // topic shifted (#17: uncertain inputs never create revision pairs).
   const stanceRevisions: Array<{ from: MessageTrace; to: MessageTrace }> = [];
-  for (let i = 1; i < users.length; i++) {
-    const a = users[i - 1]!;
-    const b = users[i]!;
+  for (let i = 1; i < answers.length; i++) {
+    const a = answers[i - 1]!;
+    const b = answers[i]!;
     if (a.text !== b.text) {
-      stanceRevisions.push({
-        from: { messageId: a.id, text: a.text, timestamp: a.timestamp },
-        to: { messageId: b.id, text: b.text, timestamp: b.timestamp },
-      });
+      stanceRevisions.push({ from: trace(a), to: trace(b) });
     }
   }
 
-  const finalPosition =
-    users.length > 0
-      ? {
-          messageId: users[users.length - 1]!.id,
-          text: users[users.length - 1]!.text,
-          timestamp: users[users.length - 1]!.timestamp,
-        }
-      : null;
+  const finalPosition = answers.length > 0 ? trace(answers[answers.length - 1]!) : null;
+
+  // #17: every uncertain input stays traceable in the card.
+  const uncertainAnswers = users.filter((m) => m.uncertain === true).map(trace);
+
+  // #17: the question that was still pending when the session completed is
+  // the honest content of the "unresolved questions" section — taken
+  // verbatim from the saved conversation, never invented.
+  const pendingQuestion = session.interrogation?.assistantQuestion?.trim();
+  const unresolved = pendingQuestion ? [pendingQuestion] : [];
 
   return {
     sessionId: session.id,
@@ -105,6 +119,22 @@ export function buildDetailedResultCard(session: Session): DetailedResultCard {
     stanceRevisions,
     finalPosition,
     messageIds: users.map((m) => m.id),
-    unresolved: [],
+    uncertainAnswers,
+    unresolved,
+  };
+}
+
+/**
+ * The simple persisted card shape, built server-side by the complete action
+ * (#17). Pure projection of the detailed card; safe for any runtime.
+ */
+export function buildSimpleResultCard(session: Session): ResultCard {
+  const detailed = buildDetailedResultCard(session);
+  return {
+    sessionId: detailed.sessionId,
+    initialStance: detailed.initialStance,
+    selectedStartingStance: detailed.selectedStartingStance,
+    finalPosition: detailed.finalPosition ? detailed.finalPosition.text : null,
+    messageIds: detailed.messageIds,
   };
 }

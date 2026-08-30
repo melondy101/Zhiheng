@@ -22,10 +22,12 @@ import type {
   StorageProvider,
   Viewpoint,
 } from './providers';
+import { isRoundAnswer } from './providers';
 import { actionAfterAnswer, pickNextStrategy, recordStrategy } from './strategy-engine';
 import type { StrategyId } from './strategy-engine';
 import { isUncertainAnswer, uncertainResponse, withFallback } from './llm-fallback';
-import { selectRoundSources } from './interrogation-context';
+import { buildNarrowedQuestion, selectRoundSources } from './interrogation-context';
+import { buildSimpleResultCard } from './result-card-builder';
 
 export interface HandleInterrogateInput {
   sessionId: string;
@@ -48,9 +50,9 @@ export type InterrogateResult =
   | { ok: true; body: InterrogateResponseBody }
   | { ok: false; status: number; error: string };
 
-/** Number of user answers already recorded in the session. */
+/** Number of round-advancing answers already recorded in the session (#17). */
 export function answeredRounds(session: Session): number {
-  return session.messages.filter((m) => m.role === 'user').length;
+  return session.messages.filter(isRoundAnswer).length;
 }
 
 /**
@@ -76,12 +78,13 @@ export function evaluateStreak(currentStreak: number, answer: string): number {
   return isUncertainAnswer(answer) ? currentStreak + 1 : 0;
 }
 
-function makeMessage(text: string): Message {
+function makeMessage(text: string, uncertain = false): Message {
   return {
     id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     role: 'user',
     text,
     timestamp: Date.now(),
+    ...(uncertain ? { uncertain: true } : {}),
   };
 }
 
@@ -103,6 +106,9 @@ function toResponseBody(
     // selected from the session's own report citations (empty when none).
     sources: selectRoundSources(session),
     suggestComplete,
+    // #17: the explicit 继续/结束 decision gate after the third uncertain
+    // answer — never an automatic completion.
+    decisionPending: state.pendingDecision === true,
     completed: session.completed,
     session,
   };
@@ -155,9 +161,39 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     session = snapshot;
     await storage.saveSession(session);
   }
+  // #17: the explicit completion action. Must run BEFORE the completed-409
+  // guard so re-posting complete on a finished session is an idempotent
+  // success (the client retry path) rather than a dead end. The card is
+  // built from the saved conversation by the pure result-card builder BEFORE
+  // the session is marked completed and persisted — a failed build/save
+  // never corrupts the session.
+  if (action === 'complete') {
+    if (session.completed && session.resultCard) {
+      return { ok: true, body: toResponseBody(session, null, false) };
+    }
+    try {
+      const card = buildSimpleResultCard(session);
+      const completedSession: Session = {
+        ...session,
+        completed: true,
+        resultCard: card,
+        updatedAt: Date.now(),
+      };
+      await storage.saveSession(completedSession);
+      return { ok: true, body: toResponseBody(completedSession, null, false) };
+    } catch (err) {
+      return {
+        ok: false,
+        status: 500,
+        error: `Failed to complete session: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
   if (session.completed) {
     return { ok: false, status: 409, error: 'Session already completed' };
   }
+
   const state = interrogationStateOf(session);
 
   if (action === 'start') {
@@ -171,7 +207,10 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     }
     // Idempotent: once an interrogation is running, starting again must not
     // replan or reset the round (e.g. double submit / restore retries).
-    if (state.round > 0 && (state.assistantQuestion || state.pendingCheckpoint)) {
+    if (
+      state.round > 0 &&
+      (state.assistantQuestion || state.pendingCheckpoint || state.pendingDecision)
+    ) {
       return { ok: true, body: toResponseBody(session, null, false) };
     }
     const selected: Viewpoint = { ...viewpoint, selectedAt: Date.now() };
@@ -182,17 +221,28 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
   }
 
   if (action === 'continue') {
-    if (!state.pendingCheckpoint) {
-      return { ok: false, status: 409, error: 'No checkpoint decision pending' };
+    if (state.pendingCheckpoint) {
+      const planned = await planNextRound(session, generateQuestion, state.uncertainStreak);
+      await storage.saveSession(planned);
+      return { ok: true, body: toResponseBody(planned, null, false) };
     }
-    const planned = await planNextRound(session, generateQuestion, state.uncertainStreak);
-    await storage.saveSession(planned);
-    return { ok: true, body: toResponseBody(planned, null, false) };
+    if (state.pendingDecision) {
+      // #17: explicit continue after the third uncertain answer — the streak
+      // resets and a fresh question is planned for the SAME round (no round
+      // was completed by uncertain inputs).
+      const planned = await planNextRound(session, generateQuestion, 0);
+      await storage.saveSession(planned);
+      return { ok: true, body: toResponseBody(planned, null, false) };
+    }
+    return { ok: false, status: 409, error: 'No checkpoint decision pending' };
   }
 
   // action === 'answer'
   if (state.pendingCheckpoint) {
     return { ok: false, status: 409, error: 'Checkpoint decision pending' };
+  }
+  if (state.pendingDecision) {
+    return { ok: false, status: 409, error: 'Complete-or-continue decision pending' };
   }
   if (!state.assistantQuestion) {
     return { ok: false, status: 400, error: 'No pending question' };
@@ -204,26 +254,74 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
 
   const streak = evaluateStreak(state.uncertainStreak, answer);
 
-  // #10 observable behavior preserved: the third consecutive uncertain answer
-  // is not recorded; the client is told to suggest ending and build the card.
-  if (streak >= 3) {
+  // Every input is recorded — including uncertain ones (#17: an uncertain
+  // input is persisted as an uncertain user message and never discarded).
+  const withAnswer: Session = {
+    ...session,
+    messages: [...session.messages, makeMessage(answer, streak > 0)],
+  };
+
+  // #17: uncertain answers NEVER advance the round. The first two stay in
+  // the current round (1: narrowed question, 2: two directions); the third
+  // opens an explicit 继续/结束 decision gate — no auto-completion, no lost
+  // input.
+  if (streak > 0) {
+    if (streak >= 3) {
+      const gated: Session = {
+        ...withAnswer,
+        interrogation: {
+          round: state.round,
+          strategy: state.strategy,
+          assistantQuestion: state.assistantQuestion,
+          usedFallback: state.usedFallback,
+          pendingCheckpoint: false,
+          uncertainStreak: streak,
+          pendingDecision: true,
+        },
+        updatedAt: Date.now(),
+      };
+      await storage.saveSession(gated);
+      const hint = uncertainResponse(streak, withAnswer, state.assistantQuestion);
+      return {
+        ok: true,
+        body: toResponseBody(gated, { message: hint.message, hint: hint.hint }, true),
+      };
+    }
+
+    let assistantQuestion = state.assistantQuestion;
+    let usedFallback = state.usedFallback;
+    if (streak === 1) {
+      // #17: the narrowed question is a rewrite of the current question,
+      // generated through the context seam and the withFallback degradation
+      // chain (usedFallback marks an honest template degradation).
+      const strategy = state.strategy ?? 'M1_evidence';
+      const fb = await withFallback(strategy, withAnswer, async () =>
+        buildNarrowedQuestion(withAnswer, state.assistantQuestion)
+      );
+      assistantQuestion = fb.question;
+      usedFallback = fb.usedFallback;
+    }
     const updated: Session = {
-      ...session,
-      interrogation: { ...state, uncertainStreak: streak },
+      ...withAnswer,
+      interrogation: {
+        round: state.round,
+        strategy: state.strategy,
+        assistantQuestion,
+        usedFallback,
+        pendingCheckpoint: false,
+        uncertainStreak: streak,
+      },
       updatedAt: Date.now(),
     };
     await storage.saveSession(updated);
+    const hintResponse = uncertainResponse(streak, withAnswer, assistantQuestion);
     return {
       ok: true,
-      body: toResponseBody(updated, { message: '建议结束本次诘问并生成成果卡。' }, true),
+      body: toResponseBody(updated, { message: hintResponse.message, hint: hintResponse.hint }, false),
     };
   }
 
-  const withAnswer: Session = { ...session, messages: [...session.messages, makeMessage(answer)] };
-  const hintResponse = streak > 0 ? uncertainResponse(streak, withAnswer) : null;
-  const hint: InterrogateHint | null = hintResponse
-    ? { message: hintResponse.message, hint: hintResponse.hint }
-    : null;
+  const hint: InterrogateHint | null = null;
 
   // After a checkpoint-round answer (5, 8, 11…) the next step is the
   // checkpoint decision, not a new question (#14 state machine).
