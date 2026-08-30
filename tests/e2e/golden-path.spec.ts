@@ -36,13 +36,13 @@ test.describe('Golden Path: minimal reasoning loop', () => {
     await expect(page.locator('h3:has-text("思辨成果卡")')).toBeVisible({ timeout: 10000 });
 
     // Step 6: Verify each section of result card separately
-    await expect(page.locator('text=最初立场')).toBeVisible();
-    await expect(page.locator('text=选择的初始立场')).toBeVisible();
-    await expect(page.locator('text=最终观点')).toBeVisible();
+    await expect(page.locator('h4:has-text("初始表达")')).toBeVisible();
+    await expect(page.locator('h4:has-text("起始立场")')).toBeVisible();
+    await expect(page.locator('h4:has-text("最终观点")')).toBeVisible();
 
     // Step 7: Verify initial opinion is preserved
     await expect(page.locator(`text=${INITIAL_OPINION}`)).toBeVisible();
-    await expect(page.getByText(ANSWER, { exact: true })).toBeVisible();
+    await expect(page.getByText(ANSWER, { exact: false }).first()).toBeVisible();
 
     // Step 8: Record session URL and reload
     const currentUrl = page.url();
@@ -50,11 +50,11 @@ test.describe('Golden Path: minimal reasoning loop', () => {
 
     // Step 9: Verify persisted content after reload
     await expect(page.locator('h3:has-text("思辨成果卡")')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('text=最初立场')).toBeVisible();
-    await expect(page.locator('text=选择的初始立场')).toBeVisible();
-    await expect(page.locator('text=最终观点')).toBeVisible();
+    await expect(page.locator('h4:has-text("初始表达")')).toBeVisible();
+    await expect(page.locator('h4:has-text("起始立场")')).toBeVisible();
+    await expect(page.locator('h4:has-text("最终观点")')).toBeVisible();
     await expect(page.locator(`text=${INITIAL_OPINION}`)).toBeVisible();
-    await expect(page.getByText(ANSWER, { exact: true })).toBeVisible();
+    await expect(page.getByText(ANSWER, { exact: false }).first()).toBeVisible();
 
     // Step 10: Verify the session ID is in the URL (reopen behavior)
     expect(currentUrl).toMatch(/session=\w+/);

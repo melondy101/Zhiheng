@@ -581,12 +581,12 @@ describe('buildResultCard', () => {
   it('preserves source on selectedStartingStance', () => {
     const card = buildResultCard({
       id: 's', question: 'q', initialOpinion: null,
-      selectedViewpoint: { id: 'v1', text: 'selected', source: 'ai_authored' },
+      selectedViewpoint: { id: 'v1', text: 'selected', source: 'ai_suggested_and_selected' },
       messages: [{ id: 'u1', role: 'user', text: 'reply', timestamp: 0 }],
       report: null, resultCard: null, completed: false, createdAt: 0, updatedAt: 0,
     });
     assert.ok(card.selectedStartingStance);
-    assert.strictEqual(card.selectedStartingStance!.source, 'ai_authored');
+    assert.strictEqual(card.selectedStartingStance!.source, 'ai_suggested_and_selected');
   });
 
   it('excludes assistant messages from messageIds', () => {
@@ -1113,5 +1113,77 @@ describe('withFallback', () => {
     });
     assert.ok(r.question.length > 0);
     assert.strictEqual(r.usedFallback, true);
+  });
+});
+
+// ---- Ticket #11: Detailed result card builder ----
+import { buildDetailedResultCard } from '../../src/lib/result-card-builder';
+
+const makeCardSession = (): Session => ({
+  id: 's1',
+  question: 'test',
+  initialOpinion: '我最初认为 X',
+  report: null,
+  selectedViewpoint: { id: 'v1', text: 'AI 建议的立场', source: 'ai_suggested_and_selected', selectedAt: 1000 },
+  messages: [
+    { id: 'm0', role: 'assistant', text: '第一个追问', timestamp: 0 },
+    { id: 'm1', role: 'user', text: '我的回答包含具体数据', timestamp: 1 },
+    { id: 'm2', role: 'assistant', text: '追问二', timestamp: 2 },
+    { id: 'm3', role: 'user', text: '我修正了观点', timestamp: 3 },
+  ],
+  resultCard: null,
+  completed: false,
+  createdAt: 0,
+  updatedAt: 0,
+});
+
+describe('buildDetailedResultCard', () => {
+  it('separates initial expression, stance, evidence, revisions, final position', () => {
+    const card = buildDetailedResultCard(makeCardSession());
+    assert.ok(card.initialExpression);
+    assert.strictEqual(card.initialExpression!.text, '我最初认为 X');
+    assert.ok(card.startingStance);
+    assert.strictEqual(card.startingStance!.source, 'ai_suggested_and_selected');
+    assert.ok(card.newEvidence.length >= 1, 'should have at least one evidence item');
+    assert.ok(card.stanceRevisions.length >= 1, 'should have at least one revision');
+    assert.ok(card.finalPosition);
+    assert.strictEqual(card.finalPosition!.text, '我修正了观点');
+  });
+
+  it('does not include assistant messages in user fields', () => {
+    const card = buildDetailedResultCard(makeCardSession());
+    const allText = [
+      card.initialExpression?.text ?? '',
+      card.startingStance?.text ?? '',
+      ...card.newEvidence.map((e) => e.text),
+      ...card.stanceRevisions.flatMap((r) => [r.from.text, r.to.text]),
+      card.finalPosition?.text ?? '',
+    ].join(' ');
+    assert.ok(!allText.includes('追问'), 'assistant text leaked into user fields');
+  });
+
+  it('each item has a traceable messageId', () => {
+    const card = buildDetailedResultCard(makeCardSession());
+    assert.ok(card.initialExpression!.messageId);
+    assert.ok(card.startingStance!.messageId);
+    card.newEvidence.forEach((e) => assert.ok(e.messageId));
+    card.stanceRevisions.forEach((r) => {
+      assert.ok(r.from.messageId);
+      assert.ok(r.to.messageId);
+    });
+    assert.ok(card.finalPosition!.messageId);
+  });
+
+  it('empty session returns empty card', () => {
+    const empty: Session = {
+      id: 's2', question: 'q', initialOpinion: null, report: null,
+      selectedViewpoint: null, messages: [], resultCard: null,
+      completed: false, createdAt: 0, updatedAt: 0,
+    };
+    const card = buildDetailedResultCard(empty);
+    assert.strictEqual(card.initialExpression, null);
+    assert.strictEqual(card.startingStance, null);
+    assert.strictEqual(card.newEvidence.length, 0);
+    assert.strictEqual(card.finalPosition, null);
   });
 });

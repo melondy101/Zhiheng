@@ -1,9 +1,10 @@
 'use client';
 
-import type { ResultCard as ResultCardType } from '@/lib/providers';
+import { buildDetailedResultCard, type DetailedResultCard } from '@/lib/result-card-builder';
+import type { Session } from '@/lib/providers';
 
 interface ResultCardViewProps {
-  card: ResultCardType;
+  card: DetailedResultCard;
   onNewSession: () => void;
 }
 
@@ -21,33 +22,105 @@ function SourceLabel({ source }: { source: string }) {
   );
 }
 
+function TraceLink({ id }: { id: string }) {
+  return (
+    <span className="text-[10px] text-gray-400 ml-1" title={`来源: ${id}`}>
+      [{id.slice(0, 12)}]
+    </span>
+  );
+}
+
+export function ResultCardViewFromSession({ session, onNewSession }: {
+  session: Session;
+  onNewSession: () => void;
+}) {
+  const card = buildDetailedResultCard(session);
+  return <ResultCardView card={card} onNewSession={onNewSession} />;
+}
+
 export default function ResultCardView({ card, onNewSession }: ResultCardViewProps) {
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <h3 className="text-xl font-bold text-blue-600 mb-4">思辨成果卡</h3>
 
-      {card.initialStance && (
-        <div className="mb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-1">最初立场</h4>
-          <p className="text-sm bg-gray-50 p-3 rounded">{card.initialStance.text}</p>
-          <SourceLabel source={card.initialStance.source} />
-        </div>
+      {card.initialExpression && (
+        <section className="mb-4">
+          <h4 className="text-sm font-semibold text-gray-600 mb-1">1. 初始表达</h4>
+          <p className="text-sm bg-gray-50 p-3 rounded">
+            {card.initialExpression.text}
+            <TraceLink id={card.initialExpression.messageId} />
+          </p>
+          <SourceLabel source="user_authored" />
+        </section>
       )}
 
-      {card.selectedStartingStance && (
-        <div className="mb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-1">选择的初始立场</h4>
-          <p className="text-sm bg-blue-50 p-3 rounded">{card.selectedStartingStance.text}</p>
-          <SourceLabel source={card.selectedStartingStance.source} />
-        </div>
+      {card.startingStance && (
+        <section className="mb-4">
+          <h4 className="text-sm font-semibold text-gray-600 mb-1">2. 起始立场</h4>
+          <p className="text-sm bg-blue-50 p-3 rounded">
+            {card.startingStance.text}
+            <TraceLink id={card.startingStance.messageId ?? ''} />
+          </p>
+          <SourceLabel source={card.startingStance.source} />
+        </section>
       )}
 
-      <div className="mb-4">
-        <h4 className="text-sm font-semibold text-gray-600 mb-1">最终观点</h4>
-        <p className="text-sm bg-green-50 p-3 rounded">
-          {card.finalPosition || '未形成明确最终观点'}
+      {card.newEvidence.length > 0 && (
+        <section className="mb-4">
+          <h4 className="text-sm font-semibold text-gray-600 mb-1">3. 新增证据</h4>
+          <ul className="text-sm space-y-1">
+            {card.newEvidence.map((ev) => (
+              <li key={ev.messageId} className="bg-green-50 p-2 rounded">
+                {ev.text}
+                <TraceLink id={ev.messageId} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {card.stanceRevisions.length > 0 && (
+        <section className="mb-4">
+          <h4 className="text-sm font-semibold text-gray-600 mb-1">4. 观点修正</h4>
+          <ul className="text-sm space-y-2">
+            {card.stanceRevisions.map((rev, i) => (
+              <li key={i} className="bg-yellow-50 p-2 rounded">
+                <div className="text-gray-500 text-xs">从：</div>
+                <div>{rev.from.text}<TraceLink id={rev.from.messageId} /></div>
+                <div className="text-gray-500 text-xs mt-1">到：</div>
+                <div>{rev.to.text}<TraceLink id={rev.to.messageId} /></div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {card.finalPosition && (
+        <section className="mb-4">
+          <h4 className="text-sm font-semibold text-gray-600 mb-1">5. 最终观点</h4>
+          <p className="text-sm bg-purple-50 p-3 rounded">
+            {card.finalPosition.text}
+            <TraceLink id={card.finalPosition.messageId} />
+          </p>
+        </section>
+      )}
+
+      {card.unresolved.length > 0 && (
+        <section className="mb-4">
+          <h4 className="text-sm font-semibold text-gray-600 mb-1">6. 未解决问题</h4>
+          <ul className="text-sm list-disc list-inside">
+            {card.unresolved.map((u, i) => (
+              <li key={i}>{u}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {!card.finalPosition && !card.startingStance && !card.initialExpression && (
+        <p className="text-sm text-gray-500">
+          本次会话没有用户原创内容，成果卡为空。
         </p>
-      </div>
+      )}
 
       <button
         onClick={onNewSession}

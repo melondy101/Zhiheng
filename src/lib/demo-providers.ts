@@ -2,6 +2,7 @@
 // These run only in the browser; do not import in server-side code.
 
 import type { StorageProvider, RenderingProvider, Report, Session, ResultCard } from './providers';
+import { buildDetailedResultCard } from './result-card-builder';
 
 // ---------------------------------------------------------------------------
 // Browser Storage Provider (localStorage adapter)
@@ -72,16 +73,12 @@ export const resultCardRenderer = new StaticReportRenderer();
 // ---------------------------------------------------------------------------
 
 export function buildResultCard(session: Session): ResultCard {
-  const userMessages = session.messages.filter(m => m.role === 'user');
+  const detailed = buildDetailedResultCard(session);
   return {
-    sessionId: session.id,
-    initialStance: session.initialOpinion
-      ? { text: session.initialOpinion, source: 'user_authored' }
-      : null,
-    selectedStartingStance: session.selectedViewpoint
-      ? { text: session.selectedViewpoint.text, source: session.selectedViewpoint.source }
-      : null,
-    finalPosition: userMessages.length > 0 ? userMessages[userMessages.length - 1].text : null,
-    messageIds: userMessages.map(m => m.id),
+    sessionId: detailed.sessionId,
+    initialStance: detailed.initialStance,
+    selectedStartingStance: detailed.selectedStartingStance,
+    finalPosition: detailed.finalPosition ? detailed.finalPosition.text : null,
+    messageIds: detailed.messageIds,
   };
 }

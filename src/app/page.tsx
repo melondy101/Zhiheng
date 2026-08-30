@@ -8,7 +8,7 @@ import HomePage from './components/HomePage';
 import ReportPanel from './components/ReportPanel';
 import StanceSelector from './components/StanceSelector';
 import QAPanel from './components/QAPanel';
-import ResultCardView from './components/ResultCardView';
+import ResultCardView, { ResultCardViewFromSession } from './components/ResultCardView';
 
 const retrievalProvider = new FixtureRetrievalProvider();
 const llmProvider = new FixtureLLMProvider();
@@ -311,8 +311,8 @@ export default function Home() {
             />
           )}
 
-          {completed && resultCard && (
-            <ResultCardView card={resultCard} onNewSession={handleNewSession} />
+          {completed && session && (
+            <ResultCardViewFromSession session={session} onNewSession={handleNewSession} />
           )}
         </div>
       </div>
