@@ -27,10 +27,18 @@ const storageProvider = new BrowserStorageProvider();
 
 type Page = 'home' | 'session';
 
-/** Retrieval state of the current session's report (#18 honest disclosure). */
+/**
+ * Retrieval state of the current session's report (#18 honest disclosure).
+ * #19 adds per-channel cache timestamps/stale flags so the UI can show when
+ * cached data was actually retrieved instead of implying it is current.
+ */
 interface ReportSourceState {
   zhihu: SourceState;
   web: SourceState;
+  zhihuUpdatedAt?: number;
+  webUpdatedAt?: number;
+  zhihuStale?: boolean;
+  webStale?: boolean;
 }
 
 /** Side-key persisting the report's retrieval state across reloads (#18). */
@@ -209,7 +217,7 @@ export default function Home() {
   const [resultCard, setResultCard] = useState<ResultCard | null>(null);
   const [answer, setAnswer] = useState('');
   const [loading, setLoading] = useState(false);
-  const [hotlist, setHotlist] = useState<{ items: { id: string; title: string; url: string }[]; source: 'live' | 'cache' | 'demo'; updatedAt: number } | null>(null);
+  const [hotlist, setHotlist] = useState<{ items: { id: string; title: string; url: string | null }[]; source: 'live' | 'cache' | 'demo'; updatedAt: number; stale?: boolean } | null>(null);
   const [hotlistLoading, setHotlistLoading] = useState(true);
   // #18: honest live/cache/demo disclosure for the report panel.
   const [reportSourceState, setReportSourceState] = useState<ReportSourceState | null>(null);
@@ -505,6 +513,19 @@ export default function Home() {
     return <HomePage onStart={handleStart} hotlist={hotlist} hotlistLoading={hotlistLoading} />;
   }
 
+  // #19: honest cache disclosure — show when the cached channel data was
+  // actually retrieved. The oldest cached channel wins, so the badge never
+  // claims fresher data than what is displayed.
+  const cacheTimes: number[] = [];
+  if (reportSourceState?.zhihu === 'cache' && typeof reportSourceState.zhihuUpdatedAt === 'number') {
+    cacheTimes.push(reportSourceState.zhihuUpdatedAt);
+  }
+  if (reportSourceState?.web === 'cache' && typeof reportSourceState.webUpdatedAt === 'number') {
+    cacheTimes.push(reportSourceState.webUpdatedAt);
+  }
+  const cacheUpdatedAt = cacheTimes.length > 0 ? Math.min(...cacheTimes) : null;
+  const cacheStale = reportSourceState?.zhihuStale === true || reportSourceState?.webStale === true;
+
   return (
     <div className="min-h-screen">
       <header className="border-b bg-white">
@@ -521,6 +542,8 @@ export default function Home() {
           report={report!}
           zhihuSourceState={reportSourceState?.zhihu}
           webSourceState={reportSourceState?.web}
+          cacheUpdatedAt={cacheUpdatedAt}
+          cacheStale={cacheStale}
           knowledgeGraph={session?.knowledgeGraph ?? null}
         />
 

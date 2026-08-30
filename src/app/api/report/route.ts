@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { serverStorage } from '@/lib/server-providers';
 import type { Session, ReportProgress, SourceState } from '@/lib/providers';
-import { ZhihuSearchProvider, WebSearchProvider, SearchResult } from '@/lib/search-providers';
+import { createZhihuSearchProvider, createGlobalSearchProvider } from '@/lib/zhihu-retrieval';
 import { HistorySearchProvider } from '@/lib/history-search';
 import { buildReport } from '@/lib/report-builder';
 import { buildGraph } from '@/lib/knowledge-graph';
@@ -15,47 +15,18 @@ interface ExtendedProgress extends ReportProgress {
   webSourceState?: SourceState;
 }
 
-/** Wrap a promise with a timeout. */
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: () => T): T {
-  // Synchronous timeout wrapper using Promise.race
-  // Returns fallback if timeout fires first
-  let timeoutId: ReturnType<typeof setTimeout>;
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error('Search timeout')), ms);
-  });
-
-  return Promise.race([promise, timeoutPromise])
-    .finally(() => clearTimeout(timeoutId)) as T;
-}
-
-async function searchWithTimeout<T extends SearchResult>(
-  provider: { search(question: string): Promise<T> },
-  question: string,
-  timeoutMs: number
-): Promise<T> {
-  let timedOut = false;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => {
-      timedOut = true;
-      reject(new Error('Search timeout'));
-    }, timeoutMs);
-  });
-
-  try {
-    const result = await Promise.race([
-      provider.search(question),
-      timeoutPromise,
-    ]);
-    return result;
-  } catch {
-    // If timed out, provider will return its own fallback (cache/demo)
-    // Re-call search which will fall through to cache/demo
-    if (timedOut) {
-      return provider.search(question);
-    }
-    // Non-timeout error — still try cache/demo via provider
-    return provider.search(question);
-  }
+/**
+ * Honest retrieval disclosure for the report (#18/#19). The optional
+ * updatedAt/stale fields carry cache timestamps so the UI can show when the
+ * cached data was actually retrieved instead of implying it is current.
+ */
+interface ExtendedSourceState {
+  zhihu: SourceState;
+  web: SourceState;
+  zhihuUpdatedAt?: number;
+  webUpdatedAt?: number;
+  zhihuStale?: boolean;
+  webStale?: boolean;
 }
 
 export async function POST(request: Request) {
@@ -64,19 +35,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Missing question' }, { status: 400 });
   }
 
-  const zhihuProvider = new ZhihuSearchProvider();
-  const webProvider = new WebSearchProvider();
+  // Real retrieval (#19): each provider degrades internally
+  // live → fresh cache → stale cache → demo and never throws. SEARCH_TIMEOUT_MS
+  // is the live-call timeout, so one slow provider cannot stall the report.
+  // Without a configured ZHIHU_ACCESS_SECRET the providers never touch the
+  // network and return the deterministic demo data (same behavior as before #19).
+  const zhihuProvider = createZhihuSearchProvider({ timeoutMs: SEARCH_TIMEOUT_MS });
+  const webProvider = createGlobalSearchProvider({ timeoutMs: SEARCH_TIMEOUT_MS });
   const historyProvider = new HistorySearchProvider();
 
-  // Run searches in parallel with 5s timeout each
   const [zhihuResult, webResult, historyResult] = await Promise.all([
-    searchWithTimeout(zhihuProvider, question, SEARCH_TIMEOUT_MS),
-    searchWithTimeout(webProvider, question, SEARCH_TIMEOUT_MS),
+    zhihuProvider.search(question),
+    webProvider.search(question),
     historyProvider.search(question, excludedHistoryIds as string[]),
   ]);
 
   const zhihuSourceState: SourceState = zhihuResult.source;
   const webSourceState: SourceState = webResult.source;
+
+  const sourceState: ExtendedSourceState = {
+    zhihu: zhihuSourceState,
+    web: webSourceState,
+    zhihuUpdatedAt: zhihuResult.updatedAt,
+    webUpdatedAt: webResult.updatedAt,
+    zhihuStale: zhihuResult.stale === true,
+    webStale: webResult.stale === true,
+  };
 
   // Build the report with progress tracking including source state
   const { report, progress } = await buildReport({
@@ -131,7 +115,7 @@ export async function POST(request: Request) {
     sessionId: session.id,
     report,
     progress: enrichedProgress,
-    sourceState: { zhihu: zhihuSourceState, web: webSourceState },
+    sourceState,
     knowledgeGraph,
   });
 }

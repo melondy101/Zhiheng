@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
-    "test": "npx tsx --test tests/unit/providers.test.ts tests/unit/interrogation-orchestrator.test.ts tests/unit/interrogation-context.test.ts tests/unit/result-card-builder.test.ts tests/integration/interrogate-api.test.ts",
+    "test": "npx tsx --test tests/unit/providers.test.ts tests/unit/zhihu-retrieval.test.ts tests/unit/interrogation-orchestrator.test.ts tests/unit/interrogation-context.test.ts tests/unit/result-card-builder.test.ts tests/integration/interrogate-api.test.ts tests/integration/retrieval-api.test.ts",
     "test:e2e": "playwright test",
     "check": "npm run typecheck && npm run lint && npm run build && npm test && npm run test:e2e"
   },
