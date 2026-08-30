@@ -1,11 +1,68 @@
-// Deterministic search providers for ticket #4.
-// These providers return fixed demonstration data — NOT live search results.
-// They exist to anchor the report pipeline with reproducible citation sources.
+// Search providers with honest degradation: live → cache → demo.
+// Supports simulateFailure flag for testing degradation paths.
 
 import type { Source } from './providers';
+import { getDemoSources } from './demo-sources';
 
 // ---------------------------------------------------------------------------
-// ZhihuSearchProvider — returns 3-5 deterministic Zhihu sources
+// Result wrapper with source tracking
+// ---------------------------------------------------------------------------
+
+export type SearchSourceState = 'live' | 'cache' | 'demo';
+
+export interface SearchResult {
+  sources: Source[];
+  source: SearchSourceState;
+  stale?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Cache helpers (client-side localStorage)
+// ---------------------------------------------------------------------------
+
+const CACHE_PREFIX = 'zhiyan_search_cache_';
+const TTL_MS = 86_400_000; // 24 hours
+
+function cacheKey(question: string): string {
+  return CACHE_PREFIX + hashQuestion(question);
+}
+
+function hashQuestion(question: string): string {
+  let hash = 0;
+  const normalized = question.trim().toLowerCase();
+  for (let i = 0; i < normalized.length; i++) {
+    const char = normalized.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function readCache(question: string): { sources: Source[]; updatedAt: number } | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(cacheKey(question));
+    if (!raw) return null;
+    return JSON.parse(raw) as { sources: Source[]; updatedAt: number };
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(question: string, sources: Source[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(
+      cacheKey(question),
+      JSON.stringify({ sources, updatedAt: Date.now() })
+    );
+  } catch {
+    // quota exceeded — silent
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ZhihuSearchProvider with degradation
 // ---------------------------------------------------------------------------
 
 const ZHIHU_DEMO_SOURCES: Omit<Source, 'id'>[] = [
@@ -39,41 +96,86 @@ const ZHIHU_DEMO_SOURCES: Omit<Source, 'id'>[] = [
   },
 ];
 
+export interface ZhihuSearchProviderOptions {
+  simulateFailure?: boolean;
+}
+
 export class ZhihuSearchProvider {
-  /**
-   * Search Zhihu for sources related to the given question.
-   * Returns a deterministic subset (first 3-5 matches).
-   */
-  async search(question: string): Promise<Source[]> {
+  private simulateFailure: boolean;
+
+  constructor(private options: ZhihuSearchProviderOptions = {}) {
+    this.simulateFailure = options.simulateFailure ?? false;
+  }
+
+  /** Search with degradation: fresh cache → stale cache → live → demo. */
+  async search(question: string): Promise<SearchResult> {
+    // 1. Check fresh cache first
+    const cached = readCache(question);
+    if (cached) {
+      const age = Date.now() - cached.updatedAt;
+      const stale = age > TTL_MS;
+      if (!stale) {
+        return { sources: cached.sources, source: 'cache' };
+      }
+      // Stale cache — trigger background refresh and return stale
+      this.refreshInBackground(question);
+      return { sources: cached.sources, source: 'cache', stale: true };
+    }
+
+    // 2. Try live (if not simulating failure)
+    if (!this.simulateFailure) {
+      try {
+        const sources = await this.fetchLive(question);
+        writeCache(question, sources);
+        return { sources, source: 'live' };
+      } catch {
+        // fall through to demo
+      }
+    }
+
+    // 3. Fall back to demo
+    const demoSources = getDemoSources(question, 'zhihu');
+    return { sources: demoSources, source: 'demo' };
+  }
+
+  /** Simulate live fetch (throws in MVP). */
+  private async fetchLive(question: string): Promise<Source[]> {
     // Simulate network delay (200-400ms)
     const delay = 200 + Math.abs(this.hashCode(question)) % 200;
     await new Promise<void>(resolve => setTimeout(resolve, delay));
 
-    const normalized = question.trim().toLowerCase();
-    // Deterministic "scoring" based on question hash to select 3-5 sources
-    const count = 3 + (Math.abs(this.hashCode(normalized)) % 3); // 3-5
-    const selected = ZHIHU_DEMO_SOURCES.slice(0, count);
+    if (this.simulateFailure) {
+      throw new Error('Simulated live failure');
+    }
 
+    const normalized = question.trim().toLowerCase();
+    const count = 3 + (Math.abs(this.hashCode(normalized)) % 3);
+    const selected = ZHIHU_DEMO_SOURCES.slice(0, count);
     return selected.map((s, i) => ({
       ...s,
       id: `zhihu_${Math.abs(this.hashCode(normalized))}_${i}`,
     }));
   }
 
-  /** Simple deterministic string hash for "search relevance" scoring. */
   private hashCode(str: string): number {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);
       hash = ((hash << 5) - hash) + char;
-      hash |= 0; // Convert to 32bit integer
+      hash |= 0;
     }
     return hash;
+  }
+
+  private refreshInBackground(question: string): void {
+    this.fetchLive(question)
+      .then(sources => writeCache(question, sources))
+      .catch(() => { /* silent — stale data still shown */ });
   }
 }
 
 // ---------------------------------------------------------------------------
-// WebSearchProvider — returns 2-3 deterministic web sources
+// WebSearchProvider with degradation
 // ---------------------------------------------------------------------------
 
 const WEB_DEMO_SOURCES: Omit<Source, 'id'>[] = [
@@ -100,20 +202,59 @@ const WEB_DEMO_SOURCES: Omit<Source, 'id'>[] = [
   },
 ];
 
+export interface WebSearchProviderOptions {
+  simulateFailure?: boolean;
+}
+
 export class WebSearchProvider {
-  /**
-   * Search the web for sources related to the given question.
-   * Returns a deterministic subset (2-3 matches).
-   */
-  async search(question: string): Promise<Source[]> {
-    // Simulate network delay (300-500ms)
+  private simulateFailure: boolean;
+
+  constructor(private options: WebSearchProviderOptions = {}) {
+    this.simulateFailure = options.simulateFailure ?? false;
+  }
+
+  /** Search with degradation: fresh cache → stale cache → live → demo. */
+  async search(question: string): Promise<SearchResult> {
+    // 1. Check fresh cache first
+    const cached = readCache(question);
+    if (cached) {
+      const age = Date.now() - cached.updatedAt;
+      const stale = age > TTL_MS;
+      if (!stale) {
+        return { sources: cached.sources, source: 'cache' };
+      }
+      // Stale cache — trigger background refresh and return stale
+      this.refreshInBackground(question);
+      return { sources: cached.sources, source: 'cache', stale: true };
+    }
+
+    // 2. Try live (if not simulating failure)
+    if (!this.simulateFailure) {
+      try {
+        const sources = await this.fetchLive(question);
+        writeCache(question, sources);
+        return { sources, source: 'live' };
+      } catch {
+        // fall through to demo
+      }
+    }
+
+    // 3. Fall back to demo
+    const demoSources = getDemoSources(question, 'web');
+    return { sources: demoSources, source: 'demo' };
+  }
+
+  private async fetchLive(question: string): Promise<Source[]> {
     const delay = 300 + Math.abs(this.hashCode(question)) % 200;
     await new Promise<void>(resolve => setTimeout(resolve, delay));
 
-    const normalized = question.trim().toLowerCase();
-    const count = 2 + (Math.abs(this.hashCode(normalized + '_web')) % 2); // 2-3
-    const selected = WEB_DEMO_SOURCES.slice(0, count);
+    if (this.simulateFailure) {
+      throw new Error('Simulated live failure');
+    }
 
+    const normalized = question.trim().toLowerCase();
+    const count = 2 + (Math.abs(this.hashCode(normalized + '_web')) % 2);
+    const selected = WEB_DEMO_SOURCES.slice(0, count);
     return selected.map((s, i) => ({
       ...s,
       id: `web_${Math.abs(this.hashCode(normalized + '_web'))}_${i}`,
@@ -128,5 +269,11 @@ export class WebSearchProvider {
       hash |= 0;
     }
     return hash;
+  }
+
+  private refreshInBackground(question: string): void {
+    this.fetchLive(question)
+      .then(sources => writeCache(question, sources))
+      .catch(() => { /* silent */ });
   }
 }

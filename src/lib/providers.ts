@@ -51,10 +51,14 @@ export type ReportProgressStage =
   | 'building_graph'
   | 'complete';
 
+export type SourceState = 'live' | 'cache' | 'demo';
+
 export interface ReportProgress {
   stage: ReportProgressStage;
   message: string;
   timestamp: number;
+  zhihuSourceState?: SourceState;
+  webSourceState?: SourceState;
 }
 
 export interface Session {

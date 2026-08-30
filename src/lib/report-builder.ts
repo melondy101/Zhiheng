@@ -2,12 +2,14 @@
 // Deterministic: same inputs always produce the same output.
 // No fabricated fields: missing author/title/url/excerpt stay null.
 
-import type { Report, ReportProgress, Source } from './providers';
+import type { Report, ReportProgress, Source, SourceState } from './providers';
 
 export interface ReportBuilderOptions {
   question: string;
   zhihuSources: Source[];
   webSources: Source[];
+  zhihuSourceState?: SourceState;
+  webSourceState?: SourceState;
   onProgress?: (progress: ReportProgress) => void;
 }
 
@@ -17,9 +19,15 @@ export interface ReportBuildResult {
 }
 
 const emit =
-  (cb?: (p: ReportProgress) => void) =>
+  (cb?: (p: ReportProgress) => void, opts?: Pick<ReportBuilderOptions, 'zhihuSourceState' | 'webSourceState'>) =>
   (stage: ReportProgress['stage'], message: string): ReportProgress => {
-    const evt: ReportProgress = { stage, message, timestamp: Date.now() };
+    const evt: ReportProgress = {
+      stage,
+      message,
+      timestamp: Date.now(),
+      zhihuSourceState: opts?.zhihuSourceState,
+      webSourceState: opts?.webSourceState,
+    };
     cb?.(evt);
     return evt;
   };
@@ -202,10 +210,13 @@ function buildViewpoints(allSources: Source[]): string[] {
  */
 export async function buildReport(options: ReportBuilderOptions): Promise<ReportBuildResult> {
   const progressLog: ReportProgress[] = [];
-  const progress = emit((evt) => {
-    progressLog.push(evt);
-    options.onProgress?.(evt);
-  });
+  const progress = emit(
+    (evt) => {
+      progressLog.push(evt);
+      options.onProgress?.(evt);
+    },
+    { zhihuSourceState: options.zhihuSourceState, webSourceState: options.webSourceState }
+  );
 
   // Stage 1: Zhihu search (handled by caller — we receive pre-fetched sources)
   const p1 = progress('zhihu_search', `正在检索知乎内容（${options.zhihuSources.length} 条结果）`);

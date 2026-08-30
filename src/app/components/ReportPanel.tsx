@@ -1,10 +1,26 @@
 'use client';
 
-import type { Report as ReportType, Source } from '@/lib/providers';
+import type { Report as ReportType, Source, SourceState } from '@/lib/providers';
 
 interface ReportPanelProps {
   report: ReportType;
+  zhihuSourceState?: SourceState;
+  webSourceState?: SourceState;
+  degraded?: boolean;
+  degradationMessage?: string;
 }
+
+const SOURCE_STATE_LABELS: Record<SourceState, string> = {
+  live: '实时检索',
+  cache: '缓存',
+  demo: '演示数据',
+};
+
+const SOURCE_STATE_COLORS: Record<SourceState, { bg: string; text: string; dot: string }> = {
+  live: { bg: 'bg-green-100', text: 'text-green-700', dot: 'bg-green-500' },
+  cache: { bg: 'bg-yellow-100', text: 'text-yellow-700', dot: 'bg-yellow-500' },
+  demo: { bg: 'bg-gray-100', text: 'text-gray-600', dot: 'bg-gray-400' },
+};
 
 /** Group sources by type for display. */
 function groupByType(sources: Source[]): Record<string, Source[]> {
@@ -27,11 +43,48 @@ const TYPE_LABELS: Record<string, string> = {
   ai_synthesis: 'AI 综合归纳',
 };
 
-export default function ReportPanel({ report }: ReportPanelProps) {
+export default function ReportPanel({
+  report,
+  zhihuSourceState,
+  webSourceState,
+  degraded,
+  degradationMessage,
+}: ReportPanelProps) {
   const grouped = groupByType(report.references);
+
+  // Determine overall worst-case source state for badge display
+  const overallState: SourceState | null =
+    webSourceState === 'demo' || zhihuSourceState === 'demo'
+      ? 'demo'
+      : webSourceState === 'cache' || zhihuSourceState === 'cache'
+      ? 'cache'
+      : webSourceState === 'live' || zhihuSourceState === 'live'
+      ? 'live'
+      : null;
 
   return (
     <div className="flex-1 overflow-y-auto p-6 border-r">
+      {/* Source state badge */}
+      {overallState && (
+        <div className="mb-4">
+          <span
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${SOURCE_STATE_COLORS[overallState].bg} ${SOURCE_STATE_COLORS[overallState].text}`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${SOURCE_STATE_COLORS[overallState].dot}`}
+            />
+            {SOURCE_STATE_LABELS[overallState]}
+          </span>
+        </div>
+      )}
+
+      {/* Degradation warning */}
+      {degraded && degradationMessage && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-xs">
+          {degradationMessage}
+        </div>
+      )}
+
       <h2 className="text-2xl font-bold mb-6">{report.title}</h2>
 
       {report.knowledgePoints.length > 0 && (
