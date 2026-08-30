@@ -8,6 +8,12 @@ interface ReportPanelProps {
   webSourceState?: SourceState;
   degraded?: boolean;
   degradationMessage?: string;
+  /** Current session ID for history source management */
+  sessionId?: string;
+  /** IDs of history sources excluded by the user */
+  excludedHistoryIds?: string[];
+  /** Called when user toggles a history source checkbox */
+  onHistorySourceToggle?: (sourceSessionId: string, excluded: boolean) => void;
 }
 
 const SOURCE_STATE_LABELS: Record<SourceState, string> = {
@@ -28,6 +34,7 @@ function groupByType(sources: Source[]): Record<string, Source[]> {
     zhihu: [],
     web: [],
     ai_synthesis: [],
+    personal_history: [],
   };
   for (const s of sources) {
     if (groups[s.type]) {
@@ -41,6 +48,7 @@ const TYPE_LABELS: Record<string, string> = {
   zhihu: '知乎来源',
   web: '外部资料',
   ai_synthesis: 'AI 综合归纳',
+  personal_history: '个人历史报告',
 };
 
 export default function ReportPanel({
@@ -49,8 +57,11 @@ export default function ReportPanel({
   webSourceState,
   degraded,
   degradationMessage,
+  excludedHistoryIds = [],
+  onHistorySourceToggle,
 }: ReportPanelProps) {
   const grouped = groupByType(report.references);
+  const excludedSet = new Set(excludedHistoryIds);
 
   // Determine overall worst-case source state for badge display
   const overallState: SourceState | null =
@@ -159,10 +170,13 @@ export default function ReportPanel({
                 <div className="space-y-3">
                   {sources.map((src) => {
                     const globalIndex = report.references.indexOf(src) + 1;
+                    const isHistory = src.type === 'personal_history';
+                    const isExcluded = isHistory && src.sourceSessionId ? excludedSet.has(src.sourceSessionId) : false;
+
                     return (
                       <div
                         key={src.id}
-                        className="border rounded-md p-3 text-sm bg-gray-50"
+                        className={`border rounded-md p-3 text-sm bg-gray-50 ${isExcluded ? 'opacity-50' : ''}`}
                       >
                         <div className="flex items-start gap-2">
                           <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0 mt-0.5">
@@ -191,6 +205,10 @@ export default function ReportPanel({
                                   {src.url}
                                 </a>
                               </div>
+                            ) : isHistory ? (
+                              <div className="text-gray-400 text-xs mt-1">
+                                {isExcluded ? '来源链接：未选择' : `来源链接：个人历史报告（${src.provenance ?? '个人上下文'}）`}
+                              </div>
                             ) : (
                               <div className="text-gray-400 text-xs mt-1">
                                 来源链接：未知
@@ -200,6 +218,23 @@ export default function ReportPanel({
                               <p className="text-gray-600 text-xs mt-1 italic">
                                 {src.excerpt}
                               </p>
+                            )}
+                            {isHistory && onHistorySourceToggle && src.sourceSessionId && (
+                              <div className="mt-2 flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  id={`history-toggle-${src.sourceSessionId}`}
+                                  checked={!isExcluded}
+                                  onChange={(e) => onHistorySourceToggle(src.sourceSessionId!, e.target.checked)}
+                                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <label
+                                  htmlFor={`history-toggle-${src.sourceSessionId}`}
+                                  className="text-xs text-gray-600 cursor-pointer"
+                                >
+                                  {isExcluded ? '未选择' : '已选择'}（点击{isExcluded ? '重新选择' : '取消选择'}）
+                                </label>
+                              </div>
                             )}
                           </div>
                         </div>

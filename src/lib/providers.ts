@@ -35,11 +35,15 @@ export interface Report {
 // Null ≠ fabricated — missing fields are left blank, never invented.
 export interface Source {
   id: string;
-  type: 'zhihu' | 'web' | 'ai_synthesis';
+  type: 'zhihu' | 'web' | 'ai_synthesis' | 'personal_history';
   author: string | null;
   title: string | null;
   url: string | null;
   excerpt: string | null;
+  /** Present when type=personal_history */
+  sourceSessionId?: string;
+  /** Present when type=personal_history */
+  provenance?: string;
 }
 
 // Progress event emitted by a RetrievalProvider while building a report.
@@ -72,6 +76,8 @@ export interface Session {
   completed: boolean;
   createdAt: number;
   updatedAt: number;
+  /** Session IDs to exclude from history search results */
+  excludedHistoryIds?: string[];
 }
 
 export interface ResultCard {

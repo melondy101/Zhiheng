@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { serverStorage } from '@/lib/server-providers';
 import type { Session, ReportProgress, SourceState } from '@/lib/providers';
 import { ZhihuSearchProvider, WebSearchProvider, SearchResult } from '@/lib/search-providers';
+import { HistorySearchProvider } from '@/lib/history-search';
 import { buildReport } from '@/lib/report-builder';
 
 export const runtime = 'nodejs';
@@ -57,18 +58,20 @@ async function searchWithTimeout<T extends SearchResult>(
 }
 
 export async function POST(request: Request) {
-  const { question } = await request.json();
+  const { question, excludedHistoryIds = [] } = await request.json();
   if (!question) {
     return NextResponse.json({ error: 'Missing question' }, { status: 400 });
   }
 
   const zhihuProvider = new ZhihuSearchProvider();
   const webProvider = new WebSearchProvider();
+  const historyProvider = new HistorySearchProvider();
 
   // Run searches in parallel with 5s timeout each
-  const [zhihuResult, webResult] = await Promise.all([
+  const [zhihuResult, webResult, historyResult] = await Promise.all([
     searchWithTimeout(zhihuProvider, question, SEARCH_TIMEOUT_MS),
     searchWithTimeout(webProvider, question, SEARCH_TIMEOUT_MS),
+    historyProvider.search(question, excludedHistoryIds as string[]),
   ]);
 
   const zhihuSourceState: SourceState = zhihuResult.source;
@@ -79,6 +82,7 @@ export async function POST(request: Request) {
     question,
     zhihuSources: zhihuResult.sources,
     webSources: webResult.sources,
+    historySources: historyResult.sources,
     zhihuSourceState,
     webSourceState,
   });
@@ -94,6 +98,7 @@ export async function POST(request: Request) {
     completed: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    excludedHistoryIds: excludedHistoryIds as string[],
   };
 
   await serverStorage.saveSession(session);

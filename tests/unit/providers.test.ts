@@ -17,6 +17,7 @@ import {
   ZhihuSearchProvider,
   WebSearchProvider,
 } from '../../src/lib/search-providers';
+import { HistorySearchProvider } from '../../src/lib/history-search';
 import { getDemoSources } from '../../src/lib/demo-sources';
 import { buildReport } from '../../src/lib/report-builder';
 import { FIXTURE_QUESTION, type Session, type Source } from '../../src/lib/providers';
@@ -669,8 +670,161 @@ describe('ReportBuilder', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Helper
+// HistorySearchProvider contract (#6)
 // ---------------------------------------------------------------------------
+
+describe('HistorySearchProvider', () => {
+  // Set up isolated localStorage for each test
+  function makeHistoryProvider(): { provider: HistorySearchProvider; store: Store } {
+    const store: Store = {};
+    const isolatedLS = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v; },
+      removeItem: (k: string) => { delete store[k]; },
+      clear: () => { Object.keys(store).forEach(k => delete store[k]); },
+      get length() { return Object.keys(store).length; },
+      key: (i: number) => Object.keys(store)[i] ?? null,
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).localStorage = isolatedLS;
+    return { provider: new HistorySearchProvider(), store };
+  }
+
+  function makeSession(overrides: Partial<{
+    id: string;
+    question: string;
+    initialOpinion: string | null;
+    messages: { id: string; role: 'user' | 'assistant'; text: string; timestamp: number }[];
+    completed: boolean;
+    updatedAt: number;
+  }> = {}): Session {
+    return {
+      id: 's1',
+      question: 'AI 如何看待程序员',
+      initialOpinion: null,
+      report: null,
+      selectedViewpoint: null,
+      messages: [],
+      resultCard: null,
+      completed: true,
+      createdAt: 0,
+      updatedAt: 100,
+      excludedHistoryIds: [],
+      ...overrides,
+    };
+  }
+
+  it('returns matching completed sessions', async () => {
+    const { provider, store } = makeHistoryProvider();
+    const session = makeSession({ id: 'match_1', question: 'AI 程序员 未来', completed: true });
+    store['zhiyan_sessions:match_1'] = JSON.stringify(session);
+
+    const result = await provider.search('AI 程序员');
+    assert.strictEqual(result.sources.length, 1);
+    assert.strictEqual(result.sources[0]!.type, 'personal_history');
+    assert.strictEqual(result.sources[0]!.sourceSessionId, 'match_1');
+  });
+
+  it('returns no more than 3 results', async () => {
+    const { provider, store } = makeHistoryProvider();
+    for (let i = 0; i < 5; i++) {
+      const session = makeSession({
+        id: `many_${i}`,
+        question: 'AI 程序员 测试',
+        completed: true,
+        updatedAt: i,
+      });
+      store[`zhiyan_sessions:many_${i}`] = JSON.stringify(session);
+    }
+
+    const result = await provider.search('AI 程序员');
+    assert.ok(result.sources.length <= 3, `expected <= 3, got ${result.sources.length}`);
+  });
+
+  it('excludes sessions by ID', async () => {
+    const { provider, store } = makeHistoryProvider();
+    const session = makeSession({ id: 'exclude_me', question: 'AI 程序员 未来', completed: true });
+    store['zhiyan_sessions:exclude_me'] = JSON.stringify(session);
+
+    const result = await provider.search('AI 程序员', ['exclude_me']);
+    assert.strictEqual(result.sources.length, 0);
+  });
+
+  it('sources have type=personal_history and sourceSessionId', async () => {
+    const { provider, store } = makeHistoryProvider();
+    const session = makeSession({ id: 'src_check', question: '测试 问题', completed: true });
+    store['zhiyan_sessions:src_check'] = JSON.stringify(session);
+
+    const result = await provider.search('测试');
+    assert.strictEqual(result.sources.length, 1);
+    const src = result.sources[0]!;
+    assert.strictEqual(src.type, 'personal_history');
+    assert.strictEqual(src.sourceSessionId, 'src_check');
+    assert.ok(src.provenance);
+  });
+
+  it('returns empty when no sessions match', async () => {
+    const { provider, store } = makeHistoryProvider();
+    const session = makeSession({ id: 'nomatch', question: '完全不相关的问题', completed: true });
+    store['zhiyan_sessions:nomatch'] = JSON.stringify(session);
+
+    const result = await provider.search('AI 程序员');
+    assert.strictEqual(result.sources.length, 0);
+  });
+
+  it('skips incomplete sessions', async () => {
+    const { provider, store } = makeHistoryProvider();
+    const session = makeSession({ id: 'incomplete', question: 'AI 程序员', completed: false });
+    store['zhiyan_sessions:incomplete'] = JSON.stringify(session);
+
+    const result = await provider.search('AI 程序员');
+    assert.strictEqual(result.sources.length, 0);
+  });
+
+  it('uses initialOpinion as excerpt when present', async () => {
+    const { provider, store } = makeHistoryProvider();
+    const session = makeSession({
+      id: 'with_opinion',
+      question: 'AI 程序员',
+      initialOpinion: '这是我的个人观点',
+      completed: true,
+    });
+    store['zhiyan_sessions:with_opinion'] = JSON.stringify(session);
+
+    const result = await provider.search('AI 程序员');
+    assert.strictEqual(result.sources.length, 1);
+    assert.strictEqual(result.sources[0]!.excerpt, '这是我的个人观点');
+  });
+
+  it('uses first user message as excerpt when no initialOpinion', async () => {
+    const { provider, store } = makeHistoryProvider();
+    const session = makeSession({
+      id: 'with_message',
+      question: 'AI 程序员',
+      initialOpinion: null,
+      messages: [{ id: 'm1', role: 'user', text: '用户的第一条消息', timestamp: 0 }],
+      completed: true,
+    });
+    store['zhiyan_sessions:with_message'] = JSON.stringify(session);
+
+    const result = await provider.search('AI 程序员');
+    assert.strictEqual(result.sources.length, 1);
+    assert.strictEqual(result.sources[0]!.excerpt, '用户的第一条消息');
+  });
+
+  it('returns sources sorted by updatedAt desc', async () => {
+    const { provider, store } = makeHistoryProvider();
+    const oldSession = makeSession({ id: 'old_s', question: 'AI 程序员', completed: true, updatedAt: 100 });
+    const newSession = makeSession({ id: 'new_s', question: 'AI 程序员', completed: true, updatedAt: 200 });
+    store['zhiyan_sessions:old_s'] = JSON.stringify(oldSession);
+    store['zhiyan_sessions:new_s'] = JSON.stringify(newSession);
+
+    const result = await provider.search('AI 程序员');
+    assert.strictEqual(result.sources.length, 2);
+    assert.strictEqual(result.sources[0]!.sourceSessionId, 'new_s');
+    assert.strictEqual(result.sources[1]!.sourceSessionId, 'old_s');
+  });
+});
 function hashQuestion(question: string): string {
   let hash = 0;
   const normalized = question.trim().toLowerCase();
