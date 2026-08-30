@@ -5,7 +5,8 @@ import { useState } from 'react';
 interface HotlistItem {
   id: string;
   title: string;
-  url: string;
+  /** Null when the provider record carried no URL — never fabricated (#19). */
+  url: string | null;
 }
 
 interface HotlistResult {

@@ -99,8 +99,9 @@ describe('ZhihuSearchProvider', () => {
     assert.deepStrictEqual(a.sources, b.sources);
   });
 
-  // Ticket #18 honesty contract: no external retrieval is wired in this MVP,
-  // so hardcoded fixture content must never be reported as 'live'.
+  // Honesty contract (#18, restated for #19): this fixture-only provider path
+  // has no real retrieval, so its hardcoded fixture content must never be
+  // reported as 'live' — only the real providers in zhihu-retrieval.ts may.
   it('reports demo on the first uncached call — fixture content is never labeled live', async () => {
     setupSearchProviderStorage();
     const provider = new ZhihuSearchProvider();
@@ -214,8 +215,9 @@ describe('WebSearchProvider', () => {
     assert.deepStrictEqual(a.sources, b.sources);
   });
 
-  // Ticket #18 honesty contract: no external retrieval is wired in this MVP,
-  // so hardcoded fixture content must never be reported as 'live'.
+  // Ticket #18 honesty contract: this fixture-only provider path must never
+  // report its hardcoded fixture content as 'live' (#19: only the real
+  // providers in zhihu-retrieval.ts may emit 'live').
   it('reports demo on the first uncached call — fixture content is never labeled live', async () => {
     setupSearchProviderStorage();
     const provider = new WebSearchProvider();
