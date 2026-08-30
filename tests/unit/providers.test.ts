@@ -961,3 +961,71 @@ describe('buildStructuredViewpoints', () => {
     });
   });
 });
+
+// ---- Ticket #9: Strategy engine ----
+import { pickNextStrategy, isCheckpointRound, STRATEGIES, planNextRound } from '../../src/lib/strategy-engine';
+
+const makeSession = (userCount: number, _strategyHistory: string[] = []): Session => {
+  const messages: Message[] = [];
+  for (let i = 0; i < userCount; i++) {
+    messages.push({ id: `u${i}`, role: 'user', text: `ans ${i}`, timestamp: i });
+    messages.push({ id: `a${i}`, role: 'assistant', text: `q ${i}`, timestamp: i });
+  }
+  return {
+    id: 's', question: 'test', initialOpinion: null, report: null,
+    selectedViewpoint: null, messages, resultCard: null,
+    completed: false, createdAt: 0, updatedAt: 0,
+  } as Session;
+};
+
+describe('pickNextStrategy', () => {
+  it('round 1: M1 evidence', () => {
+    assert.strictEqual(pickNextStrategy(makeSession(0)), 'M1_evidence');
+  });
+  it('round 2: M2 premise', () => {
+    assert.strictEqual(pickNextStrategy(makeSession(1)), 'M2_premise');
+  });
+  it('round 3: M4 steelman', () => {
+    assert.strictEqual(pickNextStrategy(makeSession(2)), 'M4_steelman');
+  });
+  it('round 4: M6 reversal', () => {
+    assert.strictEqual(pickNextStrategy(makeSession(3)), 'M6_reversal');
+  });
+  it('round 5: M5 restate', () => {
+    assert.strictEqual(pickNextStrategy(makeSession(4)), 'M5_restate');
+  });
+  it('round 6+: rotates without immediate repeat', () => {
+    const s = makeSession(5, ['M1', 'M2', 'M4', 'M6', 'M5']);
+    const next = pickNextStrategy(s);
+    assert.ok(['M1_evidence', 'M2_premise', 'M4_steelman', 'M6_reversal'].includes(next));
+  });
+});
+
+describe('isCheckpointRound', () => {
+  it('returns true for round 5', () => assert.strictEqual(isCheckpointRound(5), true));
+  it('returns true for round 8', () => assert.strictEqual(isCheckpointRound(8), true));
+  it('returns true for round 11', () => assert.strictEqual(isCheckpointRound(11), true));
+  it('returns false for round 6', () => assert.strictEqual(isCheckpointRound(6), false));
+  it('returns false for round 7', () => assert.strictEqual(isCheckpointRound(7), false));
+});
+
+describe('planNextRound', () => {
+  it('uses fallback template when generator returns empty', async () => {
+    const result = await planNextRound(makeSession(0), async () => '');
+    assert.strictEqual(result.strategy, 'M1_evidence');
+    assert.ok(result.question.length > 0);
+    assert.strictEqual(result.isCheckpoint, false);
+  });
+  it('returns checkpoint=true at round 5', async () => {
+    const result = await planNextRound(makeSession(4), async () => 'Q');
+    assert.strictEqual(result.round, 5);
+    assert.strictEqual(result.isCheckpoint, true);
+  });
+  it('each strategy has a non-empty fallback template', () => {
+    const session = makeSession(0);
+    for (const id of Object.keys(STRATEGIES) as Array<keyof typeof STRATEGIES>) {
+      const tmpl = STRATEGIES[id].fallbackTemplate(session);
+      assert.ok(tmpl.length > 0, `${id} has empty fallback`);
+    }
+  });
+});

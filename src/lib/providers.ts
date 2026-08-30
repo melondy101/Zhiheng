@@ -114,6 +114,11 @@ export interface RetrievalProvider {
 
 export interface LLMProvider {
   generateQuestion(session: Session): Promise<string>;
+  /** Strategy-aware question generation (ticket #9). */
+  generateStrategyQuestion(
+    strategy: import('./strategy-engine').StrategyId,
+    session: Session
+  ): Promise<string>;
 }
 
 export interface StorageProvider {

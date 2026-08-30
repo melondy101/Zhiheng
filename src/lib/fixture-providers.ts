@@ -39,6 +39,23 @@ export class FixtureLLMProvider implements LLMProvider {
   async generateQuestion(_session: Session): Promise<string> {
     return FIXTURE_QUESTION;
   }
+
+  async generateStrategyQuestion(
+    _strategy: import('./strategy-engine').StrategyId,
+    session: Session
+  ): Promise<string> {
+    // Fixture: round-based deterministic question matching strategy-engine plan
+    const userCount = session.messages.filter((m) => m.role === 'user').length;
+    const next = userCount + 1;
+    const questions: Record<number, string> = {
+      1: '你能给出一个具体的数据或例子来支持你目前的观点吗？',
+      2: '你的观点背后，是否有一个隐含的前提？如果该前提不成立，结论会改变吗？',
+      3: '请尝试用最强的一种对立观点重新论证。哪种反驳最难回应？',
+      4: '如果你必须为相反的立场辩护，你最有力的论据是什么？',
+      5: '基于以上讨论，请用一两句话重新表述你当前的观点。',
+    };
+    return questions[next] ?? `第 ${next} 轮：请进一步阐述你的观点。`;
+  }
 }
 
 export class AnonymousIdentityProvider implements IdentityProvider {

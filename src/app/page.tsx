@@ -24,6 +24,9 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedViewpoint, setSelectedViewpoint] = useState<Viewpoint | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
+  const [currentStrategy, setCurrentStrategy] = useState<import('@/lib/strategy-engine').StrategyId | null>(null);
+  const [isCheckpoint, setIsCheckpoint] = useState(false);
+  const [currentRound, setCurrentRound] = useState(0);
   const [completed, setCompleted] = useState(false);
   const [resultCard, setResultCard] = useState<ResultCard | null>(null);
   const [answer, setAnswer] = useState('');
@@ -145,8 +148,16 @@ export default function Home() {
   };
 
   const generateQuestion = async (sess: Session) => {
-    const question = await llmProvider.generateQuestion(sess);
-    setCurrentQuestion(question);
+    // Use strategy-aware question generation (ticket #9)
+    const { planNextRound, recordStrategy } = await import('@/lib/strategy-engine');
+    const result = await planNextRound(sess, (strategy, s) =>
+      llmProvider.generateStrategyQuestion(strategy, s)
+    );
+    recordStrategy(sess, result.strategy);
+    setCurrentQuestion(result.question);
+    setCurrentStrategy(result.strategy);
+    setIsCheckpoint(result.isCheckpoint);
+    setCurrentRound(result.round);
   };
 
   const handleSendAnswer = async (e: React.FormEvent) => {
@@ -168,10 +179,27 @@ export default function Home() {
     const updatedSession: Session = { ...session, messages: updatedMessages };
     setSession(updatedSession);
 
-    // After one user answer, complete the session
+    // MVP: complete after first user answer to keep demo flow short
     const card: ResultCard = await renderingProvider.renderResultCard(buildResultCard(updatedSession));
     const completedSession: Session = {
       ...updatedSession,
+      completed: true,
+      resultCard: card,
+      updatedAt: Date.now(),
+    };
+    await storageProvider.saveSession(completedSession);
+    setResultCard(card);
+    setCompleted(true);
+    setCurrentQuestion(null);
+    setSession(completedSession);
+  };
+
+  // User-triggered exit at any round
+  const handleCompleteNow = async () => {
+    if (!session) return;
+    const card: ResultCard = await renderingProvider.renderResultCard(buildResultCard(session));
+    const completedSession: Session = {
+      ...session,
       completed: true,
       resultCard: card,
       updatedAt: Date.now(),
@@ -239,9 +267,13 @@ export default function Home() {
             <QAPanel
               messages={messages}
               currentQuestion={currentQuestion}
+              currentStrategy={currentStrategy}
+              currentRound={currentRound}
+              isCheckpoint={isCheckpoint}
               answer={answer}
               onAnswerChange={setAnswer}
               onSubmit={handleSendAnswer}
+              onExit={handleCompleteNow}
               messagesEndRef={messagesEndRef}
             />
           )}
