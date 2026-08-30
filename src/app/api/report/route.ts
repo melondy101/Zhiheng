@@ -59,7 +59,7 @@ async function searchWithTimeout<T extends SearchResult>(
 }
 
 export async function POST(request: Request) {
-  const { question, excludedHistoryIds = [] } = await request.json();
+  const { question, initialOpinion, excludedHistoryIds = [] } = await request.json();
   if (!question) {
     return NextResponse.json({ error: 'Missing question' }, { status: 400 });
   }
@@ -97,11 +97,18 @@ export async function POST(request: Request) {
     knowledgeGraph = null;
   }
 
+  // Ticket #15: persist the full initial session state (including the user's
+  // initial opinion and the knowledge graph) so the interrogation API returns
+  // a complete session the client can mirror losslessly.
   const session: Session = {
     id: `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     question,
-    initialOpinion: null,
+    initialOpinion:
+      typeof initialOpinion === 'string' && initialOpinion.trim().length > 0
+        ? initialOpinion.trim()
+        : null,
     report,
+    knowledgeGraph,
     selectedViewpoint: null,
     messages: [],
     resultCard: null,
