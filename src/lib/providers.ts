@@ -178,6 +178,13 @@ export interface InterrogateResponseBody {
   completed: boolean;
   /** The full updated session; the client mirrors it into local storage. */
   session: Session;
+  /**
+   * Server storage disclosure (#21): 'memory' = no DATABASE_URL configured
+   * (process-lifetime storage), 'postgres' = persisted in Neon PostgreSQL,
+   * 'unavailable' = the configured database could not be reached and nothing
+   * was persisted remotely — the client must rely on its local mirror.
+   */
+  storage?: 'memory' | 'postgres' | 'unavailable';
 }
 
 export interface ResultCard {

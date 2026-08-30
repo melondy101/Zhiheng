@@ -13,6 +13,9 @@ import { POST as reportPOST } from '../../src/app/api/report/route';
 import { GET as hotlistGET } from '../../src/app/api/hotlist/route';
 import type { Report, SourceState } from '../../src/lib/providers';
 
+// #21: the anonymous owner header the report route now requires.
+const TEST_OWNER = 'test-owner-retrieval';
+
 interface ReportResponseBody {
   sessionId: string;
   report: Report;
@@ -39,7 +42,7 @@ describe('POST /api/report without a configured secret (#19 no-key equivalence)'
   it('returns a demo-sourced report with honest source state and a graph', async () => {
     const request = new Request('http://localhost:3000/api/report', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-zhiyan-owner': TEST_OWNER },
       body: JSON.stringify({ question: '集成测试问题：AI 会取代程序员吗？', initialOpinion: '' }),
     });
     const response = await reportPOST(request);
@@ -71,7 +74,7 @@ describe('POST /api/report without a configured secret (#19 no-key equivalence)'
   it('rejects a request without a question', async () => {
     const request = new Request('http://localhost:3000/api/report', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-zhiyan-owner': TEST_OWNER },
       body: JSON.stringify({}),
     });
     const response = await reportPOST(request);

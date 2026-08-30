@@ -37,6 +37,8 @@ export default defineConfig({
       LLM_API_KEY: 'test-key',
       LLM_MODEL: 'test-model',
       LLM_BASE_URL: 'http://127.0.0.1:9',
+      // #21: E2E 恒走进程内存储路径，绝不连接真实 Neon 数据库。
+      DATABASE_URL: '',
     },
   },
 });

@@ -83,9 +83,15 @@ export function saveProfile(profile: UserProfile): void {
   }
 }
 
+/**
+ * Delete the profile's conclusions while keeping the deletion tombstone
+ * (#21): a removed profile must never be auto-rebuilt from old evidence, so
+ * the stored record keeps `deletedAt` set instead of disappearing entirely.
+ * Reports and sessions are not touched.
+ */
 export function deleteProfile(): void {
   try {
-    localStorage.removeItem(PROFILE_KEY);
+    saveProfile({ conclusions: [], updatedAt: Date.now(), deletedAt: Date.now() });
   } catch {
     // ignore
   }

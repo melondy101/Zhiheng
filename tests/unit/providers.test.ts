@@ -1275,7 +1275,7 @@ describe('updateProfile', () => {
 });
 
 describe('profile localStorage', () => {
-  it('saves and loads profile', () => {
+  it('saves and loads profile; delete keeps a tombstone so old evidence cannot rebuild it (#21)', () => {
     const store: Record<string, string> = {};
     Object.defineProperty(globalThis, 'localStorage', { value: {
       getItem: (k: string) => store[k] ?? null,
@@ -1290,8 +1290,19 @@ describe('profile localStorage', () => {
     const loaded = loadProfile();
     assert.ok(loaded);
     assert.strictEqual(loaded!.deletedAt, null);
+
+    // #21: deletion is a tombstone, NOT a removal — the conclusions are
+    // emptied and deletedAt is set, so updateProfile must refuse to
+    // auto-rebuild the profile from old evidence.
     deleteProfile();
-    assert.strictEqual(loadProfile(), null);
+    const afterDelete = loadProfile();
+    assert.ok(afterDelete, 'the tombstone record must survive deletion');
+    assert.strictEqual(afterDelete!.conclusions.length, 0, 'conclusions are deleted');
+    assert.strictEqual(typeof afterDelete!.deletedAt, 'number');
+    const rebuildAttempt = updateProfile(afterDelete, [
+      { field: 'interest', value: 'AI', confidence: 0.9, sourceSessionId: 's1', sourceMessageId: null, updatedAt: 2 },
+    ]);
+    assert.strictEqual(rebuildAttempt.conclusions.length, 0, 'must not auto-rebuild after delete');
   });
 });
 

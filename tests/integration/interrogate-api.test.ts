@@ -1,11 +1,13 @@
 // Ticket #15: API integration tests for the single interrogation orchestration
 // endpoint. The route handler is exercised directly with real Request objects
-// against the real serverStorage singleton, so every assertion below covers
-// orchestration + persistence exactly as the Next.js route runs it.
-import { describe, it } from 'node:test';
+// against the real ownership-scoped server storage (#21: requests carry the
+// x-zhiyan-owner header and seeding goes through the same owner scope), so
+// every assertion below covers orchestration + persistence exactly as the
+// Next.js route runs it.
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert';
 import { POST } from '../../src/app/api/interrogate/route';
-import { serverStorage } from '../../src/lib/server-providers';
+import { getServerStorage, type OwnerStorageScope } from '../../src/lib/server-storage';
 import { STRATEGIES } from '../../src/lib/strategy-engine';
 import type {
   InterrogateResponseBody,
@@ -22,6 +24,16 @@ const VIEWPOINT: Viewpoint = {
 };
 
 const ANSWER_ROUND = (round: number) => `第 ${round} 轮的实质性回答，包含具体数据与例子。`;
+
+// #21: the anonymous owner the requests and the seeding share. The value
+// must satisfy the server-side owner id validation.
+const TEST_OWNER = 'test-owner-interrogate';
+let scope: OwnerStorageScope;
+
+before(async () => {
+  const manager = await getServerStorage();
+  scope = manager.forOwner(TEST_OWNER);
+});
 
 let sessionCounter = 0;
 
@@ -51,7 +63,7 @@ interface HttpResult {
 async function postInterrogate(payload: Record<string, unknown>): Promise<HttpResult> {
   const request = new Request('http://localhost:3000/api/interrogate', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-zhiyan-owner': TEST_OWNER },
     body: JSON.stringify(payload),
   });
   const response = await POST(request);
@@ -103,7 +115,7 @@ describe('POST /api/interrogate: request contract', () => {
 
   it('returns 400 for an unknown action', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     const result = await postInterrogate({ sessionId: session.id, action: 'bogus' });
     assert.strictEqual(result.status, 400);
   });
@@ -116,28 +128,28 @@ describe('POST /api/interrogate: request contract', () => {
 
   it('returns 400 when answering with no pending question', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     const result = await postInterrogate({ sessionId: session.id, action: 'answer', answer: '任意回答' });
     assert.strictEqual(result.status, 400);
   });
 
   it('returns 400 when starting without a viewpoint', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     const result = await postInterrogate({ sessionId: session.id, action: 'start' });
     assert.strictEqual(result.status, 400);
   });
 
   it('returns 409 for continue without a pending checkpoint decision', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     const result = await postInterrogate({ sessionId: session.id, action: 'continue' });
     assert.strictEqual(result.status, 409);
   });
 
   it('returns 409 when the session is already completed', async () => {
     const session = seedSession({ completed: true, resultCard: null });
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     const result = await postInterrogate({
       sessionId: session.id,
       action: 'start',
@@ -150,7 +162,7 @@ describe('POST /api/interrogate: request contract', () => {
 describe('POST /api/interrogate: five-round strategy contract (#15)', () => {
   it('plans rounds 1..5 in the fixed M1→M2→M4→M6→M5 order', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
 
     const started = await startSession(session);
     assert.strictEqual(started.strategy, 'M1_evidence');
@@ -177,7 +189,7 @@ describe('POST /api/interrogate: five-round strategy contract (#15)', () => {
 
   it('returns the checkpoint decision after the 5th answer and persists it', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     await startSession(session);
     await answerRounds(session, 4);
 
@@ -192,7 +204,7 @@ describe('POST /api/interrogate: five-round strategy contract (#15)', () => {
     assert.strictEqual(fifth.body.question, null);
     assert.strictEqual(fifth.body.completed, false, 'checkpoint is not completion');
 
-    const stored = await serverStorage.loadSession(session.id);
+    const stored = await scope.sessions.loadSession(session.id);
     assert.ok(stored);
     assert.strictEqual(stored.interrogation?.pendingCheckpoint, true);
     assert.strictEqual(stored.interrogation?.round, 5);
@@ -205,7 +217,7 @@ describe('POST /api/interrogate: five-round strategy contract (#15)', () => {
 
   it('continue after the checkpoint plans round 6 with M1 and clears the gate', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     await startSession(session);
     await answerRounds(session, 5);
 
@@ -221,7 +233,7 @@ describe('POST /api/interrogate: five-round strategy contract (#15)', () => {
     );
     assert.strictEqual(res.body.checkpoint, false);
 
-    const stored = await serverStorage.loadSession(session.id);
+    const stored = await scope.sessions.loadSession(session.id);
     assert.ok(stored);
     assert.strictEqual(stored.interrogation?.pendingCheckpoint, false);
     assert.strictEqual(stored.interrogation?.round, 6);
@@ -229,7 +241,7 @@ describe('POST /api/interrogate: five-round strategy contract (#15)', () => {
 
   it('start is idempotent once a question or checkpoint is pending', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     await startSession(session);
     await answerRounds(session, 2);
 
@@ -247,11 +259,11 @@ describe('POST /api/interrogate: five-round strategy contract (#15)', () => {
 describe('POST /api/interrogate: session reload consistency (#15)', () => {
   it('loadSession state matches the state the client received', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     await startSession(session);
     const last = await answerRounds(session, 2);
 
-    const reloaded = await serverStorage.loadSession(session.id);
+    const reloaded = await scope.sessions.loadSession(session.id);
     assert.ok(reloaded);
     assert.strictEqual(reloaded.interrogation?.round, last.round);
     assert.strictEqual(reloaded.interrogation?.strategy, last.strategy);
@@ -264,16 +276,16 @@ describe('POST /api/interrogate: session reload consistency (#15)', () => {
 });
 
 describe('POST /api/interrogate: hydration from the persisted client snapshot (#15)', () => {
-  it('resumes the exact round after serverStorage loses the session (server restart)', async () => {
+  it('resumes the exact round after the server store loses the session (server restart)', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     await startSession(session);
     const last = await answerRounds(session, 2);
     assert.strictEqual(last.round, 3);
 
     // Simulate a dev-server restart: the in-memory store is wiped. The client
     // re-postits its persisted snapshot; the API must adopt it and continue.
-    await serverStorage.deleteSession(session.id);
+    await scope.sessions.deleteSession(session.id);
     const res = await postInterrogate({
       sessionId: session.id,
       action: 'answer',
@@ -289,7 +301,7 @@ describe('POST /api/interrogate: hydration from the persisted client snapshot (#
       ANSWER_ROUND(3),
     ]);
 
-    const stored = await serverStorage.loadSession(session.id);
+    const stored = await scope.sessions.loadSession(session.id);
     assert.ok(stored, 'hydrated session must be persisted again');
     assert.strictEqual(userTexts(stored.messages).length, 3);
     assert.strictEqual(stored.interrogation?.round, 4);
@@ -297,15 +309,15 @@ describe('POST /api/interrogate: hydration from the persisted client snapshot (#
 
   it('checkpoint continue survives a restart: round 6, not a checkpoint replay (#14 P2)', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     await startSession(session);
     await answerRounds(session, 5);
 
-    const checkpointState = await serverStorage.loadSession(session.id);
+    const checkpointState = await scope.sessions.loadSession(session.id);
     assert.ok(checkpointState);
     assert.strictEqual(checkpointState.interrogation?.pendingCheckpoint, true);
 
-    await serverStorage.deleteSession(session.id);
+    await scope.sessions.deleteSession(session.id);
     const res = await postInterrogate({
       sessionId: session.id,
       action: 'continue',
@@ -327,7 +339,7 @@ describe('POST /api/interrogate: usedFallback marking (#15)', () => {
     };
     try {
       const session = seedSession();
-      await serverStorage.saveSession(session);
+      await scope.sessions.saveSession(session);
       const res = await postInterrogate({
         sessionId: session.id,
         action: 'start',
@@ -349,7 +361,7 @@ describe('POST /api/interrogate: usedFallback marking (#15)', () => {
         `fallback must reference the stance claim: ${template}`
       );
 
-      const stored = await serverStorage.loadSession(session.id);
+      const stored = await scope.sessions.loadSession(session.id);
       assert.ok(stored);
       assert.strictEqual(stored.interrogation?.usedFallback, true);
       assert.strictEqual(stored.interrogation?.assistantQuestion, template);
@@ -365,7 +377,7 @@ describe('POST /api/interrogate: context-driven questions (#16)', () => {
 
   it('round 1 quotes the selected stance instead of fixed template text', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     const started = await startSession(session);
     assert.ok(started.question, 'round 1 must have a question');
     assert.ok(
@@ -377,7 +389,7 @@ describe('POST /api/interrogate: context-driven questions (#16)', () => {
 
   it('the next question quotes a claim fragment from the user\'s last answer', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     await startSession(session);
     const res = await postInterrogate({
       sessionId: session.id,
@@ -396,12 +408,12 @@ describe('POST /api/interrogate: context-driven questions (#16)', () => {
 
   it('different user answers produce different questions at the same round', async () => {
     const sessionA = seedSession();
-    await serverStorage.saveSession(sessionA);
+    await scope.sessions.saveSession(sessionA);
     await startSession(sessionA);
     const resA = await postInterrogate({ sessionId: sessionA.id, action: 'answer', answer: CLAIM_A });
 
     const sessionB = seedSession();
-    await serverStorage.saveSession(sessionB);
+    await scope.sessions.saveSession(sessionB);
     await startSession(sessionB);
     const resB = await postInterrogate({ sessionId: sessionB.id, action: 'answer', answer: CLAIM_B });
 
@@ -443,7 +455,7 @@ describe('POST /api/interrogate: report evidence sources (#16)', () => {
         citations: { 1: s1, 2: s2, 3: s3, 4: s4, 5: s5 },
       },
     });
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     const started = await startSession(session);
     assert.deepStrictEqual(started.sources, [
       { index: 1, source: s1 },
@@ -454,7 +466,7 @@ describe('POST /api/interrogate: report evidence sources (#16)', () => {
 
   it('returns an empty source list when the session has no usable citations', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     const started = await startSession(session);
     assert.deepStrictEqual(started.sources, []);
   });
@@ -467,7 +479,7 @@ describe('POST /api/interrogate: uncertainty loop (#17)', () => {
 
   it('keeps uncertain inputs 1-2 in the current round, persists them, and narrows the question', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     const started = await startSession(session);
     const round1Question = started.question!;
 
@@ -494,7 +506,7 @@ describe('POST /api/interrogate: uncertainty loop (#17)', () => {
     );
 
     // The first input is persisted as an uncertain user message.
-    const stored1 = await serverStorage.loadSession(session.id);
+    const stored1 = await scope.sessions.loadSession(session.id);
     assert.ok(stored1);
     assert.deepStrictEqual(
       uncertainInputs(stored1.messages).map((m) => m.text),
@@ -519,7 +531,7 @@ describe('POST /api/interrogate: uncertainty loop (#17)', () => {
       'the narrowed question is kept for the second uncertain answer'
     );
 
-    const stored2 = await serverStorage.loadSession(session.id);
+    const stored2 = await scope.sessions.loadSession(session.id);
     assert.ok(stored2);
     assert.deepStrictEqual(
       uncertainInputs(stored2.messages).map((m) => m.text),
@@ -529,7 +541,7 @@ describe('POST /api/interrogate: uncertainty loop (#17)', () => {
 
   it('the third uncertain answer is persisted and returns an explicit decision gate, never auto-complete', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     await startSession(session);
     await postInterrogate({ sessionId: session.id, action: 'answer', answer: '不知道' });
     await postInterrogate({ sessionId: session.id, action: 'answer', answer: '我不清楚' });
@@ -548,7 +560,7 @@ describe('POST /api/interrogate: uncertainty loop (#17)', () => {
 
     // #17: the THIRD input must be persisted too — never discarded — and the
     // session must NOT be completed automatically.
-    const stored = await serverStorage.loadSession(session.id);
+    const stored = await scope.sessions.loadSession(session.id);
     assert.ok(stored);
     assert.deepStrictEqual(
       uncertainInputs(stored.messages).map((m) => m.text),
@@ -560,7 +572,7 @@ describe('POST /api/interrogate: uncertainty loop (#17)', () => {
 
   it('continue from the decision gate resets the streak and plans a fresh question in the same round', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     const started = await startSession(session);
     await postInterrogate({ sessionId: session.id, action: 'answer', answer: '不知道' });
     await postInterrogate({ sessionId: session.id, action: 'answer', answer: '我不清楚' });
@@ -591,7 +603,7 @@ describe('POST /api/interrogate: uncertainty loop (#17)', () => {
 
   it('rejects answers with 409 while the decision gate is pending', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     await startSession(session);
     await postInterrogate({ sessionId: session.id, action: 'answer', answer: '不知道' });
     await postInterrogate({ sessionId: session.id, action: 'answer', answer: '我不清楚' });
@@ -603,7 +615,7 @@ describe('POST /api/interrogate: uncertainty loop (#17)', () => {
 
   it('a substantive answer after uncertainty resets the streak and advances the round', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     await startSession(session);
 
     await postInterrogate({ sessionId: session.id, action: 'answer', answer: '不知道' });
@@ -622,7 +634,7 @@ describe('POST /api/interrogate: uncertainty loop (#17)', () => {
 describe('POST /api/interrogate: explicit complete action (#17)', () => {
   it('completes server-side: builds and persists the result card, then start returns 409', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
+    await scope.sessions.saveSession(session);
     await startSession(session);
     await answerRounds(session, 2);
 
@@ -635,7 +647,7 @@ describe('POST /api/interrogate: explicit complete action (#17)', () => {
     assert.strictEqual(card!.finalPosition, ANSWER_ROUND(2));
     assert.ok(card!.messageIds.length >= 2, 'every answer is traced');
 
-    const stored = await serverStorage.loadSession(session.id);
+    const stored = await scope.sessions.loadSession(session.id);
     assert.ok(stored);
     assert.strictEqual(stored.completed, true);
     assert.ok(stored.resultCard);
@@ -657,19 +669,22 @@ describe('POST /api/interrogate: explicit complete action (#17)', () => {
 
   it('returns 500 without corrupting the session when persistence fails', async () => {
     const session = seedSession();
-    await serverStorage.saveSession(session);
-    const original = serverStorage.saveSession.bind(serverStorage);
-    serverStorage.saveSession = async () => {
+    await scope.sessions.saveSession(session);
+    // The route resolves the same cached per-owner scope object, so patching
+    // the scoped view's saveSession injects the failure exactly where the
+    // route persists.
+    const original = scope.sessions.saveSession;
+    scope.sessions.saveSession = async () => {
       throw new Error('disk full');
     };
     try {
       const res = await postInterrogate({ sessionId: session.id, action: 'complete' });
       assert.strictEqual(res.status, 500);
     } finally {
-      serverStorage.saveSession = original;
+      scope.sessions.saveSession = original;
     }
 
-    const stored = await serverStorage.loadSession(session.id);
+    const stored = await scope.sessions.loadSession(session.id);
     assert.ok(stored, 'the session must survive a failed completion');
     assert.strictEqual(stored.completed, false);
     assert.strictEqual(stored.resultCard, null);

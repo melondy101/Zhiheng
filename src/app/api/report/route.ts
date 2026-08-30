@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { serverStorage } from '@/lib/server-providers';
+import { getServerStorage, StorageUnavailableError } from '@/lib/server-storage';
+import { readOwnerId } from '@/lib/owner-id';
 import type { Session, ReportProgress, SourceState } from '@/lib/providers';
 import { createZhihuSearchProvider, createGlobalSearchProvider } from '@/lib/zhihu-retrieval';
 import { HistorySearchProvider } from '@/lib/history-search';
@@ -30,6 +31,17 @@ interface ExtendedSourceState {
 }
 
 export async function POST(request: Request) {
+  // #21: every storage-touching request must carry the anonymous ownership
+  // header; the session is stored under that owner and is invisible to
+  // other owners.
+  const ownerId = readOwnerId(request);
+  if (!ownerId) {
+    return NextResponse.json(
+      { error: 'Missing or invalid x-zhiyan-owner header' },
+      { status: 400 }
+    );
+  }
+
   const { question, initialOpinion, excludedHistoryIds = [] } = await request.json();
   if (!question) {
     return NextResponse.json({ error: 'Missing question' }, { status: 400 });
@@ -102,7 +114,24 @@ export async function POST(request: Request) {
     excludedHistoryIds: excludedHistoryIds as string[],
   };
 
-  await serverStorage.saveSession(session);
+  // #21: persist under the anonymous owner. If the configured database is
+  // unavailable the report is STILL returned — it is fully computed and too
+  // expensive to throw away — with an explicit saved:false / storage:
+  // 'unavailable' signal so the client keeps its localStorage mirror and
+  // never believes the session was persisted remotely.
+  const serverStorage = await getServerStorage();
+  let saved = true;
+  let storageSignal: 'memory' | 'postgres' | 'unavailable' = serverStorage.mode;
+  try {
+    await serverStorage.forOwner(ownerId).sessions.saveSession(session);
+  } catch (err) {
+    if (err instanceof StorageUnavailableError) {
+      saved = false;
+      storageSignal = 'unavailable';
+    } else {
+      throw err;
+    }
+  }
 
   // Attach source state to final progress event
   const enrichedProgress: ExtendedProgress[] = progress.map(p => ({
@@ -117,5 +146,7 @@ export async function POST(request: Request) {
     progress: enrichedProgress,
     sourceState,
     knowledgeGraph,
+    saved,
+    storage: storageSignal,
   });
 }
