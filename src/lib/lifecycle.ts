@@ -5,6 +5,7 @@
 // - Build auditable simplified profile after completion
 
 import type { Session, Message, Viewpoint } from './providers';
+import { isRoundAnswer } from './providers';
 
 export type SessionStatus = 'in_progress' | 'completed';
 
@@ -90,7 +91,9 @@ export function deleteProfile(): void {
   }
 }
 
-const userMessages = (s: Session): Message[] => s.messages.filter((m) => m.role === 'user');
+// Profile inference only credits real answers: uncertain inputs (#17) must
+// never be cited as the source of a profile conclusion (PRD 8.2).
+const userMessages = (s: Session): Message[] => s.messages.filter(isRoundAnswer);
 const lastUser = (s: Session): Message | null => {
   const u = userMessages(s);
   return u.length > 0 ? u[u.length - 1]! : null;
