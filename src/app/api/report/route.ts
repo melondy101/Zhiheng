@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { DemoRetrievalProvider, storageProvider } from '@/lib/demo-providers';
-import type { Session } from '@/lib/providers';
+import { FixtureRetrievalProvider, serverStorage } from '@/lib/server-providers';
+import type { Session, Message } from '@/lib/providers';
 
-const retrievalProvider = new DemoRetrievalProvider();
+const retrievalProvider = new FixtureRetrievalProvider();
 
 export const runtime = 'nodejs';
 
@@ -16,8 +16,8 @@ export async function POST(request: Request) {
   const session: Session = {
     id: `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     question,
-    report,
     initialOpinion: null,
+    report,
     selectedViewpoint: null,
     messages: [],
     resultCard: null,
@@ -26,6 +26,6 @@ export async function POST(request: Request) {
     updatedAt: Date.now(),
   };
 
-  await storageProvider.saveSession(session);
+  await serverStorage.saveSession(session);
   return NextResponse.json({ sessionId: session.id, report });
 }

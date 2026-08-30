@@ -1,4 +1,5 @@
-// Provider contracts for ticket #2 minimal persistent reasoning loop
+// Shared provider interfaces and deterministic fixture data for ticket #2
+// This file has no side effects and no browser/server-specific code.
 
 export interface Question {
   id: string;
@@ -10,14 +11,13 @@ export interface Message {
   id: string;
   role: 'user' | 'assistant';
   text: string;
-  strategyId?: string;
   timestamp: number;
 }
 
 export interface Viewpoint {
   id: string;
   text: string;
-  source: 'user_authored' | 'ai_suggested_user_selected' | 'ai_authored';
+  source: 'user_authored' | 'ai_authored';
 }
 
 export interface Report {
@@ -26,41 +26,13 @@ export interface Report {
   knowledgePoints: string[];
   content: string;
   viewpoints: string[];
-  references: Reference[];
-  graph: GraphData;
-}
-
-export interface Reference {
-  id: number;
-  category: 'zhihu' | 'web' | 'historical_report' | 'ai_synthesis';
-  title: string;
-  url?: string;
-}
-
-export interface GraphNode {
-  id: string;
-  label: string;
-  type: 'concept' | 'evidence' | 'counter' | 'inferred' | 'user';
-}
-
-export interface GraphEdge {
-  from: string;
-  to: string;
-  label: string;
-  sourceType: 'supported' | 'inferred' | 'user_claimed';
-  citationId?: number;
-}
-
-export interface GraphData {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
 }
 
 export interface Session {
   id: string;
   question: string;
-  report: Report | null;
   initialOpinion: string | null;
+  report: Report | null;
   selectedViewpoint: Viewpoint | null;
   messages: Message[];
   resultCard: ResultCard | null;
@@ -72,11 +44,8 @@ export interface Session {
 export interface ResultCard {
   sessionId: string;
   initialStance: { text: string; source: 'user_authored' } | null;
-  selectedStartingStance: { text: string; source: 'ai_suggested_user_selected' } | null;
-  evidence: string[];
-  revisions: Array<{ before: string; after: string }>;
+  selectedStartingStance: { text: string; source: 'user_authored' | 'ai_authored' } | null;
   finalPosition: string | null;
-  unresolved: string[];
   messageIds: string[];
 }
 
@@ -85,23 +54,13 @@ export interface Identity {
   id: string;
 }
 
-export interface LLMResponse {
-  question: string;
-  strategyId: string;
-  strategyName: string;
-  citations: number[];
-}
-
 // Provider interfaces
-
 export interface RetrievalProvider {
-  getHotList(): Promise<{ items: Array<{ id: number; title: string; url: string }>; updatedAt: string; source: string }>;
-  search(query: string): Promise<{ query: string; results: Array<{ id: number; title: string; snippet: string; source: string; url: string }> }>;
   generateReport(question: string): Promise<Report>;
 }
 
 export interface LLMProvider {
-  generateQuestion(session: Session): Promise<LLMResponse>;
+  generateQuestion(session: Session): Promise<string>;
 }
 
 export interface StorageProvider {
@@ -112,10 +71,16 @@ export interface StorageProvider {
 }
 
 export interface RenderingProvider {
-  renderReport(report: Report): Promise<string>;
-  renderResultCard(card: ResultCard): Promise<string>;
+  renderReport(report: Report): Promise<Report>;
+  renderResultCard(card: ResultCard): Promise<ResultCard>;
 }
 
 export interface IdentityProvider {
   getCurrentIdentity(): Promise<Identity>;
 }
+
+// ---------------------------------------------------------------------------
+// Fixture data (shared between client and server providers)
+// ---------------------------------------------------------------------------
+
+export const FIXTURE_QUESTION = '你能提供一个具体的数据或例子来支持这个观点吗？';

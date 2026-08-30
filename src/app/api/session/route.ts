@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { storageProvider } from '@/lib/demo-providers';
+import { serverStorage } from '@/lib/server-providers';
 
 export const runtime = 'nodejs';
 
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Missing id parameter' }, { status: 400 });
   }
 
-  const session = await storageProvider.loadSession(id);
+  const session = await serverStorage.loadSession(id);
   if (!session) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Missing id' }, { status: 400 });
   }
 
-  const existing = await storageProvider.loadSession(data.id);
+  const existing = await serverStorage.loadSession(data.id);
   if (!existing) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
@@ -40,6 +40,6 @@ export async function POST(request: Request) {
   }
   existing.updatedAt = Date.now();
 
-  await storageProvider.saveSession(existing);
+  await serverStorage.saveSession(existing);
   return NextResponse.json({ ok: true, session: existing });
 }

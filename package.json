@@ -6,11 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "npx tsx --test tests/unit/providers.test.ts",
     "test:e2e": "playwright test",
-    "check": "npm run typecheck && npm run lint"
+    "check": "npm run typecheck && npm run lint && npm run build && npm test && npm run test:e2e"
   },
   "dependencies": {
     "next": "^15.0.0",

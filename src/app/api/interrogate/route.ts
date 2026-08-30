@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { DemoLLMProvider, storageProvider, isCheckpoint, buildResultCard } from '@/lib/demo-providers';
-import type { Session, Message } from '@/lib/providers';
+import { FixtureLLMProvider, serverStorage } from '@/lib/server-providers';
+import type { Session, Message, ResultCard } from '@/lib/providers';
 
-const llmProvider = new DemoLLMProvider();
+const llmProvider = new FixtureLLMProvider();
 
 export const runtime = 'nodejs';
 
@@ -12,12 +12,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
   }
 
-  const session = await storageProvider.loadSession(sessionId);
+  const session = await serverStorage.loadSession(sessionId);
   if (!session) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
 
-  // Record user answer
+  // If answer provided, record user message
   if (answer) {
     const userMessage: Message = {
       id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
@@ -29,49 +29,49 @@ export async function POST(request: Request) {
   }
 
   const userTurns = session.messages.filter(m => m.role === 'user').length;
+  const hasAssistant = session.messages.some(m => m.role === 'assistant');
 
-  // Check if session should complete (minimal: 5 turns for ticket #2)
-  if (userTurns >= 5) {
+  // After one user reply, complete the session
+  if (userTurns >= 1 && hasAssistant) {
     session.completed = true;
     session.resultCard = buildResultCard(session);
-    await storageProvider.saveSession(session);
-
+    await serverStorage.saveSession(session);
     return NextResponse.json({
       question: null,
-      strategyId: null,
-      strategyName: null,
-      citations: [],
-      checkpoint: true,
-      turn: userTurns,
       completed: true,
       resultCard: session.resultCard,
     });
   }
 
-  // Checkpoint at turn 5 (after 5 user answers)
-  const checkpoint = isCheckpoint(userTurns);
-
-  // Generate next question
-  const response = await llmProvider.generateQuestion(session);
-
+  // Generate first question
+  const question = await llmProvider.generateQuestion(session);
   const assistantMessage: Message = {
     id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
     role: 'assistant',
-    text: response.question,
-    strategyId: response.strategyId,
+    text: question,
     timestamp: Date.now(),
   };
   session.messages.push(assistantMessage);
   session.updatedAt = Date.now();
-  await storageProvider.saveSession(session);
+  await serverStorage.saveSession(session);
 
   return NextResponse.json({
-    question: response.question,
-    strategyId: response.strategyId,
-    strategyName: response.strategyName,
-    citations: response.citations,
-    checkpoint,
-    turn: userTurns + 1,
+    question,
     completed: false,
   });
+}
+
+function buildResultCard(session: Session): ResultCard {
+  const userMessages = session.messages.filter(m => m.role === 'user');
+  return {
+    sessionId: session.id,
+    initialStance: session.initialOpinion
+      ? { text: session.initialOpinion, source: 'user_authored' }
+      : null,
+    selectedStartingStance: session.selectedViewpoint
+      ? { text: session.selectedViewpoint.text, source: session.selectedViewpoint.source }
+      : null,
+    finalPosition: userMessages.length > 0 ? userMessages[userMessages.length - 1].text : null,
+    messageIds: userMessages.map(m => m.id),
+  };
 }

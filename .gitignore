@@ -1,11 +1,31 @@
-.scratch/
-.worktrees/
-.agent-runs/**/*.jsonl
+# Dependencies
 node_modules/
+
+# Build output
 .next/
+out/
 dist/
-coverage/
+
+# Test results
+test-results/
+playwright-report/
+
+# TypeScript
 *.tsbuildinfo
+
+# Environment
 .env
 .env.*
 !.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# Scratch / worktrees
+.scratch/
+.worktrees/
+.agent-runs/**/*.jsonl
+
+# Coverage
+coverage/
