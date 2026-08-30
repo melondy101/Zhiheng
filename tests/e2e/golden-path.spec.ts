@@ -94,6 +94,50 @@ test.describe('Golden Path: five-round interrogation state machine', () => {
     await expect(page.locator('h3:has-text("思辨成果卡")')).toHaveCount(0);
   });
 
+  // Ticket #15: the checkpoint decision and the assistant question are
+  // persisted, so a refresh restores exactly one of the two pending states
+  // instead of replaying the checkpoint (#14 P2 elimination evidence).
+  test('reload while checkpoint decision pending restores the checkpoint, not a question', async ({ page }) => {
+    await startSession(page, QUESTION, INITIAL_OPINION);
+
+    for (let i = 0; i < 5; i++) {
+      await answerRound(page, i + 1, ANSWERS[i]!);
+    }
+    await expect(page.getByText('阶段小结')).toBeVisible();
+
+    await page.reload();
+    // The checkpoint gate is restored — the input stays hidden so the gate
+    // cannot be bypassed by refreshing.
+    await expect(page.getByText('阶段小结')).toBeVisible();
+    await expect(page.getByRole('button', { name: '继续' })).toBeVisible();
+    await expect(page.locator('input[placeholder="输入你的回答..."]')).toHaveCount(0);
+
+    // Continuing still works: round 6 question appears.
+    await page.getByRole('button', { name: '继续' }).click();
+    await expect(page.getByText('第 6 轮').first()).toBeVisible();
+  });
+
+  test('reload after checkpoint "continue" restores the round 6 question, not a checkpoint replay', async ({ page }) => {
+    await startSession(page, QUESTION, INITIAL_OPINION);
+
+    for (let i = 0; i < 5; i++) {
+      await answerRound(page, i + 1, ANSWERS[i]!);
+    }
+    await expect(page.getByText('阶段小结')).toBeVisible();
+
+    await page.getByRole('button', { name: '继续' }).click();
+    await expect(page.getByText('第 6 轮').first()).toBeVisible();
+
+    await page.reload();
+    // Restored to the pending round 6 question — no checkpoint replay, no
+    // result card.
+    await expect(page.getByText('第 6 轮').first()).toBeVisible();
+    await expect(page.getByText('请进一步阐述你的观点')).toBeVisible();
+    await expect(page.getByText('证据追问')).toBeVisible();
+    await expect(page.getByText('阶段小结')).toHaveCount(0);
+    await expect(page.locator('h3:has-text("思辨成果卡")')).toHaveCount(0);
+  });
+
   test('reload mid-session restores the correct round, then finishes five rounds', async ({ page }) => {
     await startSession(page, QUESTION, INITIAL_OPINION);
 

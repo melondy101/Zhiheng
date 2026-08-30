@@ -1,77 +1,63 @@
+// The single interrogation orchestration entry point (#15).
+// All strategy decisions (round order, checkpoint gating, LLM fallback,
+// uncertain streak) live in the orchestrator; this route only adapts HTTP
+// to it and wires the server providers. The legacy one-round completion
+// path that used to live here is removed.
 import { NextResponse } from 'next/server';
-import { FixtureLLMProvider, serverStorage } from '@/lib/server-providers';
-import type { Session, Message, ResultCard } from '@/lib/providers';
-
-const llmProvider = new FixtureLLMProvider();
+import { llmProvider, serverStorage } from '@/lib/server-providers';
+import { handleInterrogate } from '@/lib/interrogation-orchestrator';
+import type { InterrogateAction, Session, Viewpoint } from '@/lib/providers';
 
 export const runtime = 'nodejs';
 
-export async function POST(request: Request) {
-  const { sessionId, answer } = await request.json();
-  if (!sessionId) {
-    return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
-  }
+const ACTIONS: InterrogateAction[] = ['start', 'answer', 'continue'];
 
-  const session = await serverStorage.loadSession(sessionId);
-  if (!session) {
-    return NextResponse.json({ error: 'Session not found' }, { status: 404 });
-  }
-
-  // If answer provided, record user message
-  if (answer) {
-    const userMessage: Message = {
-      id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
-      role: 'user',
-      text: answer,
-      timestamp: Date.now(),
-    };
-    session.messages.push(userMessage);
-  }
-
-  const userTurns = session.messages.filter(m => m.role === 'user').length;
-  const hasAssistant = session.messages.some(m => m.role === 'assistant');
-
-  // After one user reply, complete the session
-  if (userTurns >= 1 && hasAssistant) {
-    session.completed = true;
-    session.resultCard = buildResultCard(session);
-    await serverStorage.saveSession(session);
-    return NextResponse.json({
-      question: null,
-      completed: true,
-      resultCard: session.resultCard,
-    });
-  }
-
-  // Generate first question
-  const question = await llmProvider.generateQuestion(session);
-  const assistantMessage: Message = {
-    id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
-    role: 'assistant',
-    text: question,
-    timestamp: Date.now(),
-  };
-  session.messages.push(assistantMessage);
-  session.updatedAt = Date.now();
-  await serverStorage.saveSession(session);
-
-  return NextResponse.json({
-    question,
-    completed: false,
-  });
+function isInterrogateAction(value: unknown): value is InterrogateAction {
+  return typeof value === 'string' && ACTIONS.includes(value as InterrogateAction);
 }
 
-function buildResultCard(session: Session): ResultCard {
-  const userMessages = session.messages.filter(m => m.role === 'user');
-  return {
-    sessionId: session.id,
-    initialStance: session.initialOpinion
-      ? { text: session.initialOpinion, source: 'user_authored' }
-      : null,
-    selectedStartingStance: session.selectedViewpoint
-      ? { text: session.selectedViewpoint.text, source: session.selectedViewpoint.source }
-      : null,
-    finalPosition: userMessages.length > 0 ? userMessages[userMessages.length - 1].text : null,
-    messageIds: userMessages.map(m => m.id),
+export async function POST(request: Request) {
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const body = payload as {
+    sessionId?: unknown;
+    action?: unknown;
+    answer?: unknown;
+    viewpoint?: unknown;
+    session?: unknown;
   };
+
+  if (typeof body.sessionId !== 'string' || body.sessionId.length === 0) {
+    return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
+  }
+  if (!isInterrogateAction(body.action)) {
+    return NextResponse.json(
+      { error: 'Invalid action, expected start | answer | continue' },
+      { status: 400 }
+    );
+  }
+
+  const result = await handleInterrogate({
+    sessionId: body.sessionId,
+    action: body.action,
+    answer: typeof body.answer === 'string' ? body.answer : undefined,
+    viewpoint: (body.viewpoint ?? undefined) as Viewpoint | undefined,
+    sessionSnapshot: (body.session ?? null) as Session | null,
+    storage: serverStorage,
+    generateQuestion: (strategy, session) =>
+      llmProvider.generateStrategyQuestion(strategy, session),
+  });
+
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
+  }
+  return NextResponse.json(result.body);
 }

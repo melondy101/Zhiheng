@@ -1,10 +1,17 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { Session, Report, Viewpoint, Message, ResultCard } from '@/lib/providers';
+import type {
+  Session,
+  Report,
+  Viewpoint,
+  Message,
+  ResultCard,
+  InterrogateAction,
+  InterrogateResponseBody,
+} from '@/lib/providers';
 import type { StrategyId } from '@/lib/strategy-engine';
-import { actionAfterAnswer, resumePlan } from '@/lib/strategy-engine';
-import { FixtureRetrievalProvider, FixtureLLMProvider } from '@/lib/fixture-providers';
+import { FixtureRetrievalProvider } from '@/lib/fixture-providers';
 import { BrowserStorageProvider, StaticReportRenderer, buildResultCard } from '@/lib/demo-providers';
 import HomePage from './components/HomePage';
 import ReportPanel from './components/ReportPanel';
@@ -13,41 +20,122 @@ import QAPanel from './components/QAPanel';
 import ResultCardView, { ResultCardViewFromSession } from './components/ResultCardView';
 
 const retrievalProvider = new FixtureRetrievalProvider();
-const llmProvider = new FixtureLLMProvider();
 const storageProvider = new BrowserStorageProvider();
 const renderingProvider = new StaticReportRenderer();
 
 type Page = 'home' | 'session';
 
-interface QuestionPlanHooks {
+/**
+ * Setters the module-level interrogation helpers push state through. Built
+ * from stable React setters so they can be used inside mount effects without
+ * adding component-scope dependencies (react-hooks/exhaustive-deps).
+ */
+interface InterrogateViewHooks {
+  setSession: (s: Session | null) => void;
+  setMessages: (m: Message[]) => void;
+  setSelectedViewpoint: (v: Viewpoint | null) => void;
+  setUncertainStreak: (n: number) => void;
+  setHintMessage: (m: string | null) => void;
+  setHintOptions: (o: string[] | null) => void;
   setCurrentQuestion: (q: string | null) => void;
   setCurrentStrategy: (s: StrategyId | null) => void;
   setCurrentRound: (r: number) => void;
   setUsedFallback: (u: boolean) => void;
   setIsCheckpoint: (v: boolean) => void;
+  setCompleted: (v: boolean) => void;
+  setResultCard: (c: ResultCard | null) => void;
 }
 
 /**
- * Plan the next round for `sess` and push the question into page state.
- * Module-level so it can be called from the restore effect without adding
- * component-scope dependencies (react-hooks/exhaustive-deps).
+ * Call the single interrogation orchestration API (#15). All strategy
+ * decisions (round order, checkpoint gating, fallback, uncertain streak)
+ * happen server-side; the client sends its persisted session snapshot so the
+ * API can rehydrate its in-memory store after a restart.
  */
-async function planAndSetQuestion(sess: Session, hooks: QuestionPlanHooks) {
-  const { planNextRound, recordStrategy } = await import('@/lib/strategy-engine');
-  const { withFallback } = await import('@/lib/llm-fallback');
-  const result = await planNextRound(sess, (strategy, s) =>
-    llmProvider.generateStrategyQuestion(strategy, s)
-  );
-  const fb = await withFallback(result.strategy, sess, () =>
-    llmProvider.generateStrategyQuestion(result.strategy, sess)
-  );
-  recordStrategy(sess, result.strategy);
-  hooks.setCurrentQuestion(fb.question);
-  hooks.setCurrentStrategy(result.strategy);
-  hooks.setCurrentRound(result.round);
-  hooks.setUsedFallback(fb.usedFallback);
-  // Planning a question clears any pending checkpoint decision (#14).
-  hooks.setIsCheckpoint(false);
+async function postInterrogate(
+  sess: Session,
+  payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint }
+): Promise<InterrogateResponseBody | null> {
+  try {
+    const res = await fetch('/api/interrogate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: sess.id, session: sess, ...payload }),
+    });
+    if (!res.ok) {
+      console.error('Interrogate API error:', res.status);
+      return null;
+    }
+    return (await res.json()) as InterrogateResponseBody;
+  } catch (err) {
+    console.error('Interrogate API failed:', err);
+    return null;
+  }
+}
+
+/**
+ * Complete a session: build the result card from the recorded user messages,
+ * persist the completed session, and update the profile (#12).
+ */
+async function completeSession(sess: Session, hooks: InterrogateViewHooks): Promise<void> {
+  const card: ResultCard = await renderingProvider.renderResultCard(buildResultCard(sess));
+  const completedSession: Session = {
+    ...sess,
+    completed: true,
+    resultCard: card,
+    updatedAt: Date.now(),
+  };
+  await storageProvider.saveSession(completedSession);
+  hooks.setResultCard(card);
+  hooks.setCompleted(true);
+  hooks.setCurrentQuestion(null);
+  hooks.setSession(completedSession);
+
+  // Update profile (ticket #12)
+  const { buildProfileFromSession, updateProfile, loadProfile, saveProfile } = await import('@/lib/lifecycle');
+  const conclusions = buildProfileFromSession(completedSession);
+  if (conclusions.length > 0) {
+    const next = updateProfile(loadProfile(), conclusions);
+    saveProfile(next);
+  }
+}
+
+/**
+ * Apply an orchestration API response to the page state and mirror the
+ * returned session into local storage (#15: the persisted mirror is the
+ * refresh/reload recovery source; no orchestration runs in the browser).
+ */
+async function applyInterrogateResponse(
+  data: InterrogateResponseBody,
+  hooks: InterrogateViewHooks
+): Promise<void> {
+  hooks.setSession(data.session);
+  hooks.setMessages(data.session.messages);
+  if (data.session.selectedViewpoint) hooks.setSelectedViewpoint(data.session.selectedViewpoint);
+  hooks.setUncertainStreak(data.uncertainStreak);
+  await storageProvider.saveSession(data.session);
+
+  if (data.suggestComplete) {
+    // Three consecutive uncertain answers (#10 behavior preserved): hint,
+    // then build the result card from the recorded user messages.
+    hooks.setHintMessage(data.hint?.message ?? '建议结束本次诘问并生成成果卡。');
+    hooks.setHintOptions(null);
+    await completeSession(data.session, hooks);
+    return;
+  }
+
+  if (data.hint) {
+    hooks.setHintMessage(data.hint.message);
+    hooks.setHintOptions(data.hint.hint ?? null);
+  } else {
+    hooks.setHintMessage(null);
+    hooks.setHintOptions(null);
+  }
+  hooks.setCurrentQuestion(data.question);
+  hooks.setCurrentStrategy(data.strategy);
+  hooks.setCurrentRound(data.round);
+  hooks.setUsedFallback(data.usedFallback);
+  hooks.setIsCheckpoint(data.checkpoint);
 }
 
 export default function Home() {
@@ -57,7 +145,7 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedViewpoint, setSelectedViewpoint] = useState<Viewpoint | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<string | null>(null);
-  const [currentStrategy, setCurrentStrategy] = useState<import('@/lib/strategy-engine').StrategyId | null>(null);
+  const [currentStrategy, setCurrentStrategy] = useState<StrategyId | null>(null);
   const [isCheckpoint, setIsCheckpoint] = useState(false);
   const [currentRound, setCurrentRound] = useState(0);
   const [usedFallback, setUsedFallback] = useState(false);
@@ -72,7 +160,52 @@ export default function Home() {
   const [hotlistLoading, setHotlistLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Restore session from URL on reload
+  const handleCompleteNow = async (sess?: Session) => {
+    const target = sess ?? session;
+    if (!target) return;
+    await completeSession(target, {
+      setSession,
+      setMessages,
+      setSelectedViewpoint,
+      setUncertainStreak,
+      setHintMessage,
+      setHintOptions,
+      setCurrentQuestion,
+      setCurrentStrategy,
+      setCurrentRound,
+      setUsedFallback,
+      setIsCheckpoint,
+      setCompleted,
+      setResultCard,
+    });
+  };
+
+  const runInterrogate = async (
+    sess: Session,
+    payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint }
+  ) => {
+    const data = await postInterrogate(sess, payload);
+    if (data) {
+      await applyInterrogateResponse(data, {
+        setSession,
+        setMessages,
+        setSelectedViewpoint,
+        setUncertainStreak,
+        setHintMessage,
+        setHintOptions,
+        setCurrentQuestion,
+        setCurrentStrategy,
+        setCurrentRound,
+        setUsedFallback,
+        setIsCheckpoint,
+        setCompleted,
+        setResultCard,
+      });
+    }
+  };
+
+  // Restore session from URL on reload (#15: the persisted interrogation
+  // state decides between "checkpoint pending" and "round N question pending").
   useEffect(() => {
     const restore = async () => {
       const params = new URLSearchParams(window.location.search);
@@ -88,23 +221,47 @@ export default function Home() {
             setResultCard(data.resultCard);
             setCompleted(true);
           } else if (data.selectedViewpoint) {
-            // Ticket #14: resume the interrogation at the correct round.
-            // If the session was interrupted right after a checkpoint-round
-            // answer (5, 8, 11…), resume at the checkpoint decision so the
-            // gate cannot be bypassed by refreshing.
-            const plan = resumePlan(data);
-            if (plan.action === 'checkpoint') {
-              setCurrentRound(plan.answeredRounds);
+            const st = data.interrogation;
+            if (st?.pendingCheckpoint) {
+              // Refreshed while a checkpoint decision was pending: restore the
+              // gate exactly (#14 P2 fixed by persisting the decision state).
+              setCurrentRound(st.round);
+              setCurrentStrategy(st.strategy);
               setCurrentQuestion(null);
+              setUsedFallback(st.usedFallback);
+              setUncertainStreak(st.uncertainStreak);
               setIsCheckpoint(true);
+            } else if (st?.assistantQuestion) {
+              // Refreshed while round N's question was pending.
+              setCurrentRound(st.round);
+              setCurrentStrategy(st.strategy);
+              setCurrentQuestion(st.assistantQuestion);
+              setUsedFallback(st.usedFallback);
+              setUncertainStreak(st.uncertainStreak);
+              setIsCheckpoint(false);
             } else {
-              await planAndSetQuestion(data, {
+              // Session predates the persisted interrogation state: ask the
+              // API to resume — it decides checkpoint vs. next round.
+              const hooks: InterrogateViewHooks = {
+                setSession,
+                setMessages,
+                setSelectedViewpoint,
+                setUncertainStreak,
+                setHintMessage,
+                setHintOptions,
                 setCurrentQuestion,
                 setCurrentStrategy,
                 setCurrentRound,
                 setUsedFallback,
                 setIsCheckpoint,
+                setCompleted,
+                setResultCard,
+              };
+              const resp = await postInterrogate(data, {
+                action: 'start',
+                viewpoint: data.selectedViewpoint,
               });
+              if (resp) await applyInterrogateResponse(resp, hooks);
             }
           }
           setPage('session');
@@ -144,7 +301,7 @@ export default function Home() {
       const res = await fetch('/api/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, initialOpinion }),
       });
 
       if (!res.ok) {
@@ -186,31 +343,15 @@ export default function Home() {
 
   const handleViewpointSelect = async (viewpoint: Viewpoint) => {
     if (!session) return;
-    const updated = { ...session, selectedViewpoint: viewpoint };
     setSelectedViewpoint(viewpoint);
-    setSession(updated);
-    await storageProvider.saveSession(updated);
-    await generateQuestion(updated);
+    await runInterrogate(session, { action: 'start', viewpoint });
   };
 
   const handleCustomViewpoint = async (text: string) => {
     if (!session) return;
     const customViewpoint: Viewpoint = { id: 'custom', text, source: 'user_authored' };
-    const updated = { ...session, selectedViewpoint: customViewpoint };
     setSelectedViewpoint(customViewpoint);
-    setSession(updated);
-    await storageProvider.saveSession(updated);
-    await generateQuestion(updated);
-  };
-
-  const generateQuestion = async (sess: Session) => {
-    await planAndSetQuestion(sess, {
-      setCurrentQuestion,
-      setCurrentStrategy,
-      setCurrentRound,
-      setUsedFallback,
-      setIsCheckpoint,
-    });
+    await runInterrogate(session, { action: 'start', viewpoint: customViewpoint });
   };
 
   const handleSendAnswer = async (e: React.FormEvent) => {
@@ -221,93 +362,17 @@ export default function Home() {
     const userAnswer = answer.trim();
     setAnswer('');
 
-    // Detect uncertain answer (ticket #10)
-    const { isUncertainAnswer, uncertainResponse } = await import('@/lib/llm-fallback');
-    const uncertain = isUncertainAnswer(userAnswer);
-    const newStreak = uncertain ? uncertainStreak + 1 : 0;
-    setUncertainStreak(newStreak);
-
-    if (newStreak >= 3) {
-      setHintMessage('建议结束本次诘问并生成成果卡。');
-      setHintOptions(null);
-      await handleCompleteNow();
-      return;
-    }
-
-    if (newStreak > 0) {
-      const hint = uncertainResponse(newStreak, session);
-      setHintMessage(hint.message);
-      setHintOptions(hint.hint ?? null);
-    } else {
-      setHintMessage(null);
-      setHintOptions(null);
-    }
-
-    const userMsg: Message = {
-      id: `m_${Date.now()}_u`,
-      role: 'user',
-      text: userAnswer,
-      timestamp: Date.now(),
-    };
-    const updatedMessages = [...messages, userMsg];
-    setMessages(updatedMessages);
-
-    // Ticket #14: keep the session and move to the next round instead of
-    // completing after the first answer.
-    const justAnsweredRound =
-      currentRound > 0
-        ? currentRound
-        : updatedMessages.filter((m) => m.role === 'user').length;
-    const updatedSession: Session = {
-      ...session,
-      messages: updatedMessages,
-      updatedAt: Date.now(),
-    };
-    setSession(updatedSession);
-    await storageProvider.saveSession(updatedSession);
-
-    // After a checkpoint-round answer (5, 8, 11…) show the checkpoint
-    // decision instead of planning the next question.
-    if (actionAfterAnswer(justAnsweredRound) === 'checkpoint') {
-      setCurrentQuestion(null);
-      setIsCheckpoint(true);
-      return;
-    }
-
-    await generateQuestion(updatedSession);
+    // Ticket #15: the API records the answer, updates the uncertain streak,
+    // gates the checkpoint, and plans/persists the next round.
+    await runInterrogate(session, { action: 'answer', answer: userAnswer });
   };
 
-  // Ticket #14: continue from the checkpoint decision into the next round.
+  // Ticket #14/#15: continue from the checkpoint decision into the next round.
   const handleCheckpointContinue = async () => {
     if (!session) return;
     setHintMessage(null);
     setHintOptions(null);
-    await generateQuestion(session);
-  };
-
-  // User-triggered exit at any round
-  const handleCompleteNow = async () => {
-    if (!session) return;
-    const card: ResultCard = await renderingProvider.renderResultCard(buildResultCard(session));
-    const completedSession: Session = {
-      ...session,
-      completed: true,
-      resultCard: card,
-      updatedAt: Date.now(),
-    };
-    await storageProvider.saveSession(completedSession);
-    setResultCard(card);
-    setCompleted(true);
-    setCurrentQuestion(null);
-    setSession(completedSession);
-
-    // Update profile (ticket #12)
-    const { buildProfileFromSession, updateProfile, loadProfile, saveProfile } = await import('@/lib/lifecycle');
-    const conclusions = buildProfileFromSession(completedSession);
-    if (conclusions.length > 0) {
-      const next = updateProfile(loadProfile(), conclusions);
-      saveProfile(next);
-    }
+    await runInterrogate(session, { action: 'continue' });
   };
 
   const handleNewSession = () => {
@@ -382,7 +447,7 @@ export default function Home() {
               onAnswerChange={setAnswer}
               onSubmit={handleSendAnswer}
               onContinue={handleCheckpointContinue}
-              onExit={handleCompleteNow}
+              onExit={() => { void handleCompleteNow(); }}
               messagesEndRef={messagesEndRef}
             />
           )}

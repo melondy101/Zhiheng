@@ -84,6 +84,54 @@ export interface Session {
   updatedAt: number;
   /** Session IDs to exclude from history search results */
   excludedHistoryIds?: string[];
+  /**
+   * Server-owned interrogation state (#15). The orchestration API is the only
+   * writer; the client mirrors it into local storage as the refresh/reload
+   * recovery source.
+   */
+  interrogation?: InterrogationState;
+}
+
+/**
+ * Persisted interrogation state (#15). One authority: the orchestration API
+ * computes and stores it; `round` is the round whose question is pending
+ * (0 = not started), `pendingCheckpoint` marks a checkpoint decision awaiting
+ * the user, and `assistantQuestion` is the current pending question text.
+ */
+export interface InterrogationState {
+  round: number;
+  strategy: import('./strategy-engine').StrategyId | null;
+  assistantQuestion: string | null;
+  usedFallback: boolean;
+  pendingCheckpoint: boolean;
+  uncertainStreak: number;
+}
+
+/** Actions accepted by the interrogation orchestration API (#15). */
+export type InterrogateAction = 'start' | 'answer' | 'continue';
+
+/** Uncertain-answer hint returned by the orchestration API (#10 semantics). */
+export interface InterrogateHint {
+  message: string;
+  hint?: string[];
+}
+
+/** Response body of POST /api/interrogate (#15). */
+export interface InterrogateResponseBody {
+  round: number;
+  strategy: import('./strategy-engine').StrategyId | null;
+  /** Current pending assistant question; null while a checkpoint is pending. */
+  question: string | null;
+  /** True while the checkpoint decision (继续/结束) is pending. */
+  checkpoint: boolean;
+  usedFallback: boolean;
+  uncertainStreak: number;
+  hint: InterrogateHint | null;
+  /** True when three consecutive uncertain answers suggest ending (#10). */
+  suggestComplete: boolean;
+  completed: boolean;
+  /** The full updated session; the client mirrors it into local storage. */
+  session: Session;
 }
 
 export interface ResultCard {
@@ -113,8 +161,11 @@ export interface RetrievalProvider {
 }
 
 export interface LLMProvider {
-  generateQuestion(session: Session): Promise<string>;
-  /** Strategy-aware question generation (ticket #9). */
+  /**
+   * Strategy-aware question generation. Since #15 the LLM only fills in the
+   * question text for a strategy chosen by the orchestration API; the old
+   * session-level one-round `generateQuestion` contract is removed.
+   */
   generateStrategyQuestion(
     strategy: import('./strategy-engine').StrategyId,
     session: Session
