@@ -10,6 +10,9 @@ import {
   FixtureLLMProvider,
   FixtureRetrievalProvider,
 } from '../../src/lib/fixture-providers';
+import {
+  HotlistProvider,
+} from '../../src/lib/hotlist-providers';
 import { FIXTURE_QUESTION, type Session } from '../../src/lib/providers';
 
 // Minimal localStorage mock for Node.js environment
@@ -185,5 +188,71 @@ describe('buildResultCard', () => {
     assert.ok(card.messageIds.includes('u1'));
     assert.ok(card.messageIds.includes('u2'));
     assert.ok(!card.messageIds.includes('a1'));
+  });
+});
+
+// ---- HotlistProvider contract ----
+const makeHotlistProvider = (store?: Record<string, string>): { provider: HotlistProvider; ls: Store } => {
+  const ls: Store = store ?? {};
+  Object.defineProperty(globalThis, 'localStorage', { value: makeLS(ls), configurable: true });
+  return { provider: new HotlistProvider(), ls };
+};
+
+describe('HotlistProvider', () => {
+  it('returns demo items when no cache exists', async () => {
+    const { provider } = makeHotlistProvider();
+    const result = await provider.fetchHotlist();
+    assert.strictEqual(result.source, 'demo');
+    assert.ok(result.items.length > 0);
+    assert.ok(result.items.every(item => item.id && item.title && item.url));
+  });
+
+  it('returns cached items before falling back to demo', async () => {
+    const store: Record<string, string> = {};
+    // First call populates cache
+    const { provider: p1 } = makeHotlistProvider(store);
+    const first = await p1.fetchHotlist();
+    assert.strictEqual(first.source, 'demo');
+
+    // Second call should hit cache
+    const { provider: p2 } = makeHotlistProvider(store);
+    const second = await p2.fetchHotlist();
+    assert.strictEqual(second.source, 'cache');
+    assert.deepStrictEqual(second.items, first.items);
+  });
+
+  it('treats cache as stale after 24h', async () => {
+    const store: Record<string, string> = {};
+    const { provider: p1 } = makeHotlistProvider(store);
+    const first = await p1.fetchHotlist();
+    assert.strictEqual(first.source, 'demo');
+
+    // Push timestamp back beyond TTL
+    const stale = { ...first, updatedAt: Date.now() - 86_400_001 };
+    store['zhiyan_hotlist_cache'] = JSON.stringify(stale);
+
+    const { provider: p2 } = makeHotlistProvider(store);
+    const second = await p2.fetchHotlist();
+    // Stale cache should be replaced with fresh demo
+    assert.strictEqual(second.source, 'demo');
+    assert.ok(second.updatedAt > stale.updatedAt);
+  });
+
+  it('roundtrips cache correctly', async () => {
+    const store: Record<string, string> = {};
+    const { provider: p1 } = makeHotlistProvider(store);
+    await p1.fetchHotlist();
+
+    assert.ok(store['zhiyan_hotlist_cache']);
+    const parsed = JSON.parse(store['zhiyan_hotlist_cache']);
+    assert.strictEqual(parsed.source, 'demo');
+    assert.ok(Array.isArray(parsed.items));
+    assert.ok(typeof parsed.updatedAt === 'number');
+  });
+
+  it('has exactly 10 demo items', async () => {
+    const { provider } = makeHotlistProvider();
+    const result = await provider.fetchHotlist();
+    assert.strictEqual(result.items.length, 10);
   });
 });

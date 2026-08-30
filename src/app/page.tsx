@@ -28,6 +28,8 @@ export default function Home() {
   const [resultCard, setResultCard] = useState<ResultCard | null>(null);
   const [answer, setAnswer] = useState('');
   const [loading, setLoading] = useState(false);
+  const [hotlist, setHotlist] = useState<{ items: { id: string; title: string; url: string }[]; source: 'live' | 'cache' | 'demo'; updatedAt: number } | null>(null);
+  const [hotlistLoading, setHotlistLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Restore session from URL on reload
@@ -51,6 +53,25 @@ export default function Home() {
       }
     };
     void restore();
+  }, []);
+
+  // Fetch hotlist on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/hotlist');
+        if (!cancelled && res.ok) {
+          const data = await res.json();
+          setHotlist(data);
+        }
+      } catch {
+        // silently ignore — hotlist is optional
+      } finally {
+        if (!cancelled) setHotlistLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -167,7 +188,7 @@ export default function Home() {
   }
 
   if (page === 'home') {
-    return <HomePage onStart={handleStart} />;
+    return <HomePage onStart={handleStart} hotlist={hotlist} hotlistLoading={hotlistLoading} />;
   }
 
   return (
