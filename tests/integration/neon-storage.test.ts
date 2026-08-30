@@ -264,6 +264,32 @@ describe('PostgresOwnedStorageProvider: completed sessions are never overwritten
     const afterRewrite = await backend.loadSession(OWNER_A, session.id);
     assert.strictEqual(afterRewrite!.question, completed.question);
   });
+
+  it('pins the completed-readonly guard in the upsert SQL text itself', async () => {
+    // The fake executor emulates the guard BEHAVIORALLY (hardcoded in its
+    // INSERT branch), so the tests above would stay green even if the clause
+    // were dropped from the adapter. This test pins the STATEMENT TEXT: the
+    // atomic guard must be part of the emitted SQL, exactly as documented in
+    // postgres-storage.ts.
+    const executor = makeExecutor();
+    const backend = postgresBackend(executor);
+    const session = makeSession();
+    await backend.saveSession(OWNER_A, session);
+    await backend.saveSession(OWNER_A, { ...session, updatedAt: session.updatedAt + 1 });
+
+    const upserts = executor.executed.filter((sql) =>
+      sql.trim().toUpperCase().startsWith('INSERT INTO ZHIYAN_SESSIONS')
+    );
+    assert.ok(upserts.length >= 2, 'both writes must have executed the upsert statement');
+    for (const sql of upserts) {
+      assert.match(sql, /ON CONFLICT\s*\(owner_id,\s*session_id\)\s*DO UPDATE/i);
+      assert.match(
+        sql,
+        /WHERE\s+zhiyan_sessions\.completed\s*=\s*FALSE/i,
+        'the upsert must carry the atomic completed-readonly guard clause'
+      );
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
