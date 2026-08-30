@@ -8,10 +8,11 @@
 //     one retry, and the session, its rounds and every user answer survive
 //   - usedFallback is identical in the API response and the persisted session
 //   - model text becomes the assistant question, never a user message
-import { describe, it } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert';
 import { POST } from '../../src/app/api/interrogate/route';
-import { llmProvider, serverStorage } from '../../src/lib/server-providers';
+import { llmProvider } from '../../src/lib/server-providers';
+import { getServerStorage, type OwnerStorageScope } from '../../src/lib/server-storage';
 import {
   OpenAICompatibleLLMProvider,
   type LLMCallOptions,
@@ -32,6 +33,15 @@ const CONFIG: OpenAILLMConfig = {
   model: 'test-model',
   timeoutMs: 5_000,
 };
+
+// #21: anonymous owner shared by the requests and the seeding.
+const TEST_OWNER = 'test-owner-llm-api';
+let scope: OwnerStorageScope;
+
+before(async () => {
+  const manager = await getServerStorage();
+  scope = manager.forOwner(TEST_OWNER);
+});
 
 let sessionCounter = 0;
 
@@ -59,7 +69,7 @@ interface HttpResult {
 async function postInterrogate(payload: Record<string, unknown>): Promise<HttpResult> {
   const request = new Request('http://localhost:3000/api/interrogate', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-zhiyan-owner': TEST_OWNER },
     body: JSON.stringify(payload),
   });
   const response = await POST(request);
@@ -102,7 +112,7 @@ describe('POST /api/interrogate with the real OpenAI-compatible provider (#20)',
     const restore = installFakeModel(() => chatJson(MODEL_QUESTION));
     try {
       const session = seedSession();
-      await serverStorage.saveSession(session);
+      await scope.sessions.saveSession(session);
       const res = await postInterrogate({ sessionId: session.id, action: 'start', viewpoint: VIEWPOINT });
       assert.strictEqual(res.status, 200);
       assert.strictEqual(res.body.strategy, 'M1_evidence', 'the engine must still pick the strategy');
@@ -110,7 +120,7 @@ describe('POST /api/interrogate with the real OpenAI-compatible provider (#20)',
       assert.strictEqual(res.body.question, MODEL_QUESTION);
       assert.strictEqual(res.body.usedFallback, false);
 
-      const stored = await serverStorage.loadSession(session.id);
+      const stored = await scope.sessions.loadSession(session.id);
       assert.ok(stored);
       assert.strictEqual(stored.interrogation?.usedFallback, false);
       assert.strictEqual(stored.interrogation?.assistantQuestion, MODEL_QUESTION);
@@ -130,7 +140,7 @@ describe('POST /api/interrogate with the real OpenAI-compatible provider (#20)',
     });
     try {
       const session = seedSession();
-      await serverStorage.saveSession(session);
+      await scope.sessions.saveSession(session);
       const res = await postInterrogate({ sessionId: session.id, action: 'start', viewpoint: VIEWPOINT });
       assert.strictEqual(res.status, 200);
       assert.strictEqual(transportCalls, 2, 'at most one retry — never a third attempt');
@@ -144,7 +154,7 @@ describe('POST /api/interrogate with the real OpenAI-compatible provider (#20)',
       assert.ok(expectedTemplate.includes('策略模板'), 'the degradation must disclose itself honestly');
 
       // The persisted session matches the API response.
-      const stored = await serverStorage.loadSession(session.id);
+      const stored = await scope.sessions.loadSession(session.id);
       assert.ok(stored);
       assert.strictEqual(stored.interrogation?.usedFallback, true);
       assert.strictEqual(stored.interrogation?.assistantQuestion, expectedTemplate);
@@ -177,7 +187,7 @@ describe('POST /api/interrogate with the real OpenAI-compatible provider (#20)',
     });
     try {
       const session = seedSession();
-      await serverStorage.saveSession(session);
+      await scope.sessions.saveSession(session);
       const res = await postInterrogate({ sessionId: session.id, action: 'start', viewpoint: VIEWPOINT });
       assert.strictEqual(res.status, 200);
       assert.strictEqual(transportCalls, 2);
@@ -192,7 +202,7 @@ describe('POST /api/interrogate with the real OpenAI-compatible provider (#20)',
     const restore = installFakeModel(() => chatJson('你的观点是正确的，无需进一步讨论。'));
     try {
       const session = seedSession();
-      await serverStorage.saveSession(session);
+      await scope.sessions.saveSession(session);
       const res = await postInterrogate({ sessionId: session.id, action: 'start', viewpoint: VIEWPOINT });
       assert.strictEqual(res.status, 200);
       assert.strictEqual(res.body.usedFallback, true, 'a verdict-like model answer must degrade');
@@ -213,7 +223,7 @@ describe('POST /api/interrogate with the real OpenAI-compatible provider (#20)',
     const restore = installFakeModel(() => new Promise<Response>(() => {}), { timeoutMs: 20 });
     try {
       const session = seedSession();
-      await serverStorage.saveSession(session);
+      await scope.sessions.saveSession(session);
       const res = await postInterrogate({ sessionId: session.id, action: 'start', viewpoint: VIEWPOINT });
       assert.strictEqual(res.status, 200);
       assert.strictEqual(res.body.usedFallback, true);

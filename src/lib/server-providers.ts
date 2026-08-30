@@ -21,9 +21,12 @@ export const retrievalProvider = new FixtureRetrievalProvider();
 export const llmProvider: LLMProvider = createLLMProviderFromEnv() ?? new FixtureLLMProvider();
 
 // ---------------------------------------------------------------------------
-// Server-side in-memory storage for API routes.
-// Survives within a single Node.js process only.
-// Production boundary is Neon PostgreSQL (PRD v4.0 deferred).
+// Server-side in-memory storage.
+// NOTE (#21): API routes no longer use a bare singleton — they use the
+// ownership-aware server storage from ./server-storage (memory mode without
+// DATABASE_URL, Neon PostgreSQL with it). MemoryStorageProvider remains as
+// the baseline single-owner implementation for behavior-equivalence tests;
+// the owned variant lives in ./owned-storage.
 // ---------------------------------------------------------------------------
 
 export class MemoryStorageProvider implements StorageProvider {
@@ -45,5 +48,3 @@ export class MemoryStorageProvider implements StorageProvider {
     this.store.delete(id);
   }
 }
-
-export const serverStorage = new MemoryStorageProvider();
