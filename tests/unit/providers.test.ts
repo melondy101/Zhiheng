@@ -1339,3 +1339,83 @@ describe('DEMO_FIXTURES', () => {
     });
   });
 });
+
+// ---- Ticket #14: five-round interrogation state machine ----
+// Namespace import so the red-state failure is isolated to the new cases.
+// (FixtureLLMProvider is already imported at the top of this file.)
+import * as strategyEngine14 from '../../src/lib/strategy-engine';
+
+describe('actionAfterAnswer (#14 checkpoint state machine)', () => {
+  it('rounds 1-4 continue to the next round', () => {
+    for (const r of [1, 2, 3, 4]) {
+      assert.strictEqual(strategyEngine14.actionAfterAnswer(r), 'next_round', `round ${r}`);
+    }
+  });
+  it('round 5 triggers the checkpoint decision', () => {
+    assert.strictEqual(strategyEngine14.actionAfterAnswer(5), 'checkpoint');
+  });
+  it('rounds 6-7 continue; 8/11/14 trigger checkpoint decisions', () => {
+    assert.strictEqual(strategyEngine14.actionAfterAnswer(6), 'next_round');
+    assert.strictEqual(strategyEngine14.actionAfterAnswer(7), 'next_round');
+    assert.strictEqual(strategyEngine14.actionAfterAnswer(8), 'checkpoint');
+    assert.strictEqual(strategyEngine14.actionAfterAnswer(11), 'checkpoint');
+    assert.strictEqual(strategyEngine14.actionAfterAnswer(14), 'checkpoint');
+  });
+});
+
+describe('resumePlan (#14 refresh restore)', () => {
+  it('a restored session with 0 answers resumes the interrogation', () => {
+    assert.deepStrictEqual(strategyEngine14.resumePlan(makeSession(0)), {
+      action: 'next_round',
+      answeredRounds: 0,
+    });
+  });
+  it('a restored session with 4 answers continues the interrogation', () => {
+    assert.deepStrictEqual(strategyEngine14.resumePlan(makeSession(4)), {
+      action: 'next_round',
+      answeredRounds: 4,
+    });
+  });
+  it('a restored session with 5 answers resumes at the checkpoint decision', () => {
+    assert.strictEqual(strategyEngine14.resumePlan(makeSession(5)).action, 'checkpoint');
+    assert.strictEqual(strategyEngine14.resumePlan(makeSession(5)).answeredRounds, 5);
+  });
+  it('a restored session with 8 answers resumes at the checkpoint decision', () => {
+    assert.strictEqual(strategyEngine14.resumePlan(makeSession(8)).action, 'checkpoint');
+  });
+  it('a restored session ignores assistant messages when counting rounds', () => {
+    // messages already alternate user/assistant in makeSession; add extra assistant-only noise
+    const s = makeSession(2);
+    s.messages.push({ id: 'x1', role: 'assistant', text: 'noise', timestamp: 99 });
+    assert.deepStrictEqual(strategyEngine14.resumePlan(s), {
+      action: 'next_round',
+      answeredRounds: 2,
+    });
+  });
+});
+
+describe('five-round contract (#14)', () => {
+  it('after five answers the next round is 6, not a checkpoint round, back to M1', async () => {
+    const result = await planNextRound(makeSession(5), async () => 'Q6');
+    assert.strictEqual(result.round, 6);
+    assert.strictEqual(result.isCheckpoint, false);
+    assert.strictEqual(result.strategy, 'M1_evidence');
+  });
+  it('fixture LLM produces the five standard questions in order', async () => {
+    const provider = new FixtureLLMProvider();
+    const expected = [
+      '具体的数据或例子',
+      '隐含的前提',
+      '对立观点重新论证',
+      '相反的立场辩护',
+      '重新表述你当前的观点',
+    ];
+    for (let i = 0; i < 5; i++) {
+      const q = await provider.generateStrategyQuestion('M1_evidence', makeSession(i));
+      assert.ok(
+        q.includes(expected[i]!),
+        `round ${i + 1} question should contain "${expected[i]}" but was "${q}"`
+      );
+    }
+  });
+});

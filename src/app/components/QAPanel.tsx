@@ -8,6 +8,7 @@ interface QAPanelProps {
   currentQuestion: string | null;
   currentStrategy?: StrategyId | null;
   currentRound?: number;
+  /** True while the checkpoint decision (继续 / 结束) is pending (#14). */
   isCheckpoint?: boolean;
   usedFallback?: boolean;
   hintMessage?: string | null;
@@ -15,6 +16,7 @@ interface QAPanelProps {
   answer: string;
   onAnswerChange: (text: string) => void;
   onSubmit: (e: React.FormEvent) => void;
+  onContinue?: () => void;
   onExit?: () => void;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
 }
@@ -39,6 +41,7 @@ export default function QAPanel({
   answer,
   onAnswerChange,
   onSubmit,
+  onContinue,
   onExit,
   messagesEndRef,
 }: QAPanelProps) {
@@ -105,11 +108,32 @@ export default function QAPanel({
           )}
 
           {isCheckpoint && (
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 text-sm">
-              <p className="font-medium text-purple-700 mb-1">检查点</p>
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 text-sm mb-4">
+              <p className="font-medium text-purple-700 mb-1">阶段小结</p>
               <p className="text-gray-600">
-                阶段性小结。是否继续下一阶段？选择"结束"将生成成果卡。
+                你已完成第 1–{currentRound} 轮诘问。是否继续下一阶段，还是就此结束？
               </p>
+              {currentRound === 5 && (
+                <p className="text-gray-600 mt-1">
+                  本阶段依次完成了：证据追问、前提追问、钢铁人反驳、立场反转、观点重述。
+                </p>
+              )}
+              <div className="flex gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={onContinue}
+                  className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs hover:bg-purple-700"
+                >
+                  继续
+                </button>
+                <button
+                  type="button"
+                  onClick={onExit}
+                  className="px-3 py-1.5 border border-purple-300 text-purple-700 rounded-lg text-xs hover:bg-purple-100"
+                >
+                  结束并生成成果卡
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -121,24 +145,26 @@ export default function QAPanel({
         </div>
       )}
 
-      <form onSubmit={onSubmit} className="p-4 border-t">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={answer}
-            onChange={(e) => onAnswerChange(e.target.value)}
-            placeholder="输入你的回答..."
-            className="flex-1 p-2 border rounded-lg text-sm"
-          />
-          <button
-            type="submit"
-            disabled={!answer.trim()}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:bg-gray-300"
-          >
-            发送
-          </button>
-        </div>
-      </form>
+      {!isCheckpoint && (
+        <form onSubmit={onSubmit} className="p-4 border-t">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={answer}
+              onChange={(e) => onAnswerChange(e.target.value)}
+              placeholder="输入你的回答..."
+              className="flex-1 p-2 border rounded-lg text-sm"
+            />
+            <button
+              type="submit"
+              disabled={!answer.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:bg-gray-300"
+            >
+              发送
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
