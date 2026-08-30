@@ -9,6 +9,9 @@ interface QAPanelProps {
   currentStrategy?: StrategyId | null;
   currentRound?: number;
   isCheckpoint?: boolean;
+  usedFallback?: boolean;
+  hintMessage?: string | null;
+  hintOptions?: string[] | null;
   answer: string;
   onAnswerChange: (text: string) => void;
   onSubmit: (e: React.FormEvent) => void;
@@ -30,6 +33,9 @@ export default function QAPanel({
   currentStrategy,
   currentRound = 0,
   isCheckpoint = false,
+  usedFallback = false,
+  hintMessage,
+  hintOptions,
   answer,
   onAnswerChange,
   onSubmit,
@@ -79,6 +85,22 @@ export default function QAPanel({
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
               <p className="text-sm font-medium mb-2">追问:</p>
               <p className="text-sm">{currentQuestion}</p>
+              {usedFallback && (
+                <p className="text-xs text-orange-600 mt-2">⚠️ AI 服务异常，已使用策略模板</p>
+              )}
+            </div>
+          )}
+
+          {hintMessage && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+              <p className="text-sm">{hintMessage}</p>
+              {hintOptions && (
+                <ul className="mt-2 text-sm space-y-1">
+                  {hintOptions.map((h, i) => (
+                    <li key={i} className="text-gray-700">• {h}</li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 

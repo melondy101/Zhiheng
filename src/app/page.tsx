@@ -27,6 +27,10 @@ export default function Home() {
   const [currentStrategy, setCurrentStrategy] = useState<import('@/lib/strategy-engine').StrategyId | null>(null);
   const [isCheckpoint, setIsCheckpoint] = useState(false);
   const [currentRound, setCurrentRound] = useState(0);
+  const [usedFallback, setUsedFallback] = useState(false);
+  const [uncertainStreak, setUncertainStreak] = useState(0);
+  const [hintMessage, setHintMessage] = useState<string | null>(null);
+  const [hintOptions, setHintOptions] = useState<string[] | null>(null);
   const [completed, setCompleted] = useState(false);
   const [resultCard, setResultCard] = useState<ResultCard | null>(null);
   const [answer, setAnswer] = useState('');
@@ -148,16 +152,20 @@ export default function Home() {
   };
 
   const generateQuestion = async (sess: Session) => {
-    // Use strategy-aware question generation (ticket #9)
     const { planNextRound, recordStrategy } = await import('@/lib/strategy-engine');
+    const { withFallback } = await import('@/lib/llm-fallback');
     const result = await planNextRound(sess, (strategy, s) =>
       llmProvider.generateStrategyQuestion(strategy, s)
     );
+    const fb = await withFallback(result.strategy, sess, () =>
+      llmProvider.generateStrategyQuestion(result.strategy, sess)
+    );
     recordStrategy(sess, result.strategy);
-    setCurrentQuestion(result.question);
+    setCurrentQuestion(fb.question);
     setCurrentStrategy(result.strategy);
     setIsCheckpoint(result.isCheckpoint);
     setCurrentRound(result.round);
+    setUsedFallback(fb.usedFallback);
   };
 
   const handleSendAnswer = async (e: React.FormEvent) => {
@@ -166,6 +174,28 @@ export default function Home() {
 
     const userAnswer = answer.trim();
     setAnswer('');
+
+    // Detect uncertain answer (ticket #10)
+    const { isUncertainAnswer, uncertainResponse } = await import('@/lib/llm-fallback');
+    const uncertain = isUncertainAnswer(userAnswer);
+    const newStreak = uncertain ? uncertainStreak + 1 : 0;
+    setUncertainStreak(newStreak);
+
+    if (newStreak >= 3) {
+      setHintMessage('建议结束本次诘问并生成成果卡。');
+      setHintOptions(null);
+      await handleCompleteNow();
+      return;
+    }
+
+    if (newStreak > 0) {
+      const hint = uncertainResponse(newStreak, session);
+      setHintMessage(hint.message);
+      setHintOptions(hint.hint ?? null);
+    } else {
+      setHintMessage(null);
+      setHintOptions(null);
+    }
 
     const userMsg: Message = {
       id: `m_${Date.now()}_u`,
@@ -270,6 +300,9 @@ export default function Home() {
               currentStrategy={currentStrategy}
               currentRound={currentRound}
               isCheckpoint={isCheckpoint}
+              usedFallback={usedFallback}
+              hintMessage={hintMessage}
+              hintOptions={hintOptions}
               answer={answer}
               onAnswerChange={setAnswer}
               onSubmit={handleSendAnswer}

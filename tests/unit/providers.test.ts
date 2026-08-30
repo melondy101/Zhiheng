@@ -1029,3 +1029,89 @@ describe('planNextRound', () => {
     }
   });
 });
+
+// ---- Ticket #10: LLM fallback and uncertain answer handling ----
+import {
+  withFallback,
+  isUncertainAnswer,
+  uncertainResponse,
+} from '../../src/lib/llm-fallback';
+
+const makeFallbackSession = (): Session => ({
+  id: 's', question: 'test question', initialOpinion: null, report: null,
+  selectedViewpoint: null, messages: [], resultCard: null,
+  completed: false, createdAt: 0, updatedAt: 0,
+});
+
+describe('isUncertainAnswer', () => {
+  it('detects 不知道', () => assert.strictEqual(isUncertainAnswer('不知道'), true));
+  it('detects 不清楚', () => assert.strictEqual(isUncertainAnswer('我不清楚'), true));
+  it('detects very short answers', () => assert.strictEqual(isUncertainAnswer('嗯'), true));
+  it('accepts substantive answer', () => assert.strictEqual(isUncertainAnswer('我认为 AI 会增强而非取代创造力'), false));
+});
+
+describe('uncertainResponse', () => {
+  it('streak 0 returns empty', () => {
+    const r = uncertainResponse(0, makeFallbackSession());
+    assert.strictEqual(r.level, 0);
+    assert.strictEqual(r.message, '');
+  });
+  it('streak 1 returns narrowing prompt', () => {
+    const r = uncertainResponse(1, makeFallbackSession());
+    assert.strictEqual(r.level, 1);
+    assert.ok(r.message.includes('缩小'));
+  });
+  it('streak 2 returns two directions', () => {
+    const r = uncertainResponse(2, makeFallbackSession());
+    assert.strictEqual(r.level, 2);
+    assert.ok(r.hint && r.hint.length === 2);
+  });
+  it('streak 3+ suggests ending', () => {
+    const r = uncertainResponse(3, makeFallbackSession());
+    assert.strictEqual(r.level, 3);
+    assert.ok(r.message.includes('结束'));
+  });
+});
+
+describe('withFallback', () => {
+  it('returns first success without fallback', async () => {
+    const r = await withFallback('M1_evidence', makeFallbackSession(), async () => 'good question');
+    assert.strictEqual(r.usedFallback, false);
+    assert.strictEqual(r.question, 'good question');
+    assert.strictEqual(r.events[0]?.type, 'success');
+  });
+  it('retries once then uses template on failure', async () => {
+    let calls = 0;
+    const r = await withFallback('M1_evidence', makeFallbackSession(), async () => {
+      calls++;
+      throw new Error('boom');
+    });
+    assert.strictEqual(calls, 2, 'should attempt twice');
+    assert.strictEqual(r.usedFallback, true);
+    assert.ok(r.question.length > 0);
+    assert.ok(r.events.some((e) => e.type === 'retry'));
+    assert.ok(r.events.some((e) => e.type === 'template'));
+  });
+  it('falls back on empty string', async () => {
+    const r = await withFallback('M2_premise', makeFallbackSession(), async () => '');
+    assert.strictEqual(r.usedFallback, true);
+    assert.ok(r.question.length > 0);
+  });
+  it('success on second attempt does not use fallback', async () => {
+    let calls = 0;
+    const r = await withFallback('M1_evidence', makeFallbackSession(), async () => {
+      calls++;
+      if (calls === 1) throw new Error('first fails');
+      return 'retry success';
+    });
+    assert.strictEqual(r.usedFallback, false);
+    assert.strictEqual(r.question, 'retry success');
+  });
+  it('never throws even when generator always throws', async () => {
+    const r = await withFallback('M1_evidence', makeFallbackSession(), async () => {
+      throw new Error('persistent');
+    });
+    assert.ok(r.question.length > 0);
+    assert.strictEqual(r.usedFallback, true);
+  });
+});
