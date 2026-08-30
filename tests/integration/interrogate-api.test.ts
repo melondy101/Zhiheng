@@ -11,6 +11,7 @@ import type {
   InterrogateResponseBody,
   Message,
   Session,
+  Source,
   Viewpoint,
 } from '../../src/lib/providers';
 
@@ -212,7 +213,12 @@ describe('POST /api/interrogate: five-round strategy contract (#15)', () => {
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.round, 6);
     assert.strictEqual(res.body.strategy, 'M1_evidence');
-    assert.ok(res.body.question && res.body.question.includes('第 6 轮'));
+    // #16: the round 6 question must quote the user's last answer (round 5),
+    // not the old round-fixed template text.
+    assert.ok(
+      res.body.question && res.body.question.includes(ANSWER_ROUND(5).replace(/。$/, '')),
+      `round 6 question must quote the round 5 answer, got: ${res.body.question}`
+    );
     assert.strictEqual(res.body.checkpoint, false);
 
     const stored = await serverStorage.loadSession(session.id);
@@ -329,8 +335,19 @@ describe('POST /api/interrogate: usedFallback marking (#15)', () => {
       });
       assert.strictEqual(res.status, 200);
       assert.strictEqual(res.body.usedFallback, true);
-      const template = STRATEGIES.M1_evidence.fallbackTemplate(session);
+      // #16: the fallback template is context-driven too — the orchestrator
+      // plans with the stance already selected, so the expected template is
+      // computed against the same prepared session.
+      const prepared: Session = { ...session, selectedViewpoint: VIEWPOINT };
+      const template = STRATEGIES.M1_evidence.fallbackTemplate(prepared);
       assert.strictEqual(res.body.question, template);
+      // Honest degradation: the template discloses its provenance and quotes
+      // the user's claim (#16).
+      assert.ok(template.includes('策略模板'), `fallback must disclose degradation: ${template}`);
+      assert.ok(
+        template.includes(VIEWPOINT.text),
+        `fallback must reference the stance claim: ${template}`
+      );
 
       const stored = await serverStorage.loadSession(session.id);
       assert.ok(stored);
@@ -339,6 +356,107 @@ describe('POST /api/interrogate: usedFallback marking (#15)', () => {
     } finally {
       llmProvider.generateStrategyQuestion = original;
     }
+  });
+});
+
+describe('POST /api/interrogate: context-driven questions (#16)', () => {
+  const CLAIM_A = '远程工作减少通勤时间，并提升员工的自主权。';
+  const CLAIM_B = '开放办公环境能促进团队的即时协作。';
+
+  it('round 1 quotes the selected stance instead of fixed template text', async () => {
+    const session = seedSession();
+    await serverStorage.saveSession(session);
+    const started = await startSession(session);
+    assert.ok(started.question, 'round 1 must have a question');
+    assert.ok(
+      started.question.includes(VIEWPOINT.text),
+      `round 1 question must quote the stance, got: ${started.question}`
+    );
+    assert.notStrictEqual(started.question, '第 1 轮：请进一步阐述你的观点。');
+  });
+
+  it('the next question quotes a claim fragment from the user\'s last answer', async () => {
+    const session = seedSession();
+    await serverStorage.saveSession(session);
+    await startSession(session);
+    const res = await postInterrogate({
+      sessionId: session.id,
+      action: 'answer',
+      answer: CLAIM_A,
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.round, 2);
+    assert.strictEqual(res.body.strategy, 'M2_premise');
+    assert.ok(res.body.question);
+    assert.ok(
+      res.body.question.includes('远程工作减少通勤时间'),
+      `question must quote the user's claim, got: ${res.body.question}`
+    );
+  });
+
+  it('different user answers produce different questions at the same round', async () => {
+    const sessionA = seedSession();
+    await serverStorage.saveSession(sessionA);
+    await startSession(sessionA);
+    const resA = await postInterrogate({ sessionId: sessionA.id, action: 'answer', answer: CLAIM_A });
+
+    const sessionB = seedSession();
+    await serverStorage.saveSession(sessionB);
+    await startSession(sessionB);
+    const resB = await postInterrogate({ sessionId: sessionB.id, action: 'answer', answer: CLAIM_B });
+
+    assert.strictEqual(resA.body.round, 2);
+    assert.strictEqual(resB.body.round, 2);
+    assert.strictEqual(resA.body.strategy, 'M2_premise');
+    assert.strictEqual(resB.body.strategy, 'M2_premise');
+    assert.ok(resA.body.question && resB.body.question);
+    assert.notStrictEqual(resA.body.question, resB.body.question);
+    assert.ok(resA.body.question.includes('远程工作减少通勤时间'));
+    assert.ok(resB.body.question.includes('开放办公环境'));
+  });
+});
+
+describe('POST /api/interrogate: report evidence sources (#16)', () => {
+  const citationSource = (id: string, url: string | null): Source => ({
+    id,
+    type: 'zhihu',
+    author: null,
+    title: `标题 ${id}`,
+    url,
+    excerpt: null,
+  });
+
+  it('returns the first citation-numbered URL-bearing sources, skipping url-less ones', async () => {
+    const s1 = citationSource('src_1', 'https://example.com/1');
+    const s2 = citationSource('src_2', 'https://example.com/2');
+    const s3 = citationSource('src_3', null);
+    const s4 = citationSource('src_4', 'https://example.com/4');
+    const s5 = citationSource('src_5', 'https://example.com/5');
+    const session = seedSession({
+      report: {
+        question: 'q',
+        title: 't',
+        knowledgePoints: [],
+        content: 'c',
+        viewpoints: [],
+        references: [s1, s2, s3, s4, s5],
+        citations: { 1: s1, 2: s2, 3: s3, 4: s4, 5: s5 },
+      },
+    });
+    await serverStorage.saveSession(session);
+    const started = await startSession(session);
+    assert.deepStrictEqual(started.sources, [
+      { index: 1, source: s1 },
+      { index: 2, source: s2 },
+      { index: 4, source: s4 },
+    ]);
+  });
+
+  it('returns an empty source list when the session has no usable citations', async () => {
+    const session = seedSession();
+    await serverStorage.saveSession(session);
+    const started = await startSession(session);
+    assert.deepStrictEqual(started.sources, []);
   });
 });
 

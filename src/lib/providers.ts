@@ -51,6 +51,17 @@ export interface Source {
   provenance?: string;
 }
 
+/**
+ * A report citation selected for display next to an interrogation question
+ * (#16). `source` is always the exact Source object stored in
+ * `Report.citations` — never a re-created or fabricated one.
+ */
+export interface CitedSource {
+  /** 1-based citation number in Report.citations. */
+  index: number;
+  source: Source;
+}
+
 // Progress event emitted by a RetrievalProvider while building a report.
 export type ReportProgressStage =
   | 'zhihu_search'
@@ -127,6 +138,13 @@ export interface InterrogateResponseBody {
   usedFallback: boolean;
   uncertainStreak: number;
   hint: InterrogateHint | null;
+  /**
+   * Report evidence relevant to the current question (#16): the first few
+   * citation-numbered sources of the session report that carry a usable URL,
+   * in ascending citation order. Empty when no report citations exist — the
+   * UI must then say so instead of rendering fabricated links.
+   */
+  sources: CitedSource[];
   /** True when three consecutive uncertain answers suggest ending (#10). */
   suggestComplete: boolean;
   completed: boolean;

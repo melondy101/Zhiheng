@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type {
+  CitedSource,
   Session,
   Report,
   Viewpoint,
@@ -11,6 +12,7 @@ import type {
   InterrogateResponseBody,
 } from '@/lib/providers';
 import type { StrategyId } from '@/lib/strategy-engine';
+import { selectRoundSources } from '@/lib/interrogation-context';
 import { FixtureRetrievalProvider } from '@/lib/fixture-providers';
 import { BrowserStorageProvider, StaticReportRenderer, buildResultCard } from '@/lib/demo-providers';
 import HomePage from './components/HomePage';
@@ -41,6 +43,7 @@ interface InterrogateViewHooks {
   setCurrentStrategy: (s: StrategyId | null) => void;
   setCurrentRound: (r: number) => void;
   setUsedFallback: (u: boolean) => void;
+  setCurrentSources: (s: CitedSource[] | null) => void;
   setIsCheckpoint: (v: boolean) => void;
   setCompleted: (v: boolean) => void;
   setResultCard: (c: ResultCard | null) => void;
@@ -135,6 +138,7 @@ async function applyInterrogateResponse(
   hooks.setCurrentStrategy(data.strategy);
   hooks.setCurrentRound(data.round);
   hooks.setUsedFallback(data.usedFallback);
+  hooks.setCurrentSources(data.sources ?? []);
   hooks.setIsCheckpoint(data.checkpoint);
 }
 
@@ -149,6 +153,7 @@ export default function Home() {
   const [isCheckpoint, setIsCheckpoint] = useState(false);
   const [currentRound, setCurrentRound] = useState(0);
   const [usedFallback, setUsedFallback] = useState(false);
+  const [currentSources, setCurrentSources] = useState<CitedSource[] | null>(null);
   const [uncertainStreak, setUncertainStreak] = useState(0);
   const [hintMessage, setHintMessage] = useState<string | null>(null);
   const [hintOptions, setHintOptions] = useState<string[] | null>(null);
@@ -174,6 +179,7 @@ export default function Home() {
       setCurrentStrategy,
       setCurrentRound,
       setUsedFallback,
+      setCurrentSources,
       setIsCheckpoint,
       setCompleted,
       setResultCard,
@@ -197,6 +203,7 @@ export default function Home() {
         setCurrentStrategy,
         setCurrentRound,
         setUsedFallback,
+        setCurrentSources,
         setIsCheckpoint,
         setCompleted,
         setResultCard,
@@ -229,6 +236,8 @@ export default function Home() {
               setCurrentStrategy(st.strategy);
               setCurrentQuestion(null);
               setUsedFallback(st.usedFallback);
+              // #16: restore the question's evidence sources from the session.
+              setCurrentSources(selectRoundSources(data));
               setUncertainStreak(st.uncertainStreak);
               setIsCheckpoint(true);
             } else if (st?.assistantQuestion) {
@@ -237,6 +246,8 @@ export default function Home() {
               setCurrentStrategy(st.strategy);
               setCurrentQuestion(st.assistantQuestion);
               setUsedFallback(st.usedFallback);
+              // #16: restore the question's evidence sources from the session.
+              setCurrentSources(selectRoundSources(data));
               setUncertainStreak(st.uncertainStreak);
               setIsCheckpoint(false);
             } else {
@@ -253,6 +264,7 @@ export default function Home() {
                 setCurrentStrategy,
                 setCurrentRound,
                 setUsedFallback,
+                setCurrentSources,
                 setIsCheckpoint,
                 setCompleted,
                 setResultCard,
@@ -389,6 +401,7 @@ export default function Home() {
     setHintOptions(null);
     setCompleted(false);
     setResultCard(null);
+    setCurrentSources(null);
     setAnswer('');
     setPage('home');
     window.history.pushState({}, '', '/');
@@ -443,6 +456,7 @@ export default function Home() {
               usedFallback={usedFallback}
               hintMessage={hintMessage}
               hintOptions={hintOptions}
+              sources={currentSources}
               answer={answer}
               onAnswerChange={setAnswer}
               onSubmit={handleSendAnswer}
