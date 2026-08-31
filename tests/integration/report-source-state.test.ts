@@ -27,12 +27,14 @@ const OWNER_HEADERS_B = { 'content-type': 'application/json', 'x-zhiyan-owner': 
 
 async function callReport(
   question = '测试问题：源状态持久化',
-  initialOpinion = ''
+  initialOpinion = '',
+  owner = OWNER_A
 ): Promise<{ status: number; body: Record<string, unknown> }> {
+  const headers = owner === OWNER_B ? OWNER_HEADERS_B : OWNER_HEADERS_A;
   const response = await reportPOST(
     new Request('http://localhost:3000/api/report', {
       method: 'POST',
-      headers: OWNER_HEADERS_A,
+      headers,
       body: JSON.stringify({ question, initialOpinion }),
     })
   );
@@ -149,8 +151,8 @@ describe('ReportSourceState persistence integration', () => {
 
     it('each owner sees only their own sessions in listSessions', async () => {
       // Create sessions for owner A and owner B
-      const aResult = await callReport('Owner A question');
-      const bResult = await callReport('Owner B question');
+      const aResult = await callReport('Owner A question', '', OWNER_A);
+      const bResult = await callReport('Owner B question', '', OWNER_B);
 
       const aSessionId = aResult.body.sessionId as string;
       const bSessionId = bResult.body.sessionId as string;
