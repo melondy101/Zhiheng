@@ -117,6 +117,23 @@ export interface Session {
    * recovery source.
    */
   interrogation?: InterrogationState;
+  /**
+   * Persisted retrieval source state (#24). Records the live/cache/demo
+   * provenance of the report's Zhihu and Web sources at the time the report
+   * was generated, including cache updatedAt timestamps from the provider.
+   *
+   * Absent on legacy sessions (predating #24). The UI must display
+   * "未披露/未知" — never auto-fill demo. Use resolveReportSourceState()
+   * from session-source-state.ts for the side-key fallback rules.
+   */
+  reportSourceState?: {
+    zhihu: SourceState;
+    web: SourceState;
+    zhihuUpdatedAt?: number;
+    webUpdatedAt?: number;
+    zhihuStale?: boolean;
+    webStale?: boolean;
+  };
 }
 
 /**

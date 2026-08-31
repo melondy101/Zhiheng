@@ -383,8 +383,12 @@ export default function Home() {
           }
           setSession(data);
           if (data.report) setReport(data.report);
-          // #18: restore the report's retrieval state for the honest badge.
-          setReportSourceState(loadReportSourceState(sessionId));
+          // #24: restore report source state from the persisted session first
+          // (authoritative). Fall back to the side-key only for legacy sessions
+          // that predate #24 and have no session-level reportSourceState.
+          setReportSourceState(
+            data.reportSourceState ?? loadReportSourceState(sessionId) ?? null
+          );
           setMessages(data.messages);
           if (data.selectedViewpoint) setSelectedViewpoint(data.selectedViewpoint);
           if (data.resultCard) {
