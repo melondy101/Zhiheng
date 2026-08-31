@@ -100,7 +100,7 @@ function buildContent(question: string, allSources: Source[]): string {
 
     zhihuSources.forEach((s, i) => {
       const n = zhihuIdx(i);
-      lines.push(`- ${s.excerpt} [${n}]`);
+      lines.push(`- ${s.excerpt ?? '（无摘要）'} [${n}]`);
     });
     lines.push('');
   }
@@ -111,7 +111,7 @@ function buildContent(question: string, allSources: Source[]): string {
 
     webSources.forEach((s, i) => {
       const n = webIdx(i);
-      lines.push(`- ${s.excerpt} [${n}]`);
+      lines.push(`- ${s.excerpt ?? '（无摘要）'} [${n}]`);
     });
     lines.push('');
   }
@@ -122,7 +122,7 @@ function buildContent(question: string, allSources: Source[]): string {
 
     historySources.forEach((s, i) => {
       const n = historyIdx(i);
-      lines.push(`- ${s.excerpt} [${n}]`);
+      lines.push(`- ${s.excerpt ?? '（无摘要）'} [${n}]`);
     });
     lines.push('');
   }

@@ -658,6 +658,83 @@ describe('ReportBuilder', () => {
     assert.ok(stages.includes('synthesizing'), `missing synthesizing in ${stages}`);
     assert.ok(stages.includes('complete'), `missing complete in ${stages}`);
   });
+
+  // Ticket #23: null metadata must not render as literal "null" or "undefined"
+  it('does not render literal null/undefined for missing source metadata', async () => {
+    const nullMetaSources: Source[] = [
+      {
+        id: 'null_excerpt_zh',
+        type: 'zhihu',
+        author: null,
+        title: null,
+        url: null,
+        excerpt: null,
+      },
+      {
+        id: 'null_excerpt_web',
+        type: 'web',
+        author: null,
+        title: null,
+        url: null,
+        excerpt: null,
+      },
+    ];
+    const { report } = await buildReport({
+      question: 'missing data test',
+      zhihuSources: [nullMetaSources[0]!],
+      webSources: [nullMetaSources[1]!],
+    });
+
+    // The report content must not contain the string "null" or "undefined"
+    // (using word-boundary check to avoid false positives from the question text)
+    const nullWordRE = /\bnull\b/;
+    const undefinedWordRE = /\bundefined\b/;
+    assert.ok(
+      !nullWordRE.test(report.content),
+      `content should not contain literal "null", got: ${report.content}`
+    );
+    assert.ok(
+      !undefinedWordRE.test(report.content),
+      `content should not contain literal "undefined", got: ${report.content}`
+    );
+
+    // References preserve original null values (not fabricated) — UI layer handles presentation
+    assert.strictEqual(report.references[0]!.excerpt, null);
+    assert.strictEqual(report.references[0]!.author, null);
+    assert.strictEqual(report.references[0]!.url, null);
+    assert.strictEqual(report.references[1]!.excerpt, null);
+    assert.strictEqual(report.references[1]!.author, null);
+    assert.strictEqual(report.references[1]!.url, null);
+  });
+
+  // Ticket #23: missing excerpt shows a placeholder, not null
+  it('renders missing excerpt as placeholder text', async () => {
+    const sourcesWithMissingExcerpt: Source[] = [
+      {
+        id: 'no_excerpt',
+        type: 'zhihu',
+        author: '真实作者',
+        title: '真实标题',
+        url: 'https://www.zhihu.com/real',
+        excerpt: null,
+      },
+    ];
+    const { report } = await buildReport({
+      question: 'missing excerpt test',
+      zhihuSources: sourcesWithMissingExcerpt,
+      webSources: [],
+    });
+
+    // Should contain placeholder, not literal null
+    assert.ok(
+      report.content.includes('（无摘要）'),
+      `expected "（无摘要）" placeholder in content, got: ${report.content}`
+    );
+    assert.ok(
+      !report.content.includes('null'),
+      `content should not contain literal "null": ${report.content}`
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
