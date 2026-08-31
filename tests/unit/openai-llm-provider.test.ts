@@ -21,6 +21,7 @@ import {
   EVIDENCE_TITLE_MAX_CHARS,
   MAX_QUESTION_CHARS,
   OpenAICompatibleLLMProvider,
+  assertNonJudgingQuestion,
   buildStrategyQuestionMessages,
   createLLMProviderFromEnv,
   extractChoiceContent,
@@ -242,6 +243,51 @@ describe('isValidQuestionText', () => {
     assert.strictEqual(isValidQuestionText('你的观点是错误的，你认同吗？'), false);
     assert.strictEqual(isValidQuestionText('评分：你的观点是正确的，你觉得呢？'), false);
     assert.strictEqual(isValidQuestionText('裁决：这个主张成立，你接受吗？'), false);
+  });
+
+  // #25: expanded verdict pattern coverage
+  it('rejects "该观点错误" / "该观点正确" verdict patterns', () => {
+    assert.strictEqual(isValidQuestionText('该观点错误，你应该重新考虑。'), false);
+    assert.strictEqual(isValidQuestionText('该观点正确，无需进一步讨论。'), false);
+    assert.strictEqual(isValidQuestionText('这个观点是错误的，明白吗？'), false);
+    assert.strictEqual(isValidQuestionText('这个观点是对的，你同意吗？'), false);
+  });
+
+  it('rejects "你应该放弃这个观点" style directive verdicts', () => {
+    assert.strictEqual(isValidQuestionText('你应该放弃这个观点，重新考虑。'), false);
+    assert.strictEqual(isValidQuestionText('你应该改变这个立场。'), false);
+    assert.strictEqual(isValidQuestionText('你应该重新考虑这个观点。'), false);
+    assert.strictEqual(isValidQuestionText('建议你调整这个看法。'), false);
+  });
+
+  it('rejects "结论是……" verdict patterns', () => {
+    assert.strictEqual(isValidQuestionText('结论是你错了，请重新审视。'), false);
+    assert.strictEqual(isValidQuestionText('结论是这个观点不成立。'), false);
+    assert.strictEqual(isValidQuestionText('结论就是如此，无需多言。'), false);
+  });
+
+  it('rejects "评分：8 分" / "评 8 级" rating patterns', () => {
+    assert.strictEqual(isValidQuestionText('评分：8 分，你的观点有一定道理。'), false);
+    assert.strictEqual(isValidQuestionText('评 9 级，这个看法值得肯定。'), false);
+    assert.strictEqual(isValidQuestionText('你的观点评分：7分，你怎么看？'), false);
+    assert.strictEqual(isValidQuestionText('我对你的观点打6分。'), false);
+  });
+
+  it('rejects "评级：8" / "评级：9" rating/ranking patterns', () => {
+    assert.strictEqual(isValidQuestionText('评级：8，你的观点需要改进。'), false);
+    assert.strictEqual(isValidQuestionText('评级：9，这个看法值得肯定。'), false);
+  });
+
+  it('rejects "你必须接受/拒绝这个立场" imperative verdict patterns', () => {
+    assert.strictEqual(isValidQuestionText('你必须接受这个立场。'), false);
+    assert.strictEqual(isValidQuestionText('你必须拒绝这个观点。'), false);
+    assert.strictEqual(isValidQuestionText('你应该放弃这个立场。'), false);
+    assert.strictEqual(isValidQuestionText('你需要接受这个看法。'), false);
+  });
+
+  it('rejects "对你打 7 分" scoring verdict patterns', () => {
+    assert.strictEqual(isValidQuestionText('对你打 7 分，你的观点值得思考。'), false);
+    assert.strictEqual(isValidQuestionText('对你的回答评8分。'), false);
   });
 });
 

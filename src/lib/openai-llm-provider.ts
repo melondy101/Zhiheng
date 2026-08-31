@@ -162,7 +162,11 @@ export function buildStrategyQuestionMessages(
 // Response validation — untrusted output, never relaxed
 // ---------------------------------------------------------------------------
 
-/** Verdict/answer-on-behalf markers that must never pass as a question. */
+/**
+ * Extended verdict/answer-on-behalf markers (#25) — must never pass as a
+ * question.  The original VERDICT_PATTERNS are preserved for backward
+ * compatibility; JUDGMENT_PATTERNS adds the patterns identified in #25.
+ */
 const VERDICT_PATTERNS: RegExp[] = [
   /你是对的/,
   /你错了/,
@@ -172,6 +176,37 @@ const VERDICT_PATTERNS: RegExp[] = [
   /裁决[:：]/,
   /正确性[:：]/,
 ];
+
+/** Additional patterns added for ticket #25. */
+const JUDGMENT_PATTERNS: RegExp[] = [
+  /你应该(放弃|改变|重新考虑|调整)/,
+  /[这该]?个?观点(是)?(错误|正确|错的|对的|不可接受|站不住)/,
+  /结论(是|为|就)/,
+  /评分[:：]\s*\d+/,
+  /评\s*[一二三四五六七八九十0-9]+\s*[级分]/,
+  /你(必须|应该|需要)?\s*(接受|拒绝|放弃|改变)\s*(这个|该)?\s*(观点|立场|看法)/,
+  /对.*(打|评)\s*[0-9]+\s*分/,
+  /评级[:：]\s*[0-9]+/,
+];
+
+/**
+ * Standalone contract function (#25): throws if the text contains a judging
+ * pattern, otherwise returns silently.  Callers can use this to validate
+ * arbitrary strings (e.g. user-provided text that may have been cached or
+ * re-submitted) without having to go through isValidQuestionText.
+ * @throws Error with a message that names the failing pattern category
+ */
+export function assertNonJudgingQuestion(text: string): void {
+  const t = text.trim();
+  const verdictMatch = VERDICT_PATTERNS.find((p) => p.test(t));
+  if (verdictMatch) {
+    throw new Error(`Judging content detected (verdict pattern): ${verdictMatch}`);
+  }
+  const judgmentMatch = JUDGMENT_PATTERNS.find((p) => p.test(t));
+  if (judgmentMatch) {
+    throw new Error(`Judging content detected (judgment pattern): ${judgmentMatch}`);
+  }
+}
 
 /**
  * Validate that the model output is a single, bounded question that does not
@@ -186,7 +221,11 @@ export function isValidQuestionText(content: string): boolean {
   const questionMarks = (text.match(/[？?]/g) ?? []).length;
   if (questionMarks !== 1) return false; // single question only
   if (!text.endsWith('？') && !text.endsWith('?')) return false;
-  if (VERDICT_PATTERNS.some((p) => p.test(text))) return false;
+  try {
+    assertNonJudgingQuestion(text);
+  } catch {
+    return false;
+  }
   return true;
 }
 
