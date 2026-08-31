@@ -2,4 +2,4 @@
 
 Layout: **single-context**.
 
-Before exploring, read root `CONTEXT.md` when it exists and relevant ADRs under `docs/adr/`. If absent, proceed silently. Use the vocabulary defined in `CONTEXT.md`, and explicitly flag conflicts with existing ADRs.
+This repo currently has no root `CONTEXT.md` and no `docs/adr/` directory. Use `docs/architecture.md` as the canonical architecture reference and `.scratch/zhiyan-mvp-spec.md` for product scope. PR/Issue work goes via `gh` CLI per `docs/agents/issue-tracker.md`.
