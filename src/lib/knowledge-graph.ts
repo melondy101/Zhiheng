@@ -28,6 +28,20 @@ export interface GraphEdge {
 export interface KnowledgeGraph {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  /**
+   * The retrieval provenance of the report's sources (#24). This is the same
+   * reportSourceState that is persisted on the Session. It is attached here
+   * so KnowledgeGraphView can display provenance truthfully when rendering
+   * a graph that was restored from a session (not freshly generated).
+   */
+  sourceState?: {
+    zhihu: import('./providers').SourceState;
+    web: import('./providers').SourceState;
+    zhihuUpdatedAt?: number;
+    webUpdatedAt?: number;
+    zhihuStale?: boolean;
+    webStale?: boolean;
+  };
 }
 
 const TARGET_NODE_COUNT = 8; // within 6-10 range

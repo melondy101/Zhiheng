@@ -85,9 +85,12 @@ export async function POST(request: Request) {
   });
 
   // Build knowledge graph from report sources (non-blocking if it fails)
+  // #24: attach sourceState for KG provenance so the view can show truthful
+  // source provenance even for graphs restored from a stored session.
   let knowledgeGraph = null;
   try {
-    knowledgeGraph = buildGraph(report, report.references);
+    const raw = buildGraph(report, report.references);
+    knowledgeGraph = { ...raw, sourceState };
   } catch {
     // Graph failure must not break the report
     knowledgeGraph = null;
@@ -96,6 +99,8 @@ export async function POST(request: Request) {
   // Ticket #15: persist the full initial session state (including the user's
   // initial opinion and the knowledge graph) so the interrogation API returns
   // a complete session the client can mirror losslessly.
+  // #24: reportSourceState is persisted so cross-browser recovery is honest
+  // and the badge survives without relying on the side-key.
   const session: Session = {
     id: `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     question,
@@ -112,6 +117,7 @@ export async function POST(request: Request) {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     excludedHistoryIds: excludedHistoryIds as string[],
+    reportSourceState: sourceState,
   };
 
   // #21: persist under the anonymous owner. If the configured database is
