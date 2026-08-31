@@ -626,6 +626,22 @@ describe('ReportBuilder', () => {
     assert.strictEqual(report.references[2]!.type, 'web');
   });
 
+  it('uses the claim–evidence–reasoning format without injecting unsupported conclusions', async () => {
+    const zhihuSources: Source[] = [
+      { id: 'zh_1', type: 'zhihu', author: '张三', title: '材料标题', url: 'https://www.zhihu.com/q/1', excerpt: '这是一条可验证的材料观点。' },
+    ];
+    const { report } = await buildReport({ question: '测试问题', zhihuSources, webSources: [] });
+    assert.ok(report.content.includes('## 一句话结论'));
+    assert.ok(report.content.includes('### 观点 1：材料标题'));
+    assert.ok(report.content.includes('证明材料：[1] 知乎社区观点材料，作者：张三'));
+    assert.ok(report.content.includes('这是一条可验证的材料观点。'));
+    assert.ok(report.content.includes('推理：'));
+    assert.ok(report.content.includes('反证或不同观点：'));
+    assert.ok(report.content.includes('局限：'));
+    assert.ok(report.content.includes('## 尚待验证'));
+    assert.ok(!report.content.includes('AI 不会取代程序员'));
+  });
+
   it('deduplicates sources by id', async () => {
     const zhihuSources: Source[] = [
       { id: 'dup', type: 'zhihu', author: 'A', title: 'T', url: 'https://zhihu.com/dup', excerpt: 'E' },

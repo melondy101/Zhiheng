@@ -148,6 +148,13 @@ export default function ReportPanel({
                 </h4>
               );
             }
+            if (line.startsWith('### ')) {
+              return (
+                <h5 key={i} className="font-medium mt-4 mb-2 text-gray-900">
+                  {line.slice(4)}
+                </h5>
+              );
+            }
             if (line === '') return <br key={i} />;
             if (/^\d+\./.test(line.trim())) {
               return (
@@ -174,7 +181,7 @@ export default function ReportPanel({
 
       {report.viewpoints.length > 0 && (
         <div className="bg-white rounded-lg border p-6 mb-4">
-          <h3 className="font-semibold mb-3">主要观点与争议</h3>
+          <h3 className="font-semibold mb-3">材料观点速览</h3>
           <ul className="list-disc list-inside space-y-1 text-sm">
             {report.viewpoints.map((vp, i) => (
               <li key={i}>{vp}</li>
