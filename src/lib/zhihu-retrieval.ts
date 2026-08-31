@@ -146,11 +146,16 @@ const TITLE_KEYS = ['title', 'question_title', 'question'] as const;
 const EXCERPT_KEYS = ['excerpt', 'content', 'summary', 'answer_excerpt'] as const;
 const AUTHOR_KEYS = ['author', 'author_name'] as const;
 const URL_KEYS = ['url', 'link', 'question_url'] as const;
-const ENVELOPE_KEYS = ['data', 'items', 'results', 'list'] as const;
+// The live Zhihu API uses a PascalCase response envelope (`Code`, `Data`,
+// `Message`), while fixtures and compatible gateways commonly use lowercase
+// envelope keys.  Keep the accepted shape explicit: only array-bearing
+// collection keys are considered; a business-error `Data: null` is still
+// unusable and follows the honest degradation path.
+const ENVELOPE_KEYS = ['data', 'Data', 'items', 'results', 'list'] as const;
 
 /**
  * Extract the record array from a response body. Accepts a bare array or an
- * object envelope ({data|items|results|list: [...]}) — documented response
+ * object envelope ({data|Data|items|results|list: [...]}) — documented response
  * fields do not pin the envelope shape. Returns null when no array is found
  * (the caller degrades).
  */

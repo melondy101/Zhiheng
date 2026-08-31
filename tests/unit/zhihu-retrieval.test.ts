@@ -144,9 +144,10 @@ describe('readZhihuApiConfig', () => {
 // Untrusted response mapping — field-by-field, never coerced or executed
 // ---------------------------------------------------------------------------
 describe('untrusted response mapping', () => {
-  it('extractItems accepts a bare array or a data/items/results/list envelope', () => {
+  it('extractItems accepts a bare array or a data/Data/items/results/list envelope', () => {
     assert.deepStrictEqual(extractItems([{ a: 1 }]), [{ a: 1 }]);
     assert.deepStrictEqual(extractItems({ data: [{ a: 1 }] }), [{ a: 1 }]);
+    assert.deepStrictEqual(extractItems({ Data: [{ a: 1 }] }), [{ a: 1 }]);
     assert.deepStrictEqual(extractItems({ items: [{ a: 1 }] }), [{ a: 1 }]);
     assert.deepStrictEqual(extractItems({ results: [{ a: 1 }] }), [{ a: 1 }]);
     assert.deepStrictEqual(extractItems({ list: [{ a: 1 }] }), [{ a: 1 }]);
