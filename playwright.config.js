@@ -29,6 +29,9 @@ export default defineConfig({
       LLM_MODEL: '',
       LLM_BASE_URL: '',
       DATABASE_URL: '',
+      // E2E 恒走 fixture/模板路径：钉空 Zhihu 密钥防止真实网络请求消耗额度。
+      ZHIHU_ACCESS_SECRET: '',
+      ZHIHU_API_BASE_URL: '',
     },
   },
 });
