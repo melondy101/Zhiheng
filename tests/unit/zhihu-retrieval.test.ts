@@ -331,21 +331,26 @@ describe('LiveSearchProvider caching', () => {
     const first = await provider.search('同一问题');
     assert.strictEqual(first.source, 'live');
 
+    // #22: live always fires when configured — second call also returns live
     const second = await provider.search('同一问题');
-    assert.strictEqual(second.source, 'cache');
-    assert.strictEqual(second.updatedAt, first.updatedAt, 'cache hit keeps the original updatedAt');
-    assert.deepStrictEqual(second.sources, first.sources);
+    assert.strictEqual(second.source, 'live', '#22: live always fires');
+    assert.strictEqual(calls, 2, 'two live calls for two requests');
 
     const other = await provider.search('另一个问题');
     assert.strictEqual(other.source, 'live');
-    assert.strictEqual(calls, 2);
+    assert.strictEqual(calls, 3);
   });
 
   it('query normalization: whitespace/case variants share one cache entry', async () => {
-    const { provider } = makeSearchProvider(() => jsonResponse([fullItem()]));
+    let calls = 0;
+    const { provider } = makeSearchProvider(() => { calls += 1; return jsonResponse([fullItem()]); });
+    // First call fires live
     await provider.search('  AI  问题  ');
+    assert.strictEqual(calls, 1);
+    // Second call (normalized query) — #22: live always fires
     const hit = await provider.search('ai 问题');
-    assert.strictEqual(hit.source, 'cache');
+    assert.strictEqual(hit.source, 'live', '#22: live always fires regardless of cache');
+    assert.strictEqual(calls, 2, 'live called again for normalized query variant');
   });
 
   it('zhihu_search and global_search caches are isolated per source kind', async () => {
@@ -441,7 +446,7 @@ describe('LiveSearchProvider degradation', () => {
     });
   }
 
-  it('a fresh cache hit is served without burning an external call (quota protection)', async () => {
+  it('#22: live always fires when configured; cache is only reached after live failure', async () => {
     let fail = false;
     const clock = makeClock();
     const { transport, calls } = recordingTransport(() => {
@@ -453,15 +458,242 @@ describe('LiveSearchProvider degradation', () => {
       cache: new TtlCache<Source[]>({ ttlMs: 10_000, now: clock.nowFn }),
       timeoutMs: 5_000, ttlMs: 10_000, now: clock.nowFn,
     });
+    // First call: live fires (no cache)
     await provider.search('q');
     assert.strictEqual(calls.length, 1);
+    const firstResult = await provider.search('q');
+    // #22: live must fire again even with fresh cache — cache is a fallback after live fails
+    assert.strictEqual(firstResult.source, 'live', '#22: live fires even when fresh cache exists');
+    assert.strictEqual(calls.length, 2, 'live is called on every request when configured');
+
+    // Now live fails — fresh cache is used as fallback
     fail = true;
-    // Fresh cache short-circuits live entirely: no external call is spent for a
-    // query that already has fresh data, and the chain never throws.
-    const result = await provider.search('q');
-    assert.strictEqual(result.source, 'cache');
-    assert.strictEqual(result.stale, undefined);
-    assert.strictEqual(calls.length, 1, 'no additional external call while cache is fresh');
+    const fallback = await provider.search('q');
+    assert.strictEqual(fallback.source, 'cache', 'fallback to cache only after live failure');
+    assert.strictEqual(fallback.stale, false);
+    assert.strictEqual(calls.length, 3, '#22: live fires on every configured request; even after live failure the next request still attempts live before cache fallback');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ticket #22: live-first degradation — fresh cache is a fallback after live
+// fails, NOT a default path when live has never been tried.
+// ---------------------------------------------------------------------------
+describe('Ticket #22: live-first degradation order', () => {
+  it('#22: live always fires when configured + transport succeeds, even with fresh cache', async () => {
+    const clock = makeClock();
+    let callCount = 0;
+    const { transport, calls } = recordingTransport(() => {
+      callCount += 1;
+      return jsonResponse([fullItem()]);
+    });
+    const provider = new LiveSearchProvider({
+      kind: 'zhihu_search', config: CONFIG, transport,
+      cache: new TtlCache<Source[]>({ ttlMs: 86_400_000, now: clock.nowFn }),
+      timeoutMs: 5_000, ttlMs: 86_400_000, now: clock.nowFn,
+    });
+
+    const first = await provider.search('实时问题');
+    assert.strictEqual(first.source, 'live', 'first call must be live');
+    assert.strictEqual(callCount, 1);
+
+    // #22: fresh cache must NOT short-circuit live — live must fire again
+    const second = await provider.search('实时问题');
+    assert.strictEqual(second.source, 'live', 'second call must also be live, not cache');
+    assert.strictEqual(callCount, 2, 'live must be called on every request when configured');
+  });
+
+  it('#22: hotlist live always fires when configured + transport succeeds, even with fresh cache', async () => {
+    const clock = makeClock();
+    let callCount = 0;
+    const { transport } = recordingTransport(() => {
+      callCount += 1;
+      return jsonResponse([{ title: '热榜A' }, { title: '热榜B' }]);
+    });
+    const provider = new LiveHotlistProvider({
+      config: CONFIG, transport,
+      cache: new TtlCache<Array<{ id: string; title: string; url: string | null }>>({
+        ttlMs: 86_400_000, now: clock.nowFn,
+      }),
+      timeoutMs: 5_000, ttlMs: 86_400_000, now: clock.nowFn,
+    });
+
+    const first = await provider.fetchHotlist();
+    assert.strictEqual(first.source, 'live', 'first hotlist call must be live');
+    assert.strictEqual(callCount, 1);
+
+    const second = await provider.fetchHotlist();
+    assert.strictEqual(second.source, 'live', 'second hotlist call must also be live');
+    assert.strictEqual(callCount, 2, 'live must fire on every hotlist request when configured');
+  });
+
+  it('#22: live fails after success → degrades to fresh cache with stale=false', async () => {
+    const clock = makeClock();
+    let fail = false;
+    const { transport } = recordingTransport(() => {
+      if (fail) throw new TypeError('network error');
+      return jsonResponse([fullItem()]);
+    });
+    const provider = new LiveSearchProvider({
+      kind: 'zhihu_search', config: CONFIG, transport,
+      cache: new TtlCache<Source[]>({ ttlMs: 86_400_000, now: clock.nowFn }),
+      timeoutMs: 5_000, ttlMs: 86_400_000, now: clock.nowFn,
+    });
+
+    const first = await provider.search('降级测试');
+    assert.strictEqual(first.source, 'live');
+    assert.strictEqual(first.stale, undefined);
+
+    // Now live starts failing — should fall to fresh cache
+    fail = true;
+    const second = await provider.search('降级测试');
+    assert.strictEqual(second.source, 'cache', 'fallback to fresh cache after live failure');
+    assert.strictEqual(second.stale, false, 'fresh cache has stale=false');
+    assert.deepStrictEqual(second.sources, first.sources, 'fresh cache returns identical data');
+  });
+
+  it('#22: live fails + stale cache exists → degrades to stale cache with stale=true', async () => {
+    const clock = makeClock();
+    let fail = false;
+    const { transport } = recordingTransport(() => {
+      if (fail) throw new TypeError('network error');
+      return jsonResponse([fullItem()]);
+    });
+    const provider = new LiveSearchProvider({
+      kind: 'zhihu_search', config: CONFIG, transport,
+      cache: new TtlCache<Source[]>({ ttlMs: 1_000, now: clock.nowFn }),
+      timeoutMs: 5_000, ttlMs: 1_000, now: clock.nowFn,
+    });
+
+    const first = await provider.search('时效问题');
+    assert.strictEqual(first.source, 'live');
+
+    // Age the cache past TTL so it becomes stale
+    clock.advance(1_001);
+    fail = true;
+
+    const second = await provider.search('时效问题');
+    assert.strictEqual(second.source, 'cache', 'fallback to stale cache after live failure');
+    assert.strictEqual(second.stale, true, 'stale cache has stale=true');
+    assert.strictEqual(second.updatedAt, first.updatedAt, 'stale cache preserves original updatedAt');
+    assert.deepStrictEqual(second.sources, first.sources);
+  });
+
+  it('#22: live fails + no cache → degrades to demo with source=demo (never cache)', async () => {
+    const clock = makeClock();
+    let fail = false;
+    const { transport } = recordingTransport(() => {
+      if (fail) throw new TypeError('network error');
+      return jsonResponse([fullItem()]);
+    });
+    const provider = new LiveSearchProvider({
+      kind: 'zhihu_search', config: CONFIG, transport,
+      cache: new TtlCache<Source[]>({ ttlMs: 86_400_000, now: clock.nowFn }),
+      timeoutMs: 5_000, ttlMs: 86_400_000, now: clock.nowFn,
+    });
+
+    // First call: live works and caches data for '首次问题'
+    const first = await provider.search('首次问题');
+    assert.strictEqual(first.source, 'live');
+
+    // Second call: live fails — but no cache exists for this DIFFERENT query,
+    // so fallback goes directly to demo (never cache).
+    fail = true;
+    const result = await provider.search('全新未缓存的问题');
+    assert.strictEqual(result.source, 'demo', 'no cache for new query + live fails → demo');
+    assert.notStrictEqual(result.source, 'cache', 'demo must never be labeled cache');
+    assert.deepStrictEqual(result.sources, getDemoSources('全新未缓存的问题', 'zhihu'));
+  });
+
+  it('#22: same query, different kind — cache keys are isolated, no cross-kind hit', async () => {
+    const clock = makeClock();
+    let zhihuCalls = 0;
+    let webCalls = 0;
+    const { transport } = recordingTransport(() => {
+      return jsonResponse([fullItem()]);
+    });
+
+    const sharedCache = new TtlCache<Source[]>({ ttlMs: 86_400_000, now: clock.nowFn });
+    const zhihuProvider = new LiveSearchProvider({
+      kind: 'zhihu_search', config: CONFIG, transport: async (url, opts) => {
+        zhihuCalls += 1;
+        return transport(url, opts);
+      },
+      cache: sharedCache,
+      timeoutMs: 5_000, ttlMs: 86_400_000, now: clock.nowFn,
+    });
+    const webProvider = new LiveSearchProvider({
+      kind: 'global_search', config: CONFIG, transport: async (url, opts) => {
+        webCalls += 1;
+        return transport(url, opts);
+      },
+      cache: sharedCache,
+      timeoutMs: 5_000, ttlMs: 86_400_000, now: clock.nowFn,
+    });
+
+    // zhihu live fires (no prior cache for this kind+query)
+    const z1 = await zhihuProvider.search('同一问题');
+    assert.strictEqual(z1.source, 'live');
+    assert.strictEqual(zhihuCalls, 1);
+
+    // global_search with same query must go live independently (different kind key)
+    const w1 = await webProvider.search('同一问题');
+    assert.strictEqual(w1.source, 'live', 'different kind must not share cache with zhihu_search');
+    assert.strictEqual(webCalls, 1, 'global_search must call live independently');
+
+    // Third zhihu call — under #22 live always fires, so it returns live again
+    const z2 = await zhihuProvider.search('同一问题');
+    assert.strictEqual(z2.source, 'live', '#22: live always fires when configured');
+    assert.strictEqual(zhihuCalls, 2, 'live called again on third zhihu query');
+  });
+
+  it('#22: hotlist live always fires when configured; cache is used only after live failure', async () => {
+    const clock = makeClock();
+    let fail = false;
+    const { transport } = recordingTransport(() => {
+      if (fail) throw new TypeError('network error');
+      return jsonResponse([{ title: '热榜A' }]);
+    });
+    const provider = new LiveHotlistProvider({
+      config: CONFIG, transport,
+      cache: new TtlCache<Array<{ id: string; title: string; url: string | null }>>({
+        ttlMs: 86_400_000, now: clock.nowFn,
+      }),
+      timeoutMs: 5_000, ttlMs: 86_400_000, now: clock.nowFn,
+    });
+
+    // Step 1: live always fires when configured
+    const live = await provider.fetchHotlist();
+    assert.strictEqual(live.source, 'live');
+
+    // Step 2: live fires again (fresh cache is NOT used as default path per #22)
+    const second = await provider.fetchHotlist();
+    assert.strictEqual(second.source, 'live', '#22: live always fires, not cache');
+
+    // Step 3: live fails → fresh cache fallback
+    fail = true;
+    const freshFallback = await provider.fetchHotlist();
+    assert.strictEqual(freshFallback.source, 'cache');
+    assert.strictEqual(freshFallback.stale, false);
+
+    // Step 4: stale cache fallback (TTL expired)
+    clock.advance(86_400_001);
+    const staleFallback = await provider.fetchHotlist();
+    assert.strictEqual(staleFallback.source, 'cache');
+    assert.strictEqual(staleFallback.stale, true);
+
+    // Step 5: no cache + live fails → demo
+    const { transport: t2 } = recordingTransport(() => { throw new TypeError('network error'); });
+    const demoProvider = new LiveHotlistProvider({
+      config: CONFIG, transport: t2,
+      cache: new TtlCache<Array<{ id: string; title: string; url: string | null }>>({
+        ttlMs: 86_400_000, now: clock.nowFn,
+      }),
+      timeoutMs: 5_000, ttlMs: 86_400_000, now: clock.nowFn,
+    });
+    const demo = await demoProvider.fetchHotlist();
+    assert.strictEqual(demo.source, 'demo', 'no cache + live fails → demo');
+    assert.strictEqual(demo.items.length, 10);
   });
 });
 
@@ -539,11 +771,17 @@ describe('LiveHotlistProvider', () => {
     const first = await provider.fetchHotlist();
     assert.strictEqual(first.source, 'live');
 
-    const fresh = await provider.fetchHotlist();
-    assert.strictEqual(fresh.source, 'cache');
+    // Second call: #22 — live always fires when configured, so this is also live
+    const second = await provider.fetchHotlist();
+    assert.strictEqual(second.source, 'live');
+
+    // Now live starts failing — falls to fresh cache
+    fail = true;
+    const freshFallback = await provider.fetchHotlist();
+    assert.strictEqual(freshFallback.source, 'cache');
+    assert.strictEqual(freshFallback.stale, false);
 
     clock.advance(1_001);
-    fail = true;
     const stale = await provider.fetchHotlist();
     assert.strictEqual(stale.source, 'cache');
     assert.strictEqual(stale.stale, true);

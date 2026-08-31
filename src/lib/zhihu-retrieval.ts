@@ -251,10 +251,10 @@ interface DegradedCall<T> {
 
 async function retrieveWithDegradation<T>(call: DegradedCall<T>): Promise<DegradedResult<T>> {
   const cached = call.cache.get(call.kind, call.query);
-  const hasFreshCache = cached !== null && !cached.stale;
 
-  // 1. live — with a configured secret and no fresh cache covering the query.
-  if (call.config && call.fetchLive && !hasFreshCache) {
+  // 1. live — always attempted when a secret is configured; fresh cache is a
+  //     fallback used only after live has failed (never a default path).
+  if (call.config && call.fetchLive) {
     try {
       const live = await call.fetchLive();
       if (call.isUsable(live)) {
@@ -273,7 +273,7 @@ async function retrieveWithDegradation<T>(call: DegradedCall<T>): Promise<Degrad
     return {
       value: cached.value,
       source: 'cache',
-      ...(cached.stale ? { stale: true as const } : {}),
+      stale: cached.stale ?? false,
       updatedAt: cached.updatedAt,
     };
   }
@@ -410,7 +410,7 @@ export class LiveSearchProvider {
     return {
       sources: outcome.value,
       source: outcome.source,
-      ...(outcome.stale ? { stale: true } : {}),
+      ...(outcome.stale !== undefined ? { stale: outcome.stale } : {}),
       updatedAt: outcome.updatedAt,
     };
   }
@@ -499,7 +499,7 @@ export class LiveHotlistProvider {
     return {
       items: outcome.value,
       source: outcome.source,
-      ...(outcome.stale ? { stale: true } : {}),
+      ...(outcome.stale !== undefined ? { stale: outcome.stale } : {}),
       updatedAt: outcome.updatedAt,
     };
   }
