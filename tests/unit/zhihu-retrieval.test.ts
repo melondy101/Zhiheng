@@ -144,10 +144,12 @@ describe('readZhihuApiConfig', () => {
 // Untrusted response mapping — field-by-field, never coerced or executed
 // ---------------------------------------------------------------------------
 describe('untrusted response mapping', () => {
-  it('extractItems accepts a bare array or a data/Data/items/results/list envelope', () => {
+  it('extractItems accepts the official nested Data.Items shape and compatible array envelopes', () => {
     assert.deepStrictEqual(extractItems([{ a: 1 }]), [{ a: 1 }]);
     assert.deepStrictEqual(extractItems({ data: [{ a: 1 }] }), [{ a: 1 }]);
     assert.deepStrictEqual(extractItems({ Data: [{ a: 1 }] }), [{ a: 1 }]);
+    assert.deepStrictEqual(extractItems({ Code: 0, Data: { Items: [{ a: 1 }] } }), [{ a: 1 }]);
+    assert.deepStrictEqual(extractItems({ data: { items: [{ a: 1 }] } }), [{ a: 1 }]);
     assert.deepStrictEqual(extractItems({ items: [{ a: 1 }] }), [{ a: 1 }]);
     assert.deepStrictEqual(extractItems({ results: [{ a: 1 }] }), [{ a: 1 }]);
     assert.deepStrictEqual(extractItems({ list: [{ a: 1 }] }), [{ a: 1 }]);
@@ -155,6 +157,26 @@ describe('untrusted response mapping', () => {
     assert.strictEqual(extractItems('not an object'), null);
     assert.strictEqual(extractItems(null), null);
     assert.strictEqual(extractItems({ data: 'not an array' }), null);
+    assert.strictEqual(extractItems({ Code: 30001, Data: null }), null);
+  });
+
+  it('maps documented Zhihu PascalCase item fields', () => {
+    const s = mapSearchSource({
+      Title: '官方标题',
+      ContentText: '官方摘要',
+      AuthorName: '官方作者',
+      Url: 'https://www.zhihu.com/question/9528',
+    }, 'zhihu_search', 'h', 0);
+    assert.ok(s);
+    assert.strictEqual(s.title, '官方标题');
+    assert.strictEqual(s.excerpt, '官方摘要');
+    assert.strictEqual(s.author, '官方作者');
+    assert.strictEqual(s.url, 'https://www.zhihu.com/question/9528');
+
+    const hot = mapHotlistItem({ Title: '官方热榜', Url: 'https://www.zhihu.com/question/9529' }, 0);
+    assert.ok(hot);
+    assert.strictEqual(hot.title, '官方热榜');
+    assert.strictEqual(hot.url, 'https://www.zhihu.com/question/9529');
   });
 
   it('mapSearchSource keeps provider fields verbatim and fills missing ones with null', () => {
