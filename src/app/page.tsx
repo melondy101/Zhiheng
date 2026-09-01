@@ -304,7 +304,74 @@ export default function Home() {
   const [hotlistLoading, setHotlistLoading] = useState(true);
   // #18: honest live/cache/demo disclosure for the report panel.
   const [reportSourceState, setReportSourceState] = useState<ReportSourceState | null>(null);
+  // #23: IDs of personal_history sources excluded by the user for the current report.
+  const [excludedHistoryIds, setExcludedHistoryIds] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // #23: toggle a personal_history source in/out of the report context.
+  const handleHistorySourceToggle = (sourceSessionId: string, included: boolean) => {
+    setExcludedHistoryIds(prev =>
+      included
+        ? prev.filter(id => id !== sourceSessionId)
+        : [...prev, sourceSessionId]
+    );
+  };
+
+  // #23: regenerate the report with the current excludedHistoryIds.
+  const handleRegenerateReport = async () => {
+    if (!session) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
+        body: JSON.stringify({
+          question: session.question,
+          initialOpinion: session.initialOpinion,
+          excludedHistoryIds,
+        }),
+      });
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+
+      const { sessionId, report, knowledgeGraph, sourceState, saved, storage } = (await res.json()) as {
+        sessionId: string;
+        report: Report;
+        progress: { stage: string; message: string; timestamp: number }[];
+        knowledgeGraph?: import('@/lib/knowledge-graph').KnowledgeGraph | null;
+        sourceState?: ReportSourceState;
+        saved?: boolean;
+        storage?: 'memory' | 'postgres' | 'unavailable';
+      };
+
+      setStorageNotice(
+        saved === false ? storageNoticeFor('unavailable') : storageNoticeFor(storage)
+      );
+      if (sourceState) {
+        setReportSourceState(sourceState);
+        saveReportSourceState(sessionId, sourceState);
+      }
+
+      const newSession: Session = {
+        ...session,
+        id: sessionId,
+        report,
+        knowledgeGraph: knowledgeGraph ?? null,
+        excludedHistoryIds,
+        updatedAt: Date.now(),
+      };
+
+      await storageProvider.saveSession(newSession);
+      setSession(newSession);
+      setReport(report);
+      // After regenerate, excludedHistoryIds is server-managed; reset local state
+      setExcludedHistoryIds([]);
+      window.history.replaceState({}, '', `?session=${sessionId}`);
+    } catch (err) {
+      console.error('Failed to regenerate report:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleCompleteNow = async (sess?: Session) => {
     const target = sess ?? session;
@@ -608,6 +675,7 @@ export default function Home() {
     setReportSourceState(null);
     setStorageNotice(null);
     setAnswer('');
+    setExcludedHistoryIds([]);
     setPage('home');
     window.history.pushState({}, '', '/');
   };
@@ -666,6 +734,10 @@ export default function Home() {
           cacheUpdatedAt={cacheUpdatedAt}
           cacheStale={cacheStale}
           knowledgeGraph={session?.knowledgeGraph ?? null}
+          sessionId={session?.id}
+          excludedHistoryIds={excludedHistoryIds}
+          onHistorySourceToggle={handleHistorySourceToggle}
+          onRegenerate={excludedHistoryIds.length > 0 ? handleRegenerateReport : undefined}
         />
 
         <div className="flex flex-col flex-1 min-w-0">

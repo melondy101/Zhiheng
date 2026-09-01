@@ -16,6 +16,8 @@ interface ReportPanelProps {
   excludedHistoryIds?: string[];
   /** Called when user toggles a history source checkbox */
   onHistorySourceToggle?: (sourceSessionId: string, excluded: boolean) => void;
+  /** #23: called when user clicks "重新生成报告". undefined = button hidden. */
+  onRegenerate?: () => void;
   knowledgeGraph?: KnowledgeGraph | null;
   /** #19: when the badge shows cache — the retrieval time of the oldest cached channel. */
   cacheUpdatedAt?: number | null;
@@ -80,6 +82,7 @@ export default function ReportPanel({
   degradationMessage,
   excludedHistoryIds = [],
   onHistorySourceToggle,
+  onRegenerate,
   knowledgeGraph,
   cacheUpdatedAt = null,
   cacheStale = false,
@@ -121,6 +124,21 @@ export default function ReportPanel({
       {degraded && degradationMessage && (
         <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-xs">
           {degradationMessage}
+        </div>
+      )}
+
+      {/* #23: regenerate button — visible only after user has excluded at least one history source */}
+      {onRegenerate && excludedHistoryIds.length > 0 && (
+        <div className="mb-4">
+          <button
+            onClick={onRegenerate}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            重新生成报告（已排除 {excludedHistoryIds.length} 条历史材料）
+          </button>
         </div>
       )}
 
@@ -200,6 +218,75 @@ export default function ReportPanel({
 
           {Object.entries(grouped).map(([type, sources]) => {
             if (sources.length === 0) return null;
+
+            // #23: personal_history gets its own labelled section with count
+            if (type === 'personal_history') {
+              return (
+                <div key={type} className="mb-5 last:mb-0">
+                  <h4 className="text-sm font-medium text-gray-500 mb-2 uppercase tracking-wide">
+                    本报告引用 {sources.length} 条个人历史
+                  </h4>
+                  <div className="space-y-3">
+                    {sources.map((src) => {
+                      const globalIndex = report.references.indexOf(src) + 1;
+                      const isExcluded = src.sourceSessionId
+                        ? excludedSet.has(src.sourceSessionId)
+                        : false;
+
+                      return (
+                        <div
+                          key={src.id}
+                          className={`border rounded-md p-3 text-sm bg-gray-50 ${isExcluded ? 'opacity-50' : ''}`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0 mt-0.5">
+                              {globalIndex}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-gray-900 font-medium">
+                                {src.title ?? '个人历史报告'}
+                              </span>
+                              <div className="text-gray-400 text-xs mt-1">
+                                {isExcluded
+                                  ? '来源链接：未选择'
+                                  : `来源链接：个人历史报告（${src.provenance ?? '个人上下文'}）`}
+                              </div>
+                              {src.excerpt && (
+                                <p className="text-gray-600 text-xs mt-1 italic">
+                                  {src.excerpt}
+                                </p>
+                              )}
+                              {onHistorySourceToggle && src.sourceSessionId && (
+                                <div className="mt-2 flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    id={`history-toggle-${src.sourceSessionId}`}
+                                    checked={!isExcluded}
+                                    onChange={(e) =>
+                                      onHistorySourceToggle(src.sourceSessionId!, e.target.checked)
+                                    }
+                                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <label
+                                    htmlFor={`history-toggle-${src.sourceSessionId}`}
+                                    className="text-xs text-gray-600 cursor-pointer"
+                                  >
+                                    {isExcluded ? '未选择' : '已选择'}（点击
+                                    {isExcluded ? '重新选择' : '取消选择'}）
+                                  </label>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }
+
+            // Non-personal_history source types
             return (
               <div key={type} className="mb-5 last:mb-0">
                 <h4 className="text-sm font-medium text-gray-500 mb-2 uppercase tracking-wide">
@@ -208,16 +295,12 @@ export default function ReportPanel({
                 <div className="space-y-3">
                   {sources.map((src) => {
                     const globalIndex = report.references.indexOf(src) + 1;
-                    const isHistory = src.type === 'personal_history';
-                    const isExcluded = isHistory && src.sourceSessionId ? excludedSet.has(src.sourceSessionId) : false;
-                    // #18: same trim rule as interrogation-context.ts — a
-                    // whitespace-only URL is not a usable link.
                     const url = src.url?.trim() || null;
 
                     return (
                       <div
                         key={src.id}
-                        className={`border rounded-md p-3 text-sm bg-gray-50 ${isExcluded ? 'opacity-50' : ''}`}
+                        className="border rounded-md p-3 text-sm bg-gray-50"
                       >
                         <div className="flex items-start gap-2">
                           <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0 mt-0.5">
@@ -246,36 +329,13 @@ export default function ReportPanel({
                                   {url}
                                 </a>
                               </div>
-                            ) : isHistory ? (
-                              <div className="text-gray-400 text-xs mt-1">
-                                {isExcluded ? '来源链接：未选择' : `来源链接：个人历史报告（${src.provenance ?? '个人上下文'}）`}
-                              </div>
                             ) : (
-                              <div className="text-gray-400 text-xs mt-1">
-                                来源链接：未知
-                              </div>
+                              <div className="text-gray-400 text-xs mt-1">来源链接：未知</div>
                             )}
                             {src.excerpt && (
                               <p className="text-gray-600 text-xs mt-1 italic">
                                 {src.excerpt}
                               </p>
-                            )}
-                            {isHistory && onHistorySourceToggle && src.sourceSessionId && (
-                              <div className="mt-2 flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  id={`history-toggle-${src.sourceSessionId}`}
-                                  checked={!isExcluded}
-                                  onChange={(e) => onHistorySourceToggle(src.sourceSessionId!, e.target.checked)}
-                                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                />
-                                <label
-                                  htmlFor={`history-toggle-${src.sourceSessionId}`}
-                                  className="text-xs text-gray-600 cursor-pointer"
-                                >
-                                  {isExcluded ? '未选择' : '已选择'}（点击{isExcluded ? '重新选择' : '取消选择'}）
-                                </label>
-                              </div>
                             )}
                           </div>
                         </div>
@@ -286,6 +346,14 @@ export default function ReportPanel({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* #23: explicit empty state when there are no references at all */}
+      {report.references.length === 0 && (
+        <div className="bg-white rounded-lg border p-6">
+          <h3 className="font-semibold mb-4 text-blue-600">引用来源</h3>
+          <p className="text-sm text-gray-400 italic">暂无任何引用材料</p>
         </div>
       )}
     </div>
