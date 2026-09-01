@@ -282,7 +282,19 @@ tests/
 - LLM 失败 → 重试一次 + 策略模板 ✓（`withFallback`）
 - 知识图谱允许正文后异步完成 ✓（API 路由 try/catch 包装）
 
-## 10. 已知技术债
+## 10. 外部平台与数据库变更门禁
+
+任何未来功能若需要变更 Neon、Vercel、外部模型供应商或数据库结构，必须在编码、迁移或平台操作**之前**向用户提交并获得确认的变更说明。说明至少包含：
+
+- Neon 需要执行的操作（extension、表/索引、迁移、分支或连接配置）及数据/回滚影响；
+- Vercel 需要执行的操作（环境变量、函数 runtime/region、部署环境与重新部署）；
+- 新增或修改的表结构、迁移是否可逆、既有数据兼容性；
+- 新增密钥、成本/配额、隐私边界与故障降级；
+- 不执行平台变更时的本地或 fixture 降级行为。
+
+知识库的语义检索是该门禁的首个适用场景：在启用 Neon `pgvector`、embedding 供应商或 Vercel 服务端检索前，先提供上述清单和执行顺序；未获确认不得操作外部平台或生产数据库。
+
+## 11. 已知技术债
 
 - `next` + `react` types 在某些 tsc 调用中报 `JSX.IntrinsicElements` 警告 — 预存
 - Builder/Finalizer 工作流未在 `package.json` 中 script 化
