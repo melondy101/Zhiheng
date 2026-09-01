@@ -65,87 +65,84 @@ function buildCitations(allSources: Source[]): Record<number, Source> {
   return map;
 }
 
-/** Build the body text with [N] citation markers inserted at key claims. */
+/** Keep a source excerpt short enough to be readable without changing its meaning. */
+function evidenceExcerpt(source: Source): string {
+  const excerpt = source.excerpt?.trim();
+  // Keep the established visible placeholder for missing provider text. The
+  // accompanying limitation makes clear that it is not evidence.
+  if (!excerpt) return '（无摘要）';
+  return excerpt.length <= 320 ? excerpt : `${excerpt.slice(0, 317)}…`;
+}
+
+function sourceKindLabel(source: Source): string {
+  switch (source.type) {
+    case 'zhihu': return '知乎社区观点材料';
+    case 'web': return '外部检索材料';
+    case 'personal_history': return '个人历史材料';
+    case 'ai_synthesis': return 'AI 综合材料';
+  }
+}
+
+function confidenceFor(source: Source): '低' | '中' {
+  // A retrieved excerpt can support discussion, but a single source cannot
+  // establish a universal conclusion. Community material receives the more
+  // conservative label; neither label is a claim about the author.
+  return source.type === 'web' ? '中' : '低';
+}
+
+function limitationFor(source: Source): string {
+  if (!source.excerpt?.trim()) return '该来源没有摘要，不能据此判断其完整论证或结论。';
+  if (source.type === 'zhihu') return '这是单个社区来源的观点材料，不能据此推断群体共识或普遍事实。';
+  if (source.type === 'personal_history') return '这是个人历史上下文，只适用于该历史情境，不能外推为一般结论。';
+  return '当前仅保留检索摘要；需要阅读原文并与更多独立材料交叉核验。';
+}
+
+/** Build a claim–evidence–reasoning report without inventing unsupported facts. */
 function buildContent(question: string, allSources: Source[]): string {
   if (allSources.length === 0) {
-    return `关于"${question}"，社区中存在多种代表性观点。本报告使用本地演示数据归纳核心论点，供思辨过程参考。（演示数据）`;
+    return [
+      '## 问题',
+      question,
+      '',
+      '## 一句话结论',
+      '当前没有可引用材料，不能形成可验证的结论。',
+      '',
+      '## 尚待验证',
+      '- 需要补充至少一条可追溯的来源材料，再分析观点与证据之间的关系。',
+    ].join('\n');
   }
-
-  const zhihuSources = allSources.filter(s => s.type === 'zhihu');
-  const webSources = allSources.filter(s => s.type === 'web');
-  const historySources = allSources.filter(s => s.type === 'personal_history');
-
-  // Identify citation indices for each source type
-  const zhihuIdx = (i: number) => {
-    const list = allSources.filter(s => s.type === 'zhihu');
-    return list[i] ? allSources.indexOf(list[i]) + 1 : 0;
-  };
-  const webIdx = (i: number) => {
-    const list = allSources.filter(s => s.type === 'web');
-    return list[i] ? allSources.indexOf(list[i]) + 1 : 0;
-  };
-  const historyIdx = (i: number) => {
-    const list = allSources.filter(s => s.type === 'personal_history');
-    return list[i] ? allSources.indexOf(list[i]) + 1 : 0;
-  };
-
   const lines: string[] = [];
 
-  lines.push(`关于"${question}"，社区中存在多种代表性观点。`);
+  lines.push('## 问题');
+  lines.push(question);
   lines.push('');
-
-  if (zhihuSources.length > 0) {
-    lines.push('## 知乎社区观点');
-    lines.push('');
-
-    zhihuSources.forEach((s, i) => {
-      const n = zhihuIdx(i);
-      lines.push(`- ${s.excerpt} [${n}]`);
-    });
-    lines.push('');
-  }
-
-  if (webSources.length > 0) {
-    lines.push('## 外部参考资料');
-    lines.push('');
-
-    webSources.forEach((s, i) => {
-      const n = webIdx(i);
-      lines.push(`- ${s.excerpt} [${n}]`);
-    });
-    lines.push('');
-  }
-
-  if (historySources.length > 0) {
-    lines.push('## 个人历史报告（个人上下文）');
-    lines.push('');
-
-    historySources.forEach((s, i) => {
-      const n = historyIdx(i);
-      lines.push(`- ${s.excerpt} [${n}]`);
-    });
-    lines.push('');
-  }
-
-  lines.push('## 综合归纳');
+  lines.push('## 一句话结论');
+  lines.push(`当前检索到 ${allSources.length} 条可追溯材料。它们可以支持讨论其中呈现的具体观点，但不足以单独证明关于“${question}”的普遍结论。`);
   lines.push('');
-  lines.push('综合上述来源，可以观察到几个核心论点：');
-  lines.push('');
+  lines.push('## 核心观点');
 
-  if (zhihuSources.length > 0) {
-    lines.push(`1. 实践者视角（知乎）[${zhihuIdx(0)}]：从一线开发者的实际经验来看，AI 辅助编程确实改变了工作方式，但开发者角色的核心能力正在从"写代码"转向"定义问题和审查 AI 输出"。`);
-  }
-  if (webSources.length > 0) {
-    lines.push(`2. 行业研究数据（外部资料）[${webIdx(0)}][${webIdx(1)}]：多项行业报告表明，AI 工具大幅提升了代码生成效率，但系统性设计和复杂决策仍依赖人类判断。`);
-  }
-  if (zhihuSources.length > 0 && webSources.length > 0) {
-    lines.push(`3. 共识与争议[${zhihuIdx(0)}][${webIdx(0)}]：社区普遍认同 AI 不会取代程序员，但会重塑岗位要求——对初级开发者的冲击较大，对能驾驭 AI 的高级开发者是利好。`);
-  }
-  lines.push('');
+  allSources.slice(0, 3).forEach((source, index) => {
+    const citation = allSources.indexOf(source) + 1;
+    const title = source.title?.trim() || `来源 ${citation}`;
+    const opposing = allSources.length > 1
+      ? '其余材料可能提供不同角度；当前未将它们自动归为对该观点的直接反证。'
+      : '当前仅有这一条材料，未检索到可直接比较的不同观点。';
+    lines.push('');
+    lines.push(`### 观点 ${index + 1}：${title}`);
+    lines.push(`- 结论强度：${confidenceFor(source)}`);
+    lines.push(`- 证明材料：[${citation}] ${sourceKindLabel(source)}${source.author ? `，作者：${source.author}` : ''}`);
+    lines.push(`  - 摘录：“${evidenceExcerpt(source)}”`);
+    lines.push(`- 推理：上述摘录是该来源对问题的直接相关表述，因此可作为讨论这一观点的材料；它不能单独推出超出摘录范围的事实或因果结论。`);
+    lines.push(`- 反证或不同观点：${opposing}`);
+    lines.push(`- 局限：${limitationFor(source)}`);
+  });
 
-  lines.push('## 结论');
   lines.push('');
-  lines.push('结论取决于具体情境。对于重复性编码任务，AI 已能胜任；对于架构决策和团队协作，人类判断仍不可替代。关键在于持续学习和适应工具的变化。');
+  lines.push('## 尚待验证');
+  lines.push('- 需要补充独立来源，并阅读原文上下文，才能判断各观点的代表性、适用边界与相互冲突。');
+  lines.push('');
+  lines.push('## 最终判断');
+  lines.push('本报告将材料、推理和局限分开呈现；结论应以证据覆盖范围为限，而不是由来源数量或模型措辞决定。');
 
   return lines.join('\n');
 }
@@ -162,67 +159,24 @@ function buildTitle(question: string): string {
 function buildKnowledgePoints(allSources: Source[]): string[] {
   if (allSources.length === 0) {
     return [
-      '这是一个多维度的问题，涉及技术、社会、伦理等多个层面',
-      '不同立场各有其逻辑依据和适用边界',
-      '深入分析需要区分事实判断与价值判断',
+      '暂无可引用材料，不能形成可验证的知识要点。',
     ];
   }
-
-  const points: string[] = [];
-
-  const zhihuSources = allSources.filter(s => s.type === 'zhihu');
-  const webSources = allSources.filter(s => s.type === 'web');
-  const historySources = allSources.filter(s => s.type === 'personal_history');
-
-  if (zhihuSources.length > 0) {
-    points.push('一线开发者的实践经验表明 AI 改变了编码方式，但开发者角色正在演变而非消失');
-  }
-  if (webSources.length > 0) {
-    points.push('行业数据显示 AI 工具大幅提升了代码生成效率，但系统性设计仍需人类');
-  }
-  if (zhihuSources.length > 0 && webSources.length > 0) {
-    points.push('社区观点与外部研究形成共识：AI 是工具升级而非替代，关键在开发者如何适应');
-  }
-  if (historySources.length > 0) {
-    points.push('参考个人历史报告，可结合自身过往经验进行更深入的对比分析');
-  }
-  points.push('深入分析需要区分事实判断与价值判断，两者都有参考价值');
-
-  return points;
+  return allSources.slice(0, 3).map((source, index) =>
+    `材料 ${index + 1}：${source.title?.trim() || evidenceExcerpt(source)}`
+  );
 }
 
 /** Generate viewpoints from sources. */
 function buildViewpoints(allSources: Source[]): string[] {
   if (allSources.length === 0) {
     return [
-      '这种观点强调渐进式变革的重要性',
-      '另一种视角认为激进创新才能带来真正的突破',
-      '还有一种观点认为答案取决于具体情境',
+      '暂无来源观点；需要先补充可追溯材料。',
     ];
   }
-
-  const vps: string[] = [];
-  const zhihuSources = allSources.filter(s => s.type === 'zhihu');
-  const webSources = allSources.filter(s => s.type === 'web');
-  const historySources = allSources.filter(s => s.type === 'personal_history');
-
-  if (zhihuSources.length > 0) {
-    vps.push('渐进式适应派：开发者应主动学习 AI 工具，将其融入日常工作流，从"写代码的人"转向"驾驭 AI 的人"');
-  }
-  if (webSources.length > 0) {
-    vps.push('效率提升派：AI 编程助手是生产力革命，企业应重新设计开发流程，减少重复劳动');
-  }
-  if (zhihuSources.length > 0 && webSources.length > 0) {
-    vps.push('审慎观望派：AI 能力有限，过度依赖可能导致代码质量下降，需要建立严格的代码审查机制');
-  }
-  if (historySources.length > 0) {
-    vps.push('个人经验参考派：结合自身历史报告中的观点，进行对比反思，形成更成熟的判断');
-  }
-  if (vps.length === 0) {
-    vps.push('社区中存在多种代表性观点，答案取决于具体情境和应用场景');
-  }
-
-  return vps;
+  return allSources.slice(0, 3).map((source, index) =>
+    `观点 ${index + 1} [${index + 1}]：${evidenceExcerpt(source)}`
+  );
 }
 
 /**

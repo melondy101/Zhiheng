@@ -99,8 +99,9 @@ describe('ZhihuSearchProvider', () => {
     assert.deepStrictEqual(a.sources, b.sources);
   });
 
-  // Ticket #18 honesty contract: no external retrieval is wired in this MVP,
-  // so hardcoded fixture content must never be reported as 'live'.
+  // Honesty contract (#18, restated for #19): this fixture-only provider path
+  // has no real retrieval, so its hardcoded fixture content must never be
+  // reported as 'live' — only the real providers in zhihu-retrieval.ts may.
   it('reports demo on the first uncached call — fixture content is never labeled live', async () => {
     setupSearchProviderStorage();
     const provider = new ZhihuSearchProvider();
@@ -214,8 +215,9 @@ describe('WebSearchProvider', () => {
     assert.deepStrictEqual(a.sources, b.sources);
   });
 
-  // Ticket #18 honesty contract: no external retrieval is wired in this MVP,
-  // so hardcoded fixture content must never be reported as 'live'.
+  // Ticket #18 honesty contract: this fixture-only provider path must never
+  // report its hardcoded fixture content as 'live' (#19: only the real
+  // providers in zhihu-retrieval.ts may emit 'live').
   it('reports demo on the first uncached call — fixture content is never labeled live', async () => {
     setupSearchProviderStorage();
     const provider = new WebSearchProvider();
@@ -624,6 +626,22 @@ describe('ReportBuilder', () => {
     assert.strictEqual(report.references[2]!.type, 'web');
   });
 
+  it('uses the claim–evidence–reasoning format without injecting unsupported conclusions', async () => {
+    const zhihuSources: Source[] = [
+      { id: 'zh_1', type: 'zhihu', author: '张三', title: '材料标题', url: 'https://www.zhihu.com/q/1', excerpt: '这是一条可验证的材料观点。' },
+    ];
+    const { report } = await buildReport({ question: '测试问题', zhihuSources, webSources: [] });
+    assert.ok(report.content.includes('## 一句话结论'));
+    assert.ok(report.content.includes('### 观点 1：材料标题'));
+    assert.ok(report.content.includes('证明材料：[1] 知乎社区观点材料，作者：张三'));
+    assert.ok(report.content.includes('这是一条可验证的材料观点。'));
+    assert.ok(report.content.includes('推理：'));
+    assert.ok(report.content.includes('反证或不同观点：'));
+    assert.ok(report.content.includes('局限：'));
+    assert.ok(report.content.includes('## 尚待验证'));
+    assert.ok(!report.content.includes('AI 不会取代程序员'));
+  });
+
   it('deduplicates sources by id', async () => {
     const zhihuSources: Source[] = [
       { id: 'dup', type: 'zhihu', author: 'A', title: 'T', url: 'https://zhihu.com/dup', excerpt: 'E' },
@@ -655,6 +673,83 @@ describe('ReportBuilder', () => {
     assert.ok(stages.includes('web_search'), `missing web_search in ${stages}`);
     assert.ok(stages.includes('synthesizing'), `missing synthesizing in ${stages}`);
     assert.ok(stages.includes('complete'), `missing complete in ${stages}`);
+  });
+
+  // Ticket #23: null metadata must not render as literal "null" or "undefined"
+  it('does not render literal null/undefined for missing source metadata', async () => {
+    const nullMetaSources: Source[] = [
+      {
+        id: 'null_excerpt_zh',
+        type: 'zhihu',
+        author: null,
+        title: null,
+        url: null,
+        excerpt: null,
+      },
+      {
+        id: 'null_excerpt_web',
+        type: 'web',
+        author: null,
+        title: null,
+        url: null,
+        excerpt: null,
+      },
+    ];
+    const { report } = await buildReport({
+      question: 'missing data test',
+      zhihuSources: [nullMetaSources[0]!],
+      webSources: [nullMetaSources[1]!],
+    });
+
+    // The report content must not contain the string "null" or "undefined"
+    // (using word-boundary check to avoid false positives from the question text)
+    const nullWordRE = /\bnull\b/;
+    const undefinedWordRE = /\bundefined\b/;
+    assert.ok(
+      !nullWordRE.test(report.content),
+      `content should not contain literal "null", got: ${report.content}`
+    );
+    assert.ok(
+      !undefinedWordRE.test(report.content),
+      `content should not contain literal "undefined", got: ${report.content}`
+    );
+
+    // References preserve original null values (not fabricated) — UI layer handles presentation
+    assert.strictEqual(report.references[0]!.excerpt, null);
+    assert.strictEqual(report.references[0]!.author, null);
+    assert.strictEqual(report.references[0]!.url, null);
+    assert.strictEqual(report.references[1]!.excerpt, null);
+    assert.strictEqual(report.references[1]!.author, null);
+    assert.strictEqual(report.references[1]!.url, null);
+  });
+
+  // Ticket #23: missing excerpt shows a placeholder, not null
+  it('renders missing excerpt as placeholder text', async () => {
+    const sourcesWithMissingExcerpt: Source[] = [
+      {
+        id: 'no_excerpt',
+        type: 'zhihu',
+        author: '真实作者',
+        title: '真实标题',
+        url: 'https://www.zhihu.com/real',
+        excerpt: null,
+      },
+    ];
+    const { report } = await buildReport({
+      question: 'missing excerpt test',
+      zhihuSources: sourcesWithMissingExcerpt,
+      webSources: [],
+    });
+
+    // Should contain placeholder, not literal null
+    assert.ok(
+      report.content.includes('（无摘要）'),
+      `expected "（无摘要）" placeholder in content, got: ${report.content}`
+    );
+    assert.ok(
+      !report.content.includes('null'),
+      `content should not contain literal "null": ${report.content}`
+    );
   });
 });
 
@@ -1273,7 +1368,7 @@ describe('updateProfile', () => {
 });
 
 describe('profile localStorage', () => {
-  it('saves and loads profile', () => {
+  it('saves and loads profile; delete keeps a tombstone so old evidence cannot rebuild it (#21)', () => {
     const store: Record<string, string> = {};
     Object.defineProperty(globalThis, 'localStorage', { value: {
       getItem: (k: string) => store[k] ?? null,
@@ -1288,8 +1383,19 @@ describe('profile localStorage', () => {
     const loaded = loadProfile();
     assert.ok(loaded);
     assert.strictEqual(loaded!.deletedAt, null);
+
+    // #21: deletion is a tombstone, NOT a removal — the conclusions are
+    // emptied and deletedAt is set, so updateProfile must refuse to
+    // auto-rebuild the profile from old evidence.
     deleteProfile();
-    assert.strictEqual(loadProfile(), null);
+    const afterDelete = loadProfile();
+    assert.ok(afterDelete, 'the tombstone record must survive deletion');
+    assert.strictEqual(afterDelete!.conclusions.length, 0, 'conclusions are deleted');
+    assert.strictEqual(typeof afterDelete!.deletedAt, 'number');
+    const rebuildAttempt = updateProfile(afterDelete, [
+      { field: 'interest', value: 'AI', confidence: 0.9, sourceSessionId: 's1', sourceMessageId: null, updatedAt: 2 },
+    ]);
+    assert.strictEqual(rebuildAttempt.conclusions.length, 0, 'must not auto-rebuild after delete');
   });
 });
 

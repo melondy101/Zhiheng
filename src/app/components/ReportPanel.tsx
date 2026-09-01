@@ -17,6 +17,10 @@ interface ReportPanelProps {
   /** Called when user toggles a history source checkbox */
   onHistorySourceToggle?: (sourceSessionId: string, excluded: boolean) => void;
   knowledgeGraph?: KnowledgeGraph | null;
+  /** #19: when the badge shows cache — the retrieval time of the oldest cached channel. */
+  cacheUpdatedAt?: number | null;
+  /** #19: true when a cached channel is past its TTL. */
+  cacheStale?: boolean;
 }
 
 const SOURCE_STATE_LABELS: Record<SourceState, string> = {
@@ -54,6 +58,20 @@ const TYPE_LABELS: Record<string, string> = {
   personal_history: '个人历史报告',
 };
 
+/** #19: honest cache-time display on the cache badge. */
+function formatCacheTime(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** #19: cache badge text — stale caches show the expiry flag plus the time
+ * the data was actually retrieved; the time is never faked for live/demo. */
+function cacheBadgeText(cacheUpdatedAt?: number | null, cacheStale?: boolean): string {
+  if (!cacheUpdatedAt) return cacheStale ? '缓存（已过期）' : '缓存';
+  return `缓存${cacheStale ? '（已过期）' : ''} · 更新于 ${formatCacheTime(cacheUpdatedAt)}`;
+}
+
 export default function ReportPanel({
   report,
   zhihuSourceState,
@@ -63,6 +81,8 @@ export default function ReportPanel({
   excludedHistoryIds = [],
   onHistorySourceToggle,
   knowledgeGraph,
+  cacheUpdatedAt = null,
+  cacheStale = false,
 }: ReportPanelProps) {
   const grouped = groupByType(report.references);
   const excludedSet = new Set(excludedHistoryIds);
@@ -79,7 +99,8 @@ export default function ReportPanel({
 
   return (
     <div className="flex-1 overflow-y-auto p-6 border-r">
-      {/* Source state badge (#18: honest live/cache/demo disclosure) */}
+      {/* Source state badge (#18: honest live/cache/demo disclosure; #19 adds
+          the cache retrieval time for cache states) */}
       {overallState && (
         <div className="mb-4">
           <span
@@ -89,7 +110,9 @@ export default function ReportPanel({
             <span
               className={`w-1.5 h-1.5 rounded-full ${SOURCE_STATE_COLORS[overallState].dot}`}
             />
-            {SOURCE_STATE_LABELS[overallState]}
+            {overallState === 'cache'
+              ? cacheBadgeText(cacheUpdatedAt, cacheStale)
+              : SOURCE_STATE_LABELS[overallState]}
           </span>
         </div>
       )}
@@ -125,6 +148,13 @@ export default function ReportPanel({
                 </h4>
               );
             }
+            if (line.startsWith('### ')) {
+              return (
+                <h5 key={i} className="font-medium mt-4 mb-2 text-gray-900">
+                  {line.slice(4)}
+                </h5>
+              );
+            }
             if (line === '') return <br key={i} />;
             if (/^\d+\./.test(line.trim())) {
               return (
@@ -151,7 +181,7 @@ export default function ReportPanel({
 
       {report.viewpoints.length > 0 && (
         <div className="bg-white rounded-lg border p-6 mb-4">
-          <h3 className="font-semibold mb-3">主要观点与争议</h3>
+          <h3 className="font-semibold mb-3">材料观点速览</h3>
           <ul className="list-disc list-inside space-y-1 text-sm">
             {report.viewpoints.map((vp, i) => (
               <li key={i}>{vp}</li>

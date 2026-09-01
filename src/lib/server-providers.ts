@@ -2,18 +2,31 @@
 // These run only in Node.js API routes; no browser APIs.
 // All data is locally generated; no external calls, no fabricated source provenance.
 
-import type { Session, StorageProvider } from './providers';
+import type { LLMProvider, Session, StorageProvider } from './providers';
 import { FixtureRetrievalProvider, FixtureLLMProvider } from './fixture-providers';
+import { createLLMProviderFromEnv } from './openai-llm-provider';
 
 export { FixtureRetrievalProvider, FixtureLLMProvider } from './fixture-providers';
 
 export const retrievalProvider = new FixtureRetrievalProvider();
-export const llmProvider = new FixtureLLMProvider();
+
+/**
+ * The question generator used by the interrogation route (#20): the real
+ * OpenAI-compatible provider when LLM_API_KEY and LLM_MODEL are configured in
+ * the server environment; the deterministic fixture otherwise. Without a key
+ * the behavior is unchanged from the pre-#20 fixture path — fixture output is
+ * never labeled as a real model response, and usedFallback stays honest
+ * because the fixture succeeds without degradation.
+ */
+export const llmProvider: LLMProvider = createLLMProviderFromEnv() ?? new FixtureLLMProvider();
 
 // ---------------------------------------------------------------------------
-// Server-side in-memory storage for API routes.
-// Survives within a single Node.js process only.
-// Production boundary is Neon PostgreSQL (PRD v4.0 deferred).
+// Server-side in-memory storage.
+// NOTE (#21): API routes no longer use a bare singleton — they use the
+// ownership-aware server storage from ./server-storage (memory mode without
+// DATABASE_URL, Neon PostgreSQL with it). MemoryStorageProvider remains as
+// the baseline single-owner implementation for behavior-equivalence tests;
+// the owned variant lives in ./owned-storage.
 // ---------------------------------------------------------------------------
 
 export class MemoryStorageProvider implements StorageProvider {
@@ -35,5 +48,3 @@ export class MemoryStorageProvider implements StorageProvider {
     this.store.delete(id);
   }
 }
-
-export const serverStorage = new MemoryStorageProvider();

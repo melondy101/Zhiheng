@@ -16,6 +16,8 @@ import type { StrategyId } from '@/lib/strategy-engine';
 import { selectRoundSources } from '@/lib/interrogation-context';
 import { FixtureRetrievalProvider } from '@/lib/fixture-providers';
 import { BrowserStorageProvider } from '@/lib/demo-providers';
+import { ownerHeaders } from '@/lib/owner-id';
+import { pickRecoverySession, storageNoticeFor } from '@/lib/session-recovery';
 import HomePage from './components/HomePage';
 import ReportPanel from './components/ReportPanel';
 import StanceSelector from './components/StanceSelector';
@@ -27,10 +29,18 @@ const storageProvider = new BrowserStorageProvider();
 
 type Page = 'home' | 'session';
 
-/** Retrieval state of the current session's report (#18 honest disclosure). */
+/**
+ * Retrieval state of the current session's report (#18 honest disclosure).
+ * #19 adds per-channel cache timestamps/stale flags so the UI can show when
+ * cached data was actually retrieved instead of implying it is current.
+ */
 interface ReportSourceState {
   zhihu: SourceState;
   web: SourceState;
+  zhihuUpdatedAt?: number;
+  webUpdatedAt?: number;
+  zhihuStale?: boolean;
+  webStale?: boolean;
 }
 
 /** Side-key persisting the report's retrieval state across reloads (#18). */
@@ -75,32 +85,94 @@ interface InterrogateViewHooks {
   setCompleteError: (e: string | null) => void;
   setCompleted: (v: boolean) => void;
   setResultCard: (c: ResultCard | null) => void;
+  /** #21: honest server-storage status line (null = persisted remotely). */
+  setStorageNotice: (n: string | null) => void;
+}
+
+/**
+ * Result of calling the interrogation API. `storageUnavailable` is true only
+ * on the explicit server degradation signal (503 + storage:'unavailable'):
+ * nothing was persisted remotely and the client must rely on its local
+ * mirror — it must never assume the write was saved remotely.
+ */
+type InterrogateCallResult =
+  | { ok: true; data: InterrogateResponseBody }
+  | { ok: false; storageUnavailable: boolean };
+
+/**
+ * Fetch one of this browser owner's stored sessions from the server (#21).
+ * Returns null on any failure (missing/404/degraded database) — recovery
+ * then falls back to the local mirror (see pickRecoverySession).
+ */
+async function fetchServerSession(sessionId: string): Promise<Session | null> {
+  try {
+    const res = await fetch(`/api/session?id=${encodeURIComponent(sessionId)}`, {
+      headers: ownerHeaders(),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { session?: Session | null };
+    return body.session ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The owner-scoped server profile, or null when unavailable (#21). */
+async function fetchServerProfile(): Promise<import('@/lib/lifecycle').UserProfile | null> {
+  try {
+    const res = await fetch('/api/profile', { headers: ownerHeaders() });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      profile?: import('@/lib/lifecycle').UserProfile | null;
+    };
+    return body.profile ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Push the profile to the owner-scoped server storage (best effort, #21). */
+async function pushProfileToServer(profile: import('@/lib/lifecycle').UserProfile): Promise<void> {
+  try {
+    await fetch('/api/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
+      body: JSON.stringify({ profile }),
+    });
+  } catch {
+    // Server unavailable — the profile stays local-only (honest degradation).
+  }
 }
 
 /**
  * Call the single interrogation orchestration API (#15). All strategy
  * decisions (round order, checkpoint gating, fallback, uncertain streak)
  * happen server-side; the client sends its persisted session snapshot so the
- * API can rehydrate its in-memory store after a restart.
+ * API can rehydrate its store after a restart, plus the anonymous owner
+ * header (#21) so storage is scoped to this browser's identity.
  */
 async function postInterrogate(
   sess: Session,
   payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint }
-): Promise<InterrogateResponseBody | null> {
+): Promise<InterrogateCallResult> {
   try {
     const res = await fetch('/api/interrogate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
       body: JSON.stringify({ sessionId: sess.id, session: sess, ...payload }),
     });
+    if (res.status === 503) {
+      // Explicit server-storage degradation signal (#21).
+      return { ok: false, storageUnavailable: true };
+    }
     if (!res.ok) {
       console.error('Interrogate API error:', res.status);
-      return null;
+      return { ok: false, storageUnavailable: false };
     }
-    return (await res.json()) as InterrogateResponseBody;
+    return { ok: true, data: (await res.json()) as InterrogateResponseBody };
   } catch (err) {
     console.error('Interrogate API failed:', err);
-    return null;
+    return { ok: false, storageUnavailable: false };
   }
 }
 
@@ -113,11 +185,19 @@ async function postInterrogate(
  * Returns true when the card is ready.
  */
 async function completeSession(sess: Session, hooks: InterrogateViewHooks): Promise<boolean> {
-  const data = await postInterrogate(sess, { action: 'complete' });
-  if (!data || !data.session.resultCard) {
+  const res = await postInterrogate(sess, { action: 'complete' });
+  if (!res.ok) {
+    if (res.storageUnavailable) {
+      hooks.setStorageNotice(storageNoticeFor('unavailable'));
+    }
     hooks.setCompleteError('生成成果卡失败，请重试。');
     return false;
   }
+  if (!res.data.session.resultCard) {
+    hooks.setCompleteError('生成成果卡失败，请重试。');
+    return false;
+  }
+  const data = res.data;
   hooks.setCompleteError(null);
   hooks.setSession(data.session);
   hooks.setMessages(data.session.messages);
@@ -128,14 +208,21 @@ async function completeSession(sess: Session, hooks: InterrogateViewHooks): Prom
   hooks.setPendingDecision(false);
   hooks.setHintMessage(null);
   hooks.setHintOptions(null);
+  hooks.setStorageNotice(storageNoticeFor(data.storage));
   await storageProvider.saveSession(data.session);
 
-  // Update profile (ticket #12) — stays client-side (#17).
+  // Update profile (ticket #12) — stays client-side (#17). #21: when no
+  // local profile exists it is recovered from this owner's server storage
+  // first (tombstone semantics preserved), and the merged profile is pushed
+  // back best-effort so it survives browser storage loss.
   const { buildProfileFromSession, updateProfile, loadProfile, saveProfile } = await import('@/lib/lifecycle');
   const conclusions = buildProfileFromSession(data.session);
   if (conclusions.length > 0) {
-    const next = updateProfile(loadProfile(), conclusions);
+    let current = loadProfile();
+    if (!current) current = await fetchServerProfile();
+    const next = updateProfile(current, conclusions);
     saveProfile(next);
+    void pushProfileToServer(next);
   }
   return true;
 }
@@ -154,6 +241,8 @@ async function applyInterrogateResponse(
   if (data.session.selectedViewpoint) hooks.setSelectedViewpoint(data.session.selectedViewpoint);
   hooks.setUncertainStreak(data.uncertainStreak);
   hooks.setCompleteError(null);
+  // #21: honest server-storage disclosure from the API response.
+  hooks.setStorageNotice(storageNoticeFor(data.storage));
   await storageProvider.saveSession(data.session);
 
   if (data.decisionPending) {
@@ -209,7 +298,9 @@ export default function Home() {
   const [resultCard, setResultCard] = useState<ResultCard | null>(null);
   const [answer, setAnswer] = useState('');
   const [loading, setLoading] = useState(false);
-  const [hotlist, setHotlist] = useState<{ items: { id: string; title: string; url: string }[]; source: 'live' | 'cache' | 'demo'; updatedAt: number } | null>(null);
+  // #21: honest server-storage status line for the session view.
+  const [storageNotice, setStorageNotice] = useState<string | null>(null);
+  const [hotlist, setHotlist] = useState<{ items: { id: string; title: string; url: string | null }[]; source: 'live' | 'cache' | 'demo'; updatedAt: number; stale?: boolean } | null>(null);
   const [hotlistLoading, setHotlistLoading] = useState(true);
   // #18: honest live/cache/demo disclosure for the report panel.
   const [reportSourceState, setReportSourceState] = useState<ReportSourceState | null>(null);
@@ -235,6 +326,7 @@ export default function Home() {
       setCompleteError,
       setCompleted,
       setResultCard,
+      setStorageNotice,
     });
   };
 
@@ -242,9 +334,9 @@ export default function Home() {
     sess: Session,
     payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint }
   ) => {
-    const data = await postInterrogate(sess, payload);
-    if (data) {
-      await applyInterrogateResponse(data, {
+    const res = await postInterrogate(sess, payload);
+    if (res.ok) {
+      await applyInterrogateResponse(res.data, {
         setSession,
         setMessages,
         setSelectedViewpoint,
@@ -261,23 +353,42 @@ export default function Home() {
         setCompleteError,
         setCompleted,
         setResultCard,
+        setStorageNotice,
       });
+    } else if (res.storageUnavailable) {
+      // #21: explicit degradation — keep the local mirror, disclose honestly.
+      setStorageNotice(storageNoticeFor('unavailable'));
     }
   };
 
   // Restore session from URL on reload (#15: the persisted interrogation
   // state decides between "checkpoint pending" and "round N question pending").
+  // #21 recovery priority: server reachable → the server copy is the durable
+  // candidate; otherwise the local mirror. When both exist the newer
+  // updatedAt wins and a completed session is never downgraded
+  // (pickRecoverySession). A degraded server simply falls back to local.
   useEffect(() => {
     const restore = async () => {
       const params = new URLSearchParams(window.location.search);
       const sessionId = params.get('session');
       if (sessionId) {
-        const data = await storageProvider.loadSession(sessionId);
+        const local = await storageProvider.loadSession(sessionId);
+        const remote = await fetchServerSession(sessionId);
+        const data = pickRecoverySession(local, remote);
         if (data) {
+          if (!local) {
+            // Restored from the server with no local copy — re-mirror it so
+            // the browser has a snapshot for later offline rehydration.
+            await storageProvider.saveSession(data);
+          }
           setSession(data);
           if (data.report) setReport(data.report);
-          // #18: restore the report's retrieval state for the honest badge.
-          setReportSourceState(loadReportSourceState(sessionId));
+          // #24: restore report source state from the persisted session first
+          // (authoritative). Fall back to the side-key only for legacy sessions
+          // that predate #24 and have no session-level reportSourceState.
+          setReportSourceState(
+            data.reportSourceState ?? loadReportSourceState(sessionId) ?? null
+          );
           setMessages(data.messages);
           if (data.selectedViewpoint) setSelectedViewpoint(data.selectedViewpoint);
           if (data.resultCard) {
@@ -336,12 +447,13 @@ export default function Home() {
                 setCompleteError,
                 setCompleted,
                 setResultCard,
+                setStorageNotice,
               };
               const resp = await postInterrogate(data, {
                 action: 'start',
                 viewpoint: data.selectedViewpoint,
               });
-              if (resp) await applyInterrogateResponse(resp, hooks);
+              if (resp.ok) await applyInterrogateResponse(resp.data, hooks);
             }
           }
           setPage('session');
@@ -380,7 +492,7 @@ export default function Home() {
       // Call the server API which runs parallel search providers + report builder
       const res = await fetch('/api/report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
         body: JSON.stringify({ question, initialOpinion }),
       });
 
@@ -388,13 +500,22 @@ export default function Home() {
         throw new Error(`API error: ${res.status}`);
       }
 
-      const { sessionId, report, knowledgeGraph, sourceState } = (await res.json()) as {
+      const { sessionId, report, knowledgeGraph, sourceState, saved, storage } = (await res.json()) as {
         sessionId: string;
         report: Report;
         progress: { stage: string; message: string; timestamp: number }[];
         knowledgeGraph?: import('@/lib/knowledge-graph').KnowledgeGraph | null;
         sourceState?: ReportSourceState;
+        saved?: boolean;
+        storage?: 'memory' | 'postgres' | 'unavailable';
       };
+
+      // #21: honest storage disclosure. saved === false (or an explicit
+      // 'unavailable' mode) means the session was NOT persisted remotely —
+      // the client keeps its localStorage mirror and says so.
+      setStorageNotice(
+        saved === false ? storageNoticeFor('unavailable') : storageNoticeFor(storage)
+      );
 
       // #18: keep the report's retrieval state for the panel's honest badge,
       // including across reloads (side-key next to the mirrored session).
@@ -485,6 +606,7 @@ export default function Home() {
     setResultCard(null);
     setCurrentSources(null);
     setReportSourceState(null);
+    setStorageNotice(null);
     setAnswer('');
     setPage('home');
     window.history.pushState({}, '', '/');
@@ -505,14 +627,34 @@ export default function Home() {
     return <HomePage onStart={handleStart} hotlist={hotlist} hotlistLoading={hotlistLoading} />;
   }
 
+  // #19: honest cache disclosure — show when the cached channel data was
+  // actually retrieved. The oldest cached channel wins, so the badge never
+  // claims fresher data than what is displayed.
+  const cacheTimes: number[] = [];
+  if (reportSourceState?.zhihu === 'cache' && typeof reportSourceState.zhihuUpdatedAt === 'number') {
+    cacheTimes.push(reportSourceState.zhihuUpdatedAt);
+  }
+  if (reportSourceState?.web === 'cache' && typeof reportSourceState.webUpdatedAt === 'number') {
+    cacheTimes.push(reportSourceState.webUpdatedAt);
+  }
+  const cacheUpdatedAt = cacheTimes.length > 0 ? Math.min(...cacheTimes) : null;
+  const cacheStale = reportSourceState?.zhihuStale === true || reportSourceState?.webStale === true;
+
   return (
     <div className="min-h-screen">
       <header className="border-b bg-white">
         <div className="px-4 py-3 flex justify-between items-center">
           <h1 className="text-xl font-bold text-blue-600">知研</h1>
-          <span className="text-sm text-gray-600 truncate max-w-xs">
-            {session?.question}
-          </span>
+          <div className="flex flex-col items-end min-w-0">
+            <span className="text-sm text-gray-600 truncate max-w-xs">
+              {session?.question}
+            </span>
+            {storageNotice && (
+              <p data-testid="storage-notice" className="text-xs text-amber-600 truncate max-w-md">
+                {storageNotice}
+              </p>
+            )}
+          </div>
         </div>
       </header>
 
@@ -521,6 +663,8 @@ export default function Home() {
           report={report!}
           zhihuSourceState={reportSourceState?.zhihu}
           webSourceState={reportSourceState?.web}
+          cacheUpdatedAt={cacheUpdatedAt}
+          cacheStale={cacheStale}
           knowledgeGraph={session?.knowledgeGraph ?? null}
         />
 

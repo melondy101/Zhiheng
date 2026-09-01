@@ -1,10 +1,17 @@
 // Hotlist provider — fetches Zhihu hotlist topics with localStorage caching.
-// Client-side only; do not import in server code.
+// Client-side only; do not import in server code (server code imports the
+// HotlistItem *type* from here, never the runtime — #19).
+//
+// #19: real live retrieval runs server-side in src/lib/zhihu-retrieval.ts
+// (/api/hotlist). This browser-side class keeps the honest degradation chain
+// cache → demo; its live path intentionally throws, so the fixture data below
+// can never be labeled 'live'.
 
 export interface HotlistItem {
   id: string;
   title: string;
-  url: string;
+  /** Null when the provider record carried no URL — never fabricated (#19). */
+  url: string | null;
 }
 
 export interface HotlistResult {
@@ -35,10 +42,11 @@ export class HotlistProvider {
     ];
   }
 
-  /** Try to fetch from a live API (always fails in MVP — throws). */
+  /** Client-side live attempt — intentionally unreachable (#19: live retrieval
+   *  is server-side only, so this browser path always throws and the chain
+   *  degrades to cache → demo; the demo items below are never labeled 'live'). */
   private async fetchLive(): Promise<HotlistResult> {
-    // MVP: live endpoint intentionally unreachable.
-    throw new Error('Live API not available in MVP');
+    throw new Error('Live API not available client-side');
   }
 
   /** Read cached result from localStorage.

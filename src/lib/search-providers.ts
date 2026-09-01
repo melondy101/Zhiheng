@@ -1,6 +1,8 @@
 // Search providers with honest degradation (#18): cache → demo.
-// No external retrieval is wired in this MVP — the simulated fetch serves
-// hardcoded fixture content, which must be labeled 'demo', never 'live'.
+// #19: real retrieval now lives in src/lib/zhihu-retrieval.ts (server-side,
+// injectable transport). THIS module remains the fixture-only provider path:
+// its fetch serves hardcoded fixture content, which must be labeled 'demo',
+// never 'live' — only the real providers in zhihu-retrieval.ts may emit 'live'.
 // Supports simulateFailure flag for testing degradation paths.
 
 import type { Source } from './providers';
@@ -124,10 +126,10 @@ export class ZhihuSearchProvider {
       return { sources: cached.sources, source: 'cache', stale: true };
     }
 
-    // 2. Simulated fetch (#18 honesty): this MVP has no external retrieval,
-    //    so fetchLive serves hardcoded fixture content. Labeling it 'live'
-    //    would disguise fixture data as real-time retrieval, so it is
-    //    reported as demo data.
+    // 2. Simulated fetch (#18 honesty, fixture-only path since #19): this
+    //    provider class has no real retrieval — fetchLive serves hardcoded
+    //    fixture content. Labeling it 'live' would disguise fixture data as
+    //    real-time retrieval, so it is reported as demo data.
     if (!this.simulateFailure) {
       try {
         const sources = await this.fetchLive(question);
@@ -233,10 +235,10 @@ export class WebSearchProvider {
       return { sources: cached.sources, source: 'cache', stale: true };
     }
 
-    // 2. Simulated fetch (#18 honesty): this MVP has no external retrieval,
-    //    so fetchLive serves hardcoded fixture content. Labeling it 'live'
-    //    would disguise fixture data as real-time retrieval, so it is
-    //    reported as demo data.
+    // 2. Simulated fetch (#18 honesty, fixture-only path since #19): this
+    //    provider class has no real retrieval — fetchLive serves hardcoded
+    //    fixture content. Labeling it 'live' would disguise fixture data as
+    //    real-time retrieval, so it is reported as demo data.
     if (!this.simulateFailure) {
       try {
         const sources = await this.fetchLive(question);
