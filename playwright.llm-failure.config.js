@@ -27,7 +27,9 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
-    command: 'npx cross-env PORT=3002 next dev',
+    // Keep the failure suite self-contained: Next's port flag works on every
+    // CI shell without an additional cross-env dependency.
+    command: 'npx next dev -p 3002',
     url: 'http://localhost:3002',
     reuseExistingServer: false,
     timeout: 60000,

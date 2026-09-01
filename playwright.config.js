@@ -15,7 +15,9 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
-    command: 'npx cross-env PORT=3001 next dev',
+    // `next dev -p` is cross-platform and avoids relying on an undeclared
+    // cross-env binary in CI.
+    command: 'npx next dev -p 3001',
     url: 'http://localhost:3001',
     reuseExistingServer: false,
     timeout: 60000,
