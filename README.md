@@ -1,6 +1,6 @@
 # 知研 (Zhiyan) — AI 时代的思辨陪练
 
-> 知乎黑客松 MVP · Next.js 15 + React 19 · 19 张 ticket 已合并（#02–#13 + #19–#25）
+> 知乎黑客松 MVP · Next.js 15 + React 19 · GitHub #23 已在 integration `81771a1` 闭环，#30 已修复其服务端/浏览器边界；真实环境验收后进入 M1（#26）
 
 让 AI 通过追问帮助人类打磨观点，而非替用户思考。报告、引用、知识图谱、五轮诘问与可追溯成果卡 — 完整可演示。
 
@@ -37,9 +37,10 @@ npm run check       # 全量门禁
 1. **首页** → 输入问题或点击知乎热榜 Top 10（带 live/cache/demo 状态徽章）
 2. **报告生成** → 知乎 + 全网并行检索（live-first；失败按 fresh cache → stale cache → demo 降级）；引用区对 Provider null 元数据自动显示"（无摘要）"占位而非字面 `null`
 3. **观点引导** → 选 3 个 AI 建议之一 / 自写
-4. **五轮诘问** → 证据 → 前提 → 钢铁人反驳 → 立场反转 → 观点重述；LLM 在配置有效时按真实模型出题，否则稳定走策略模板（不替用户裁决）
-5. **成果卡** → 6 段可追溯 (初始表达/起始立场/新增证据/观点修正/最终观点/未解决问题)
-6. **刷新页面** → 重新打开成果卡（localStorage 或 Neon 跨设备恢复，owner header 隔离）
+4. **历史材料管理**（GitHub #23，integration `81771a1`） → 报告"本报告引用 N 条个人历史"列表；勾掉单项 → 点"重新生成报告"→ 新报告排除该条、保留其余；原 session 不删；空状态显示"暂无任何引用材料"
+5. **五轮诘问** → 证据 → 前提 → 钢铁人反驳 → 立场反转 → 观点重述；LLM 在配置有效时按真实模型出题，否则稳定走策略模板（不替用户裁决）
+6. **成果卡** → 6 段可追溯 (初始表达/起始立场/新增证据/观点修正/最终观点/未解决问题)
+7. **刷新页面** → 重新打开成果卡（localStorage 或 Neon 跨设备恢复，owner header 隔离）
 
 **三个预置主题**（可在 `src/lib/demo-sources.ts` 找到，fixture 降级时强制使用）：
 - `AI是否会取代人类创造力`（AI/技术）
@@ -85,12 +86,12 @@ npm run check       # 全量门禁
 
 ## 已知限制
 
-- **真实 Provider 凭据**：`.env.local` 缺失时 Zhihu/LLM/Neon 仍诚实降级到 fixture；真实接入验收需 #26 在受控环境中完成
+- **真实 Provider 凭据**：`.env.local` 缺失时 Zhihu/LLM/Neon 仍诚实降级到 fixture；真实接入验收尚未在已部署环境中证实
 - **演示数据**：3 个预置主题（AI 创造力、远程工作、35 岁程序员）保留确定性 fixture 用于演示和 CI
 - **持久化**：`localStorage` 仍可用（无 DB）；`#21` 已实现 Neon adapter，凭据缺失时明确降级并不伪称远端保存
 - **诘问策略**：MVP 仅 M1/M2/M4/M6/M5 5 轮；完整 8 策略 + 19 陷阱检测未实现
-- **报告 source state 跨浏览器恢复**：`#24` 已合并 — `Session.reportSourceState` 是权威来源，跨浏览器刷新后 badge 由持久化 Session 恢复（不再依赖 side-key）；知识图谱同源披露 provenance；无 DB 时 UI 显式标注"本地存储：未同步到远端"
-- **LLM 真实接入验收**：`#26` 必须由主控在受控环境亲自跑；fake/integration 测试已覆盖全部降级分支
+- **报告 source state 跨浏览器恢复**：历史内部 ticket #24 已合并 — `Session.reportSourceState` 是权威来源，跨浏览器刷新后 badge 由持久化 Session 恢复（不再依赖 side-key）；知识图谱同源披露 provenance；无 DB 时 UI 显式标注"本地存储：未同步到远端"
+- **LLM 真实接入验收**：尚待主控在受控环境亲自执行；fake/integration 测试已覆盖全部降级分支
 
 ## 项目结构
 
@@ -114,12 +115,13 @@ docs/
 
 ## 文档导航
 
-- [产品设计 v4.0](docs/prd/2026-08-29-zhiyan-design-v4.0.md) — 完整产品蓝图 + MVP 范围
+- [产品设计 v4.1](docs/prd/2026-09-01-zhiyan-design-v4.1.md) — 当前产品蓝图、MVP 与 M1 决策
+- [M1 交付 Backlog](docs/prd/2026-09-01-zhiyan-m1-delivery-backlog.md) — GitHub 映射、依赖与并行窗口
 - [架构说明](docs/architecture.md) — Provider 合约、数据流、状态机
 - [Agent 规范](AGENTS.md) — 项目内 AI 协作规则
 - [Issue Tracker 规范](docs/agents/issue-tracker.md) — GitHub issue 操作
 
-## 已合并 ticket 清单（截至 integration `46c1bf7`）
+## 已合并 ticket 清单（截至 integration `81771a1`）
 
 | # | 标题 | 集成 SHA |
 |---|------|----------|
@@ -139,9 +141,16 @@ docs/
 | 20 | 接入真实 LLM 追问并保留策略降级 | `ce1b000` |
 | 21 | 接入 Neon 持久化与匿名会话所有权 | `90901aa` |
 | 22 | 修正真实检索的 live-first 降级顺序 | `605b7a6` |
-| 23 | 保持 Provider 缺失元数据的诚实呈现 | `5dbc053` |
-| 24 | 持久化检索来源状态 | `46c1bf7` |
+| **23** | **GitHub #23：支持从当前报告上下文移除历史材料并再生成** | **`81771a1`** |
+| 24 | 持久化检索来源状态（历史内部 #24；**非 GitHub #24 刘看山**） | `46c1bf7` |
 | 25 | 强化 LLM "不得裁决用户观点" 护栏 | `44a400a` |
 
+> ⚠️ **编号防错**：历史合并的 `5dbc053 fix(#23)` 和 `46c1bf7 fix(#24)` 是**历史内部 ticket 编号**，分别对应"引用缺失元数据的 null 泄露"和"持久化检索来源状态"——**不是** GitHub Issue #23（移除历史材料）和 #24（刘看山）。GitHub #24 当前拆为 P2 子票 #47/#48；具体状态以 GitHub Issue 为准。
+
 每个 ticket 的 handoff 在 `.scratch/agent-runs/ticket-NN/HANDOFF.md`。
-待办：`#26` 真实服务验收门禁。
+
+待办：
+
+- **GitHub #26**：M1 阶段总控与准入门禁；真实环境验收有结论后才能开始 M1 实现
+- **GitHub #47/#48**：刘看山反馈 P2 拆票，不阻塞 M1
+- **真实环境验收**：Zhihu、LLM、Neon 与已部署 Vercel 环境尚未证实；#30 已解决 HistorySearchProvider 的服务端/浏览器存储边界

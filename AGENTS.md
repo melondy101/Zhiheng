@@ -19,15 +19,16 @@ Single-context layout. See `docs/agents/domain.md`.
 - Builder 最多 2 次实现尝试；Finalizer 最多 1 次修复尝试；超出必须升级主控到人工决策
 - Reviewer 必须独立跑门禁（typecheck/lint/test/build）并独立读 diff；不接受 Builder/Finalizer 自述为证据
 - 凭据处理：`.env.local` 是唯一外部凭据源；worktree 不复制凭据；测试时设 `DOTENV_CONFIG_PATH` 指向主仓 `.env.local`
-- 真实服务未配置（任一 `ZHIHU_ACCESS_SECRET` / `LLM_API_KEY` / `DATABASE_URL` 缺失）时，合并结论只能写"代码与 fake/integration 测试通过、真实接入待 #26"，不得声称真实接入完成
+- 真实服务未配置（任一 `ZHIHU_ACCESS_SECRET` / `LLM_API_KEY` / `DATABASE_URL` 缺失）时，合并结论只能写"代码与 fake/integration 测试通过、真实接入待受控环境验收"，不得声称真实接入完成
 - 完成票的 handoff 必须写到 `.scratch/agent-runs/ticket-NN/HANDOFF.md`；控制证据写到 `.scratch/agent-runs/control/HANDOFF.md`
 - 凭据绝不在 commit、handoff、控制台输出任何位置以明文出现；只报告布尔（CONFIGURED / EMPTY_OR_MISSING）
 
-## 当前阶段状态（截至 integration `46c1bf7`）
+## 当前阶段状态（截至 2026-09-01）
 
-- 已合并：`#19 #20 #21 #22 #23 #24 #25`（详见 `README.md` 末尾 ticket 表）
-- 待展开：`#26` 真实服务验收（依赖全部；DATABASE_URL 仍缺失，Neon 部分将 BLOCKED）
-- 上次同步：2026-08-31（#24 合并完成 + neat-freak 同步）
+- 已有实现证据：`#19 #20 #21 #22`（历史内部编号）、GitHub #23（移除历史材料并再生成，integration `81771a1`）与 GitHub #30（服务端/浏览器存储边界修复，已关闭）。
+- M1 总控为 **GitHub #26**；在真实 Zhihu、LLM、Neon 与 Vercel 验收有明确通过或受控阻塞结论，且现有质量门禁全绿前，不得开始或合并 M1 生产代码。
+- 刘看山反馈属于 P2，已拆为 **GitHub #47/#48**，不阻塞 M1。
+- 上次同步：2026-09-01（M1 设计、依赖与 GitHub 映射已对齐）
 - 详细控制证据：`.scratch/agent-runs/control/HANDOFF.md`
 
 ## 质量门禁（不可绕过）
