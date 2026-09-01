@@ -87,7 +87,7 @@ test.describe('History remove and regenerate (#23)', () => {
 
     // The personal_history section should appear in the references
     // (HistorySearchProvider returns sessions matching keywords "AI")
-    const personalHistorySection = page.locator('h4:has-text("个人历史报告")');
+    const personalHistorySection = page.locator('h4:has-text("本报告引用")');
     await expect(personalHistorySection).toBeVisible({ timeout: 10000 });
   });
 
@@ -101,7 +101,7 @@ test.describe('History remove and regenerate (#23)', () => {
     await expect(page.locator('h2')).toContainText(QUESTION, { timeout: 15000 });
 
     // Wait for personal_history section to appear
-    const personalHistorySection = page.locator('h4:has-text("个人历史报告")');
+    const personalHistorySection = page.locator('h4:has-text("本报告引用")');
     await expect(personalHistorySection).toBeVisible({ timeout: 10000 });
 
     // Capture the initial list of history source checkboxes
@@ -192,7 +192,7 @@ test.describe('History remove and regenerate (#23)', () => {
     expect(sessionBefore).not.toBeNull();
 
     // Wait for history section and uncheck a source
-    const personalHistorySection = page.locator('h4:has-text("个人历史报告")');
+    const personalHistorySection = page.locator('h4:has-text("本报告引用")');
     await expect(personalHistorySection).toBeVisible({ timeout: 10000 });
 
     const historyCheckboxes = page.locator('input[id^="history-toggle-"]');
@@ -279,10 +279,10 @@ test.describe('History remove and regenerate (#23)', () => {
     await expect(page.locator('h2')).toContainText(QUESTION, { timeout: 15000 });
 
     // personal_history section should not appear when there are no history sources
-    const personalHistorySection = page.locator('h4:has-text("个人历史报告")');
+    const personalHistorySection = page.locator('h4:has-text("本报告引用")');
     await expect(personalHistorySection).toHaveCount(0);
 
     // The zhihu source should still be visible
-    await expect(page.getByText('知乎回答')).toBeVisible();
+    await expect(page.getByText('知乎回答', { exact: true })).toBeVisible();
   });
 });
