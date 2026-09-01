@@ -24,6 +24,8 @@ import ReportPanel from './components/ReportPanel';
 import StanceSelector from './components/StanceSelector';
 import QAPanel from './components/QAPanel';
 import ResultCardView, { ResultCardViewFromSession } from './components/ResultCardView';
+import SessionFeedbackCue from './components/SessionFeedbackCue';
+import { deriveFeedbackCueState } from '@/lib/feedback-cue-state';
 
 const retrievalProvider = new FixtureRetrievalProvider();
 const storageProvider = new BrowserStorageProvider();
@@ -691,12 +693,24 @@ export default function Home() {
     window.history.pushState({}, '', '/');
   };
 
+  // #48: the cue is derived ONLY from existing state — no parallel business
+  // state is introduced (see src/lib/feedback-cue-state.ts).
+  const feedbackCueState = deriveFeedbackCueState({
+    loading,
+    hasSelectedViewpoint: selectedViewpoint !== null,
+    completed,
+    currentStrategy,
+  });
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="text-2xl mb-4">知研</div>
-          <p className="text-gray-600">加载中...</p>
+          <p className="text-gray-600 mb-3">加载中...</p>
+          {feedbackCueState === 'retrieving' && (
+            <SessionFeedbackCue state="retrieving" className="inline-flex text-left" />
+          )}
         </div>
       </div>
     );
@@ -752,6 +766,10 @@ export default function Home() {
         />
 
         <div className="flex flex-col flex-1 min-w-0">
+          {feedbackCueState && feedbackCueState !== 'retrieving' && (
+            <SessionFeedbackCue state={feedbackCueState} className="m-3" />
+          )}
+
           {!selectedViewpoint && !completed && (
             <StanceSelector
               viewpoints={report?.viewpoints ?? []}
