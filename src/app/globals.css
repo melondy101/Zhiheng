@@ -9,9 +9,8 @@ body {
 /* #50: SessionFeedbackCue — scoped, non-blocking status cue styles.
    Assets are official transparent GIFs that carry their own animation.
    No CSS keyframe nudge is applied to avoid overlapping animation.
-   The --animated class is still toggled by the component based on
-   prefers-reduced-motion; when motion is reduced the GIF animation
-   is not overridden by CSS — the user's system preference is respected.
+   When prefers-reduced-motion is active, the component renders its text/glyph
+   fallback instead of a GIF, so motion is not the only way to perceive state.
    Image dimensions (width/height) are set in the <img> tag to prevent
    layout shifts; the art class only provides flex layout constraints. */
 .session-feedback-cue {

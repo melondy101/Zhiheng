@@ -142,12 +142,10 @@ describe('SessionFeedbackCue — degradation (#50)', () => {
     assert.ok(html.includes(FEEDBACK_CUE_CONTENT.challenging!.description));
   });
 
-  it('image load failure (onError) hides GIF and shows glyph with full text', () => {
-    // Simulate a failed load by rendering with a non-existent src would be a DOM test;
-    // here we verify the onError handler toggles to text-only via the state reset:
-    // When imageLoadError=true, showImage = !imageUnavailable && !imageLoadError && !reduceMotion = false
+  it('normal motion renders the GIF while preserving full text', () => {
+    // The browser-level route-abort Golden Path covers the onError transition.
+    // This server-rendered contract test only pins the normal-image structure.
     const html = render({ state: 'retrieving', reducedMotion: false });
-    // Normal render shows image — verify structure
     assert.match(html, /data-testid="session-feedback-cue-image"/);
     assert.ok(html.includes(FEEDBACK_CUE_CONTENT.retrieving!.label));
     assert.ok(html.includes(FEEDBACK_CUE_CONTENT.retrieving!.description));

@@ -54,8 +54,8 @@ export interface FeedbackCueContent {
  *
  * #50: assets are official transparent GIFs copied from docs/kanshan-animations/
  * to public/feedback/official/. Each GIF carries its own animation; the
- * component still respects prefers-reduced-motion for the container class,
- * but no CSS keyframe nudge is applied to animated GIFs.
+ * component suppresses the GIF when prefers-reduced-motion is active, and no
+ * CSS keyframe nudge is applied to the animated assets.
  */
 export const FEEDBACK_CUE_CONTENT: Record<FeedbackCueState, FeedbackCueContent> = {
   retrieving: {
