@@ -1,6 +1,6 @@
 'use client';
 
-// #47 (#24-1): SessionFeedbackCue — a small, side-effect-free 刘看山 status
+// #50 (#24-1): SessionFeedbackCue — a small, side-effect-free 刘看山 status
 // cue. The component only renders a visual + text description for one of four
 // contracted states; it owns no session business state, makes no network
 // requests beyond loading its own local static asset, and never blocks input.
@@ -14,6 +14,12 @@
 // - Motion is opt-in: the first (SSR-safe) render assumes reduced motion; a
 //   client effect flips it on only when the OS media query allows motion. The
 //   `reducedMotion` prop lets callers/tests override detection deterministically.
+//
+// Asset contract (#50): each state uses an official transparent GIF from
+// docs/kanshan-animations/, copied to public/feedback/official/. Each GIF
+// carries its own animation. When prefers-reduced-motion is active, the GIF
+// is replaced by a decorative glyph (text only), honoring the user's motion
+// preference while preserving the text status.
 
 import { useEffect, useState } from 'react';
 
@@ -45,38 +51,43 @@ export interface FeedbackCueContent {
  * The single source of truth for per-state copy and assets. #48 must derive
  * WHICH state to show from the existing loading/strategy/completed state — it
  * must never extend this contract with unimplemented modes.
+ *
+ * #50: assets are official transparent GIFs copied from docs/kanshan-animations/
+ * to public/feedback/official/. Each GIF carries its own animation; the
+ * component still respects prefers-reduced-motion for the container class,
+ * but no CSS keyframe nudge is applied to animated GIFs.
  */
 export const FEEDBACK_CUE_CONTENT: Record<FeedbackCueState, FeedbackCueContent> = {
   retrieving: {
     key: 'retrieving',
     label: '刘看山正在检索资料',
     description: '正在汇总知乎与全网资料，请稍候。',
-    asset: '/feedback/liukanshan-retrieving.svg',
-    alt: '刘看山抱着放大镜，正在检索资料',
+    asset: '/feedback/official/retrieving_6s_320x320_20fps_transparent.gif',
+    alt: '刘看山坐在电脑前，正在检索资料（官方透明GIF，6秒循环）',
     fallbackGlyph: '🔎',
   },
   questioning: {
     key: 'questioning',
     label: '刘看山正在向你提问',
     description: '请结合报告证据，继续你的思考。',
-    asset: '/feedback/liukanshan-questioning.svg',
-    alt: '刘看山举起一块写着问号的提示牌，正在提问',
+    asset: '/feedback/official/questioning_5s_320x320_20fps_transparent.gif',
+    alt: '刘看山站在待机状态，正在等待你的回答（官方透明GIF，5秒循环）',
     fallbackGlyph: '💬',
   },
   challenging: {
     key: 'challenging',
     label: '刘看山提出反方挑战',
     description: '试着站到对立立场，回应最有力的反驳。',
-    asset: '/feedback/liukanshan-challenging.svg',
-    alt: '刘看山举出一块方向相反的箭头牌，表示反方挑战',
+    asset: '/feedback/official/challenging_3s_320x320_20fps_transparent.gif',
+    alt: '刘看山晃悠着提出反方挑战（官方透明GIF，3秒循环）',
     fallbackGlyph: '⇄',
   },
   completed: {
     key: 'completed',
     label: '刘看山陪你完成了本次思辨',
     description: '本次思辨已完成，可以查看思辨成果卡。',
-    asset: '/feedback/liukanshan-completed.svg',
-    alt: '刘看山举着带对勾的小旗，表示思辨完成',
+    asset: '/feedback/official/completed_4s_320x320_20fps_transparent.gif',
+    alt: '刘看山向你打招呼，表示思辨完成（官方透明GIF，4秒循环）',
     fallbackGlyph: '✅',
   },
 };
@@ -122,11 +133,10 @@ export default function SessionFeedbackCue({
   }, [state]);
 
   const reduceMotion = reducedMotion ?? motionReducedBySystem;
-  const showImage = !imageUnavailable && !imageLoadError;
+  const showImage = !imageUnavailable && !imageLoadError && !reduceMotion;
   const content = FEEDBACK_CUE_CONTENT[state];
   const containerClass = [
     'session-feedback-cue',
-    reduceMotion ? '' : 'session-feedback-cue--animated',
     className ?? '',
   ]
     .filter(Boolean)

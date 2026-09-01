@@ -1,10 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// #48 (#24-2): browser Golden Path for the 刘看山 SessionFeedbackCue.
+// #50 (#24-2): browser Golden Path for the 刘看山 SessionFeedbackCue.
 // The cue must be DERIVED from the existing state machine: retrieval loading,
 // normal questioning rounds (M1/M2/M5), adversarial rounds (M4/M6), and the
 // explicit completion. It also proves the accessible fallbacks: reduced
-// motion disables animation, and a failed asset still leaves equivalent text.
+// motion replaces GIF with glyph, and a failed asset still leaves equivalent text.
 
 const QUESTION = 'AI是否会取代人类创造力？';
 const INITIAL_OPINION = '我认为AI会增强而非取代创造力';
@@ -97,19 +97,21 @@ test.describe('Feedback cue Golden Path: four derived states (#48)', () => {
     await expect(cue(page)).toHaveAttribute('data-cue-state', 'completed');
   });
 
-  test('prefers-reduced-motion removes the animation class while keeping the cue', async ({ page }) => {
+  test('prefers-reduced-motion shows glyph fallback with text intact', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await startSession(page);
 
     await expect(cue(page)).toHaveAttribute('data-cue-state', 'questioning');
-    await expect(cue(page)).not.toHaveClass(/session-feedback-cue--animated/);
+    // Reduced motion replaces GIF with decorative glyph.
+    await expect(cue(page).getByTestId('session-feedback-cue-image')).toHaveCount(0);
+    await expect(cue(page).getByTestId('session-feedback-cue-text-art')).toBeVisible();
     // Text remains perceivable.
     await expect(cue(page)).toContainText('刘看山正在向你提问');
   });
 
   test('failed image asset degrades to equivalent text (no broken image, no lost state)', async ({ page }) => {
     // Every cue asset fails to load.
-    await page.route('**/feedback/*.svg', (route) => route.abort());
+    await page.route('**/feedback/official/*.gif', (route) => route.abort());
     await startSession(page);
 
     await expect(cue(page)).toHaveAttribute('data-cue-state', 'questioning');

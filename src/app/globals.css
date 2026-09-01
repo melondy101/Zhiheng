@@ -6,10 +6,14 @@ body {
   @apply bg-gray-50 text-gray-900;
 }
 
-/* #47: SessionFeedbackCue — scoped, non-blocking status cue styles.
-   The animation is a gentle nudge only. It is gated twice: the component
-   adds the --animated class only when prefers-reduced-motion is not set, and
-   the media query below provides a CSS-only backstop. */
+/* #50: SessionFeedbackCue — scoped, non-blocking status cue styles.
+   Assets are official transparent GIFs that carry their own animation.
+   No CSS keyframe nudge is applied to avoid overlapping animation.
+   The --animated class is still toggled by the component based on
+   prefers-reduced-motion; when motion is reduced the GIF animation
+   is not overridden by CSS — the user's system preference is respected.
+   Image dimensions (width/height) are set in the <img> tag to prevent
+   layout shifts; the art class only provides flex layout constraints. */
 .session-feedback-cue {
   display: flex;
   align-items: center;
@@ -53,24 +57,8 @@ body {
   color: #475569;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .session-feedback-cue--animated .session-feedback-cue-art {
-    animation: session-feedback-cue-nudge 2.4s ease-in-out infinite;
-  }
-}
-
-@keyframes session-feedback-cue-nudge {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-3px);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .session-feedback-cue--animated .session-feedback-cue-art {
+  .session-feedback-cue-art {
     animation: none;
   }
 }
