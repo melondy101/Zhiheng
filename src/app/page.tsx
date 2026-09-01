@@ -16,6 +16,7 @@ import type { StrategyId } from '@/lib/strategy-engine';
 import { selectRoundSources } from '@/lib/interrogation-context';
 import { FixtureRetrievalProvider } from '@/lib/fixture-providers';
 import { BrowserStorageProvider } from '@/lib/demo-providers';
+import { toHistorySessionSnapshots } from '@/lib/history-search';
 import { ownerHeaders } from '@/lib/owner-id';
 import { pickRecoverySession, storageNoticeFor } from '@/lib/session-recovery';
 import HomePage from './components/HomePage';
@@ -26,6 +27,11 @@ import ResultCardView, { ResultCardViewFromSession } from './components/ResultCa
 
 const retrievalProvider = new FixtureRetrievalProvider();
 const storageProvider = new BrowserStorageProvider();
+
+/** Browser storage is read here, then passed explicitly to the server route. */
+async function historySessionsForReport() {
+  return toHistorySessionSnapshots(await storageProvider.listSessions());
+}
 
 type Page = 'home' | 'session';
 
@@ -329,6 +335,7 @@ export default function Home() {
           question: session.question,
           initialOpinion: session.initialOpinion,
           excludedHistoryIds,
+          historySessions: await historySessionsForReport(),
         }),
       });
       if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -560,7 +567,11 @@ export default function Home() {
       const res = await fetch('/api/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
-        body: JSON.stringify({ question, initialOpinion }),
+        body: JSON.stringify({
+          question,
+          initialOpinion,
+          historySessions: await historySessionsForReport(),
+        }),
       });
 
       if (!res.ok) {

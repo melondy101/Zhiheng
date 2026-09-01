@@ -157,16 +157,13 @@ test.describe('History remove and regenerate (#23)', () => {
     // Verify the unchecked source no longer appears in the history list
     const updatedCheckboxes = page.locator('input[id^="history-toggle-"]');
     const updatedCount = await updatedCheckboxes.count();
-    // The unchecked item should either be gone or show as unchecked
-    const uncheckedIds: string[] = [];
+    // The excluded history source must be absent from the regenerated report.
+    const updatedIds: string[] = [];
     for (let i = 0; i < updatedCount; i++) {
-      const checked = await updatedCheckboxes.nth(i).isChecked();
-      if (!checked) {
-        const id = await updatedCheckboxes.nth(i).getAttribute('id');
-        uncheckedIds.push(id ?? '');
-      }
+      const id = await updatedCheckboxes.nth(i).getAttribute('id');
+      updatedIds.push(id ?? '');
     }
-    expect(uncheckedIds).toContain(`history-toggle-${sessionIdToExclude}`);
+    expect(updatedIds).not.toContain(`history-toggle-${sessionIdToExclude}`);
   });
 
   test('original session is preserved in localStorage after regenerate', async ({ page }) => {

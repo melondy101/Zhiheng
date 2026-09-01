@@ -1,11 +1,37 @@
-// History search provider — searches past sessions for relevant context.
-// Runs only in the browser via BrowserStorageProvider.
+// History search provider — filters browser-supplied historical context on the
+// server. Browser storage must never be imported here: localStorage is not
+// available in the Node.js route that generates reports.
 
-import type { Source } from './providers';
-import { clientStorage } from './demo-providers';
+import type { Session, Source } from './providers';
 
 export interface HistorySearchResult {
   sources: Source[];
+}
+
+/**
+ * The minimum browser-owned data the report API needs to identify relevant
+ * personal history. Deliberately excludes reports, graphs, and other session
+ * state so the client/server boundary stays small and explicit.
+ */
+export interface HistorySessionSnapshot {
+  id: string;
+  question: string;
+  initialOpinion: string | null;
+  messages: { role: string; text: string }[];
+  completed: boolean;
+  updatedAt: number;
+}
+
+/** Create transport-safe history snapshots from the browser's local sessions. */
+export function toHistorySessionSnapshots(sessions: readonly Session[]): HistorySessionSnapshot[] {
+  return sessions.map(session => ({
+    id: session.id,
+    question: session.question,
+    initialOpinion: session.initialOpinion,
+    messages: session.messages.map(message => ({ role: message.role, text: message.text })),
+    completed: session.completed,
+    updatedAt: session.updatedAt,
+  }));
 }
 
 /** Normalize text for keyword matching: lowercase, trim. */
@@ -15,7 +41,10 @@ function normalize(text: string): string {
 
 /** Check if keywords from `question` appear in `text`. */
 function matchesKeywords(question: string, text: string): boolean {
-  const qWords = normalize(question).split(/\s+/).filter(w => w.length >= 2);
+  // CJK questions are commonly written without spaces. Keep contiguous Han
+  // text as a phrase, while also extracting Latin/digit terms such as "AI"
+  // that can match across otherwise different Chinese phrasings.
+  const qWords = normalize(question).match(/[\p{Script=Han}]{2,}|[a-z0-9]{2,}/gu) ?? [];
   if (qWords.length === 0) return false;
   const t = normalize(text);
   return qWords.some(w => t.includes(w));
@@ -31,8 +60,8 @@ function extractExcerpt(session: { initialOpinion: string | null; messages: { ro
 }
 
 /**
- * HistorySearchProvider searches completed sessions from BrowserStorageProvider
- * that match the question via keyword overlap.
+ * HistorySearchProvider searches browser-supplied completed sessions that match
+ * the question via keyword overlap.
  *
  * Results are capped at 3, sorted by updatedAt desc, and include only
  * completed sessions (completed === true).
@@ -41,15 +70,18 @@ export class HistorySearchProvider {
   /**
    * Search past sessions for context relevant to `question`.
    * @param question The question to match against
+   * @param sessions Browser-owned history snapshots submitted with this report request
    * @param excludedIds Session IDs to exclude from results (e.g. the current session)
    */
-  async search(question: string, excludedIds: string[] = []): Promise<HistorySearchResult> {
-    const allSessions = await clientStorage.listSessions();
-
+  async search(
+    question: string,
+    sessions: readonly HistorySessionSnapshot[] = [],
+    excludedIds: string[] = []
+  ): Promise<HistorySearchResult> {
     const excluded = new Set(excludedIds);
 
     // Filter: completed sessions, not excluded, and keyword match
-    const matched = allSessions
+    const matched = sessions
       .filter(s => {
         if (!s.completed) return false;
         if (excluded.has(s.id)) return false;

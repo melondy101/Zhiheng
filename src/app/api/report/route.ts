@@ -3,7 +3,7 @@ import { getServerStorage, StorageUnavailableError } from '@/lib/server-storage'
 import { readOwnerId } from '@/lib/owner-id';
 import type { Session, ReportProgress, SourceState } from '@/lib/providers';
 import { createZhihuSearchProvider, createGlobalSearchProvider } from '@/lib/zhihu-retrieval';
-import { HistorySearchProvider } from '@/lib/history-search';
+import { HistorySearchProvider, type HistorySessionSnapshot } from '@/lib/history-search';
 import { buildReport } from '@/lib/report-builder';
 import { buildGraph } from '@/lib/knowledge-graph';
 
@@ -30,6 +30,48 @@ interface ExtendedSourceState {
   webStale?: boolean;
 }
 
+/**
+ * Accept only the minimal browser-owned history shape used by the history
+ * provider. The route remains safe when called by older clients or arbitrary
+ * HTTP clients that omit or malformed this optional field.
+ */
+function parseHistorySessions(value: unknown): HistorySessionSnapshot[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((candidate): HistorySessionSnapshot[] => {
+    if (!candidate || typeof candidate !== 'object') return [];
+    const record = candidate as Record<string, unknown>;
+    if (
+      typeof record.id !== 'string' ||
+      typeof record.question !== 'string' ||
+      (record.initialOpinion !== null && typeof record.initialOpinion !== 'string') ||
+      typeof record.completed !== 'boolean' ||
+      typeof record.updatedAt !== 'number' ||
+      !Number.isFinite(record.updatedAt) ||
+      !Array.isArray(record.messages)
+    ) {
+      return [];
+    }
+
+    const messages = record.messages.flatMap((message): { role: string; text: string }[] => {
+      if (!message || typeof message !== 'object') return [];
+      const item = message as Record<string, unknown>;
+      return typeof item.role === 'string' && typeof item.text === 'string'
+        ? [{ role: item.role, text: item.text }]
+        : [];
+    });
+
+    return [{
+      id: record.id,
+      question: record.question,
+      initialOpinion: record.initialOpinion as string | null,
+      messages,
+      completed: record.completed,
+      updatedAt: record.updatedAt,
+    }];
+  });
+}
+
 export async function POST(request: Request) {
   // #21: every storage-touching request must carry the anonymous ownership
   // header; the session is stored under that owner and is invisible to
@@ -42,7 +84,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { question, initialOpinion, excludedHistoryIds = [] } = await request.json();
+  const { question, initialOpinion, excludedHistoryIds = [], historySessions } = await request.json();
   if (!question) {
     return NextResponse.json({ error: 'Missing question' }, { status: 400 });
   }
@@ -55,11 +97,12 @@ export async function POST(request: Request) {
   const zhihuProvider = createZhihuSearchProvider({ timeoutMs: SEARCH_TIMEOUT_MS });
   const webProvider = createGlobalSearchProvider({ timeoutMs: SEARCH_TIMEOUT_MS });
   const historyProvider = new HistorySearchProvider();
+  const parsedHistorySessions = parseHistorySessions(historySessions);
 
   const [zhihuResult, webResult, historyResult] = await Promise.all([
     zhihuProvider.search(question),
     webProvider.search(question),
-    historyProvider.search(question, excludedHistoryIds as string[]),
+    historyProvider.search(question, parsedHistorySessions, excludedHistoryIds as string[]),
   ]);
 
   const zhihuSourceState: SourceState = zhihuResult.source;

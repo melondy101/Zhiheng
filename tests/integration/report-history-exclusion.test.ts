@@ -43,6 +43,42 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('POST /api/report with excludedHistoryIds', () => {
+  it('uses explicit client history snapshots without reading browser storage', async () => {
+    const request = new Request('http://localhost:3000/api/report', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-zhiyan-owner': TEST_OWNER },
+      body: JSON.stringify({
+        question: 'AI是否会改变教育？',
+        initialOpinion: '',
+        historySessions: [
+          {
+            id: 'browser_history_1',
+            question: 'AI是否会改变教育？',
+            initialOpinion: 'AI辅助学习是趋势',
+            messages: [],
+            completed: true,
+            updatedAt: 100,
+          },
+          {
+            id: 'browser_history_incomplete',
+            question: 'AI会怎样改变教育？',
+            initialOpinion: null,
+            messages: [],
+            completed: false,
+            updatedAt: 200,
+          },
+        ],
+      }),
+    });
+
+    const response = await reportPOST(request);
+    assert.strictEqual(response.status, 200);
+    const body = (await response.json()) as ReportResponseBody;
+    const historyRefs = body.report.references.filter(ref => ref.type === 'personal_history');
+    assert.deepStrictEqual(historyRefs.map(ref => ref.sourceSessionId), ['browser_history_1']);
+    assert.strictEqual(historyRefs[0]!.provenance, '个人上下文');
+  });
+
   it('accepts excludedHistoryIds parameter without error', async () => {
     const request = new Request('http://localhost:3000/api/report', {
       method: 'POST',
