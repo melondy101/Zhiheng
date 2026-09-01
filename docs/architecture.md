@@ -120,6 +120,14 @@ MVP 实现：`BrowserStorageProvider`（localStorage，key 前缀 `zhiyan_sessio
 
 `StaticReportRenderer` 当前是 `structuredClone()` — 保持数据不可变。`AnonymousIdentityProvider` 返回固定 `anon` 身份。两者未来用于 SSR/Neon 时扩展。
 
+#### 正式化阶段：游客身份认领（设计决策）
+
+MVP 的随机匿名 owner 仅用于演示期隔离，不能作为正式鉴权凭据。正式化时采用“游客先用、注册后认领”的身份模型：服务端签发并以 `HttpOnly`、`Secure`、`SameSite` Cookie 保存游客会话；所有会话、报告与画像先归该游客 identity。用户注册或登录后，服务端在一个事务中把当前游客 identity 的数据归属迁移或绑定到已验证的账户 identity，并使旧游客会话失效。
+
+业务与存储仍只依赖稳定的 `ownerId` / identity scope，不把匿名 token 写入报告、消息或领域实体。账户态请求必须从服务端验证的登录会话解析 owner，不能信任客户端提交的 `x-zhiyan-owner`。未注册游客清除浏览器 Cookie、使用无痕窗口或更换设备前无法安全找回其数据；这是匿名体验的预期边界。
+
+**排期约束**：在 Demo 的所有已承诺功能完成前，不实现 Cookie 会话、注册/登录或游客数据认领；当前匿名 owner 数据模型保持与未来账户数据模型兼容即可。身份正式化作为 Demo 收尾后的独立基础任务，且先于分享、跨设备和账户中心。
+
 ## 3. 状态机
 
 ### 3.1 页面级（page.tsx）

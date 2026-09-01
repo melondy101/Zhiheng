@@ -13,6 +13,12 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Repository: `huang-yi-dae/zhiyan`.
 
+## Source of truth
+
+GitHub Issues are the sole authority for a ticket's number, title, scope, dependency, and lifecycle state. Before planning or reporting ticket work, read the current issue with `gh issue view <number> --comments` (and use `gh issue list` to establish the open-ticket set).
+
+`README.md`, handoff files, commit messages, and agent-run records are historical implementation evidence only. They must not be used to infer a current ticket number or status when they conflict with GitHub Issues.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.**
