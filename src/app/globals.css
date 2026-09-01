@@ -5,3 +5,72 @@
 body {
   @apply bg-gray-50 text-gray-900;
 }
+
+/* #47: SessionFeedbackCue — scoped, non-blocking status cue styles.
+   The animation is a gentle nudge only. It is gated twice: the component
+   adds the --animated class only when prefers-reduced-motion is not set, and
+   the media query below provides a CSS-only backstop. */
+.session-feedback-cue {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  max-width: 100%;
+}
+
+.session-feedback-cue-art {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+.session-feedback-cue-art--text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.session-feedback-cue-text {
+  min-width: 0;
+}
+
+.session-feedback-cue-label {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #1e3a8a;
+}
+
+.session-feedback-cue-description {
+  margin: 0.125rem 0 0;
+  font-size: 0.75rem;
+  color: #475569;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .session-feedback-cue--animated .session-feedback-cue-art {
+    animation: session-feedback-cue-nudge 2.4s ease-in-out infinite;
+  }
+}
+
+@keyframes session-feedback-cue-nudge {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-feedback-cue--animated .session-feedback-cue-art {
+    animation: none;
+  }
+}
