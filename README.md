@@ -1,6 +1,6 @@
 # 知研 (Zhiyan) — AI 时代的思辨陪练
 
-> 知乎黑客松 MVP · Next.js 15 + React 19 · GitHub #23 已在 integration `81771a1` 闭环，#30 已修复其服务端/浏览器边界；真实环境验收后进入 M1（#26）
+> 知乎黑客松 MVP · Next.js 15 + React 19 · integration 最新 `f35a711`（GitHub #50 官方刘看山 GIF 已合入并关闭）；真实环境验收后进入 M1（#26）
 
 让 AI 通过追问帮助人类打磨观点，而非替用户思考。报告、引用、知识图谱、五轮诘问与可追溯成果卡 — 完整可演示。
 
@@ -22,7 +22,7 @@ npm start -- --port 3001
 
 # 质量门禁
 npm run typecheck   # TypeScript 严格模式
-npm test            # 单元/集成测试（371 tests, 104 suites）
+npm test            # 单元/集成测试（426 tests, 113 suites）
 npm run test:e2e    # E2E（含 LLM 失败降级 Golden Path）
 npm run check       # 全量门禁
 ```
@@ -104,7 +104,7 @@ src/
 │   └── layout.tsx
 ├── lib/              # 22 个 Provider / Builder / Engine（含 zhihu-retrieval, openai-llm-provider, owned-storage...）
 tests/
-├── unit/             # 350 单元/集成测试覆盖 93 suites（含 zhihu-retrieval / openai-llm-provider / providers）
+├── unit/             # 单元/集成测试覆盖 113 suites（含 zhihu-retrieval / openai-llm-provider / providers / session-feedback-cue）
 ├── integration/      # retrieve-api / llm-provider-api / neon-storage / profile-api / storage-degradation
 └ tests/e2e-llm/           # llm-failure-golden-path.spec.ts
 docs/
@@ -118,6 +118,7 @@ docs/
 - [产品设计 v4.1](docs/prd/2026-09-01-zhiyan-design-v4.1.md) — 当前产品蓝图、MVP 与 M1 决策
 - [M1 交付 Backlog](docs/prd/2026-09-01-zhiyan-m1-delivery-backlog.md) — GitHub 映射、依赖与并行窗口
 - [架构说明](docs/architecture.md) — Provider 合约、数据流、状态机
+- [刘看山反馈资源策略](docs/assets/feedback-cue-assets.md) — `SessionFeedbackCue` 资源来源、加载与降级（#50）
 - [Agent 规范](AGENTS.md) — 项目内 AI 协作规则
 - [Issue Tracker 规范](docs/agents/issue-tracker.md) — GitHub issue 操作
 
@@ -144,13 +145,16 @@ docs/
 | **23** | **GitHub #23：支持从当前报告上下文移除历史材料并再生成** | **`81771a1`** |
 | 24 | 持久化检索来源状态（历史内部 #24；**非 GitHub #24 刘看山**） | `46c1bf7` |
 | 25 | 强化 LLM "不得裁决用户观点" 护栏 | `44a400a` |
+| **47** | **GitHub #47：刘看山反馈组件/资源策略/无障碍降级** | **`52c904a`** |
+| **48** | **GitHub #48：刘看山反馈状态机接入 + 浏览器 Golden Path** | **`fd9da7b`** |
+| **50** | **GitHub #50：将四种会话反馈替换为官方刘看山 GIF** | **`f35a711`** |
 
-> ⚠️ **编号防错**：历史合并的 `5dbc053 fix(#23)` 和 `46c1bf7 fix(#24)` 是**历史内部 ticket 编号**，分别对应"引用缺失元数据的 null 泄露"和"持久化检索来源状态"——**不是** GitHub Issue #23（移除历史材料）和 #24（刘看山）。GitHub #24 当前拆为 P2 子票 #47/#48；具体状态以 GitHub Issue 为准。
+> ⚠️ **编号防错**：历史合并的 `5dbc053 fix(#23)` 和 `46c1bf7 fix(#24)` 是**历史内部 ticket 编号**，分别对应"引用缺失元数据的 null 泄露"和"持久化检索来源状态"——**不是** GitHub Issue #23（移除历史材料）和 #24（刘看山）。GitHub #24 当前拆为 P2 子票 #47/#48；具体状态以 GitHub Issue 为准。#47/#48 的素材替换后续票是 GitHub #50（已合并并关闭）。
 
 每个 ticket 的 handoff 在 `.scratch/agent-runs/ticket-NN/HANDOFF.md`。
 
 待办：
 
 - **GitHub #26**：M1 阶段总控与准入门禁；真实环境验收有结论后才能开始 M1 实现
-- **GitHub #47/#48**：刘看山反馈 P2 拆票，不阻塞 M1
+- **GitHub #47/#48**：刘看山反馈 P2 拆票，已合并到 integration `fd9da7b`，待授权关闭（#50 素材替换已合入并关闭）
 - **真实环境验收**：Zhihu、LLM、Neon 与已部署 Vercel 环境尚未证实；#30 已解决 HistorySearchProvider 的服务端/浏览器存储边界

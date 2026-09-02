@@ -27,5 +27,8 @@ playwright-report/
 .worktrees/
 .agent-runs/**/*.jsonl
 
+# Generated local CodeGraph index
+.codegraph/
+
 # Coverage
 coverage/
