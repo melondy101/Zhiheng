@@ -50,6 +50,7 @@ export async function POST(request: Request) {
     answer?: unknown;
     viewpoint?: unknown;
     session?: unknown;
+    optimisticId?: unknown;
   };
 
   if (typeof body.sessionId !== 'string' || body.sessionId.length === 0) {
@@ -73,6 +74,7 @@ export async function POST(request: Request) {
       answer: typeof body.answer === 'string' ? body.answer : undefined,
       viewpoint: (body.viewpoint ?? undefined) as Viewpoint | undefined,
       sessionSnapshot: (body.session ?? null) as Session | null,
+      optimisticId: typeof body.optimisticId === 'string' ? body.optimisticId : null,
       storage: scope.sessions,
       generateQuestion: (strategy, session) =>
         llmProvider.generateStrategyQuestion(strategy, session),

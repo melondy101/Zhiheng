@@ -13,6 +13,13 @@ export interface Message {
   text: string;
   timestamp: number;
   /**
+   * #26/T3: optimistic message status.
+   * - 'sent': confirmed by server (default for existing messages).
+   * - 'pending': client-side optimistic insert awaiting server confirmation.
+   * - 'failed': server rejected; the user can click to retry.
+   */
+  status?: 'sent' | 'pending' | 'failed';
+  /**
    * True when this user input was recorded while the user was uncertain
    * (#17). Uncertain inputs stay traceable in the conversation but never
    * advance the interrogation round.

@@ -35,6 +35,14 @@ export interface HandleInterrogateInput {
   answer?: string;
   viewpoint?: Viewpoint;
   /**
+   * #26/T3: the optimistic user message id sent by the client before the
+   * API call. When present and matching a `pending` message, the server
+   * confirms it as `sent` in the response session so the client can remove
+   * the optimistic insert. Absent or mismatched → the optimistic message
+   * stays `pending` and the client marks it as `failed`.
+   */
+  optimisticId?: string | null;
+  /**
    * The client's persisted copy of the last API-returned session. Adopted
    * only when server storage has no such session (e.g. after a restart);
    * it is itself a snapshot of previously API-computed state, never
@@ -237,6 +245,35 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     return { ok: false, status: 409, error: 'No checkpoint decision pending' };
   }
 
+  // #26/T3: optimistic reconciliation — if the client sent an optimistic
+  // message id, locate the matching `pending` message and confirm it. The
+  // optimistic insert uses a `pending` status and a server-generated real id
+  // replaces the optimistic id. If no match is found, the server produces
+  // a normal message (the client will mark its optimistic insert as failed).
+  function reconcileOptimistic(session: Session, optimisticId?: string | null): Session {
+    if (!optimisticId) return session;
+    const optimisticIndex = session.messages.findIndex(
+      (m) => m.id === optimisticId && m.status === 'pending'
+    );
+    if (optimisticIndex === -1) return session;
+    const realMessage: Message = {
+      id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      role: 'user',
+      text: session.messages[optimisticIndex]!.text,
+      timestamp: Date.now(),
+      status: 'sent',
+      uncertain: session.messages[optimisticIndex]!.uncertain,
+    };
+    return {
+      ...session,
+      messages: [
+        ...session.messages.slice(0, optimisticIndex),
+        realMessage,
+        ...session.messages.slice(optimisticIndex + 1),
+      ],
+    };
+  }
+
   // action === 'answer'
   if (state.pendingCheckpoint) {
     return { ok: false, status: 409, error: 'Checkpoint decision pending' };
@@ -254,11 +291,15 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
 
   const streak = evaluateStreak(state.uncertainStreak, answer);
 
+  // #26/T3: first reconcile any pending optimistic message with the real
+  // server-generated id, then proceed with the normal answer flow.
+  let currentSession = reconcileOptimistic(session, input.optimisticId);
+
   // Every input is recorded — including uncertain ones (#17: an uncertain
   // input is persisted as an uncertain user message and never discarded).
   const withAnswer: Session = {
-    ...session,
-    messages: [...session.messages, makeMessage(answer, streak > 0)],
+    ...currentSession,
+    messages: [...currentSession.messages, makeMessage(answer, streak > 0)],
   };
 
   // #17: uncertain answers NEVER advance the round. The first two stay in

@@ -1,8 +1,12 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
+
 import type { CitedSource, Message } from '@/lib/providers';
 import { isRoundAnswer } from '@/lib/providers';
+import type { FeedbackCueState } from './SessionFeedbackCue';
 import type { StrategyId } from '@/lib/strategy-engine';
+import SessionFeedbackCue from './SessionFeedbackCue';
 
 interface QAPanelProps {
   messages: Message[];
@@ -35,8 +39,14 @@ interface QAPanelProps {
   onDecisionContinue?: () => void;
   /** #17: retry the failed completion. */
   onRetryComplete?: () => void;
+  /** #26/T3: retry a failed optimistic user message. */
+  onRetryMessage?: (msgId: string) => void;
   onExit?: () => void;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
+  /** #26/T3: true while an answer is being sent (form visually disabled). */
+  formLoading?: boolean;
+  /** #26/T3: inline 刘看山 feedback cue state derived from page state. */
+  feedbackCueState?: FeedbackCueState | null;
 }
 
 const STRATEGY_LABELS: Record<StrategyId, string> = {
@@ -79,9 +89,6 @@ function SourcesSection({ sources }: { sources: CitedSource[] | null | undefined
       <ul className="mt-1 space-y-1">
         {sources.map(({ index, source }) => {
           const label = source.title ?? source.author ?? `来源 ${index}`;
-          // #18: same trim rule as interrogation-context.ts — a
-          // whitespace-only URL is not a usable link and renders as plain
-          // text, never as a link.
           const url = source.url?.trim() || null;
           return (
             <li key={`${index}-${source.id}`} className="text-xs">
@@ -126,9 +133,21 @@ export default function QAPanel({
   onContinue,
   onDecisionContinue,
   onRetryComplete,
+  onRetryMessage,
   onExit,
   messagesEndRef,
+  formLoading = false,
+  feedbackCueState = null,
 }: QAPanelProps) {
+  const scrollTargetRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll to the end when new messages arrive.
+  useEffect(() => {
+    if (scrollTargetRef.current) {
+      scrollTargetRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages.length]);
+
   return (
     <div className="w-[450px] flex flex-col bg-white">
       <div className="px-4 py-2 border-b flex items-center justify-between bg-gray-50">
@@ -164,12 +183,33 @@ export default function QAPanel({
                     msg.role === 'user'
                       ? 'bg-blue-600 text-white ml-8'
                       : 'bg-gray-100 mr-8'
+                  } ${msg.status === 'pending' ? 'opacity-60' : ''} ${
+                    msg.status === 'failed' ? 'border-2 border-red-400' : ''
                   }`}
                 >
                   <p className="text-sm mb-1">{msg.text}</p>
+                  {msg.status === 'pending' && (
+                    <p className="text-xs text-blue-200 mt-1">发送中...</p>
+                  )}
+                  {msg.status === 'failed' && onRetryMessage && (
+                    <button
+                      onClick={() => onRetryMessage(msg.id)}
+                      className="text-xs text-red-300 hover:text-red-100 underline mt-1"
+                    >
+                      点击重试
+                    </button>
+                  )}
                 </div>
               ))}
-              <div ref={messagesEndRef} />
+              {/* Inline feedback cue inside the message list, also visible when
+                  no messages have been sent yet (no-messages window). */}
+              {feedbackCueState && feedbackCueState !== 'retrieving' && (
+                <SessionFeedbackCue
+                  state={feedbackCueState}
+                  className="inline-flex text-left"
+                />
+              )}
+              <div ref={scrollTargetRef} />
             </div>
           )}
 
@@ -275,10 +315,9 @@ export default function QAPanel({
         </div>
       )}
 
-      {!currentQuestion && messages.length === 0 && (
-        <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
-          选择观点后开始思辨
-        </div>
+      {/* No-messages window: show the cue before the first round (#48). */}
+      {!messages.length && feedbackCueState && feedbackCueState !== 'retrieving' && (
+        <SessionFeedbackCue state={feedbackCueState} className="m-3" />
       )}
 
       {!isCheckpoint && !pendingDecision && (
@@ -288,15 +327,16 @@ export default function QAPanel({
               type="text"
               value={answer}
               onChange={(e) => onAnswerChange(e.target.value)}
-              placeholder="输入你的回答..."
-              className="flex-1 p-2 border rounded-lg text-sm"
+              placeholder={formLoading ? '正在发送...' : '输入你的回答...'}
+              disabled={formLoading}
+              className="flex-1 p-2 border rounded-lg text-sm disabled:bg-gray-100 disabled:text-gray-400"
             />
             <button
               type="submit"
-              disabled={!answer.trim()}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:bg-gray-300"
+              disabled={!answer.trim() || formLoading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
             >
-              发送
+              {formLoading ? '发送中...' : '发送'}
             </button>
           </div>
         </form>

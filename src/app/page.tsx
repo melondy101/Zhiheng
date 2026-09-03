@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   CitedSource,
   Session,
@@ -242,10 +242,24 @@ async function completeSession(sess: Session, hooks: InterrogateViewHooks): Prom
  */
 async function applyInterrogateResponse(
   data: InterrogateResponseBody,
-  hooks: InterrogateViewHooks
+  hooks: InterrogateViewHooks,
+  optimisticId: string | null,
+  clearOptimistic: () => void
 ): Promise<void> {
+  // #26/T3: optimistic reconciliation — the server replaces the optimistic
+  // message (different id) if accepted, or leaves it as pending if not.
+  // If the optimistic id is still in the response messages, mark it as
+  // `failed` so the user can click to retry.
+  let finalMessages = data.session.messages;
+  if (optimisticId && data.session.messages.some(m => m.id === optimisticId)) {
+    finalMessages = data.session.messages.map((m) =>
+      m.id === optimisticId ? { ...m, status: 'failed' } : m
+    );
+  }
+  clearOptimistic();
+
   hooks.setSession(data.session);
-  hooks.setMessages(data.session.messages);
+  hooks.setMessages(finalMessages);
   if (data.session.selectedViewpoint) hooks.setSelectedViewpoint(data.session.selectedViewpoint);
   hooks.setUncertainStreak(data.uncertainStreak);
   hooks.setCompleteError(null);
@@ -315,6 +329,13 @@ export default function Home() {
   // #23: IDs of personal_history sources excluded by the user for the current report.
   const [excludedHistoryIds, setExcludedHistoryIds] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // #26/T3: instant form feedback — disables the input while the answer
+  // is being sent so the user sees immediate visual confirmation.
+  const [formLoading, setFormLoading] = useState(false);
+  // #26/T3: optimistic message tracking — id of the pending user message
+  // awaiting server confirmation, or null when no optimistic insert exists.
+  const [optimisticMessageId, setOptimisticMessageId] = useState<string | null>(null);
 
   // #23: toggle a personal_history source in/out of the report context.
   const handleHistorySourceToggle = (sourceSessionId: string, included: boolean) => {
@@ -408,7 +429,7 @@ export default function Home() {
 
   const runInterrogate = async (
     sess: Session,
-    payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint }
+    payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint; optimisticId?: string | null }
   ) => {
     const res = await postInterrogate(sess, payload);
     if (res.ok) {
@@ -430,10 +451,11 @@ export default function Home() {
         setCompleted,
         setResultCard,
         setStorageNotice,
-      });
+      }, payload.optimisticId ?? null, () => setOptimisticMessageId(null));
     } else if (res.storageUnavailable) {
       // #21: explicit degradation — keep the local mirror, disclose honestly.
       setStorageNotice(storageNoticeFor('unavailable'));
+      setOptimisticMessageId(null);
     }
   };
 
@@ -529,7 +551,7 @@ export default function Home() {
                 action: 'start',
                 viewpoint: data.selectedViewpoint,
               });
-              if (resp.ok) await applyInterrogateResponse(resp.data, hooks);
+              if (resp.ok) await applyInterrogateResponse(resp.data, hooks, null, () => {});
             }
           }
           setPage('session');
@@ -653,10 +675,25 @@ export default function Home() {
 
     const userAnswer = answer.trim();
     setAnswer('');
+    setFormLoading(true);
+
+    // #26/T3: optimistic insert — the user message appears instantly as
+    // pending while the API call is in flight.
+    const optimisticId = `opt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const optimisticMsg: Message = {
+      id: optimisticId,
+      role: 'user',
+      text: userAnswer,
+      timestamp: Date.now(),
+      status: 'pending',
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+    setOptimisticMessageId(optimisticId);
 
     // Ticket #15: the API records the answer, updates the uncertain streak,
     // gates the checkpoint, and plans/persists the next round.
-    await runInterrogate(session, { action: 'answer', answer: userAnswer });
+    await runInterrogate(session, { action: 'answer', answer: userAnswer, optimisticId });
+    setFormLoading(false);
   };
 
   // Ticket #14/#17: continue from the checkpoint decision (or the #17
@@ -667,6 +704,17 @@ export default function Home() {
     setHintOptions(null);
     await runInterrogate(session, { action: 'continue' });
   };
+
+  // #26/T3: retry handler for failed optimistic messages.
+  const handleRetryMessage = useCallback((msgId: string) => {
+    if (!session || !messages.find(m => m.id === msgId)) return;
+    const msg = messages.find(m => m.id === msgId)!;
+    if (msg.status !== 'failed') return;
+    // Retry: mark as pending and re-submit
+    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'pending' } : m));
+    setOptimisticMessageId(msgId);
+    void runInterrogate(session, { action: 'answer', answer: msg.text, optimisticId: msgId });
+  }, [session, messages]);
 
   const handleNewSession = () => {
     setSession(null);
@@ -689,6 +737,8 @@ export default function Home() {
     setStorageNotice(null);
     setAnswer('');
     setExcludedHistoryIds([]);
+    setFormLoading(false);
+    setOptimisticMessageId(null);
     setPage('home');
     window.history.pushState({}, '', '/');
   };
@@ -766,7 +816,10 @@ export default function Home() {
         />
 
         <div className="flex flex-col flex-1 min-w-0">
-          {feedbackCueState && feedbackCueState !== 'retrieving' && (
+          {/* External 刘看山 cue during stance selection (#48); also visible
+              after completion so the result card can show the completed cue.
+              Hidden once inside QAPanel where the inline cue takes over (#26/T3). */}
+          {(!selectedViewpoint || feedbackCueState === 'completed') && feedbackCueState && feedbackCueState !== 'retrieving' && (
             <SessionFeedbackCue state={feedbackCueState} className="m-3" />
           )}
 
@@ -798,13 +851,18 @@ export default function Home() {
               onContinue={handleCheckpointContinue}
               onDecisionContinue={handleCheckpointContinue}
               onRetryComplete={() => { void handleCompleteNow(); }}
+              onRetryMessage={handleRetryMessage}
               onExit={() => { void handleCompleteNow(); }}
               messagesEndRef={messagesEndRef}
+              formLoading={formLoading}
+              feedbackCueState={feedbackCueState}
             />
           )}
 
           {completed && session && (
-            <ResultCardViewFromSession session={session} onNewSession={handleNewSession} />
+            <div>
+              <ResultCardViewFromSession session={session} onNewSession={handleNewSession} />
+            </div>
           )}
         </div>
       </div>
