@@ -127,6 +127,15 @@ function toResponseBody(
  * provider with fallback, persist the strategy history, and store the new
  * interrogation state on the session.
  */
+function makeAssistantMessage(text: string): Message {
+  return {
+    id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    role: 'assistant',
+    text,
+    timestamp: Date.now(),
+  };
+}
+
 async function planNextRound(
   session: Session,
   generateQuestion: HandleInterrogateInput['generateQuestion'],
@@ -143,7 +152,12 @@ async function planNextRound(
     pendingCheckpoint: false,
     uncertainStreak,
   };
-  return { ...session, interrogation: next, updatedAt: Date.now() };
+  return {
+    ...session,
+    messages: [...session.messages, makeAssistantMessage(fb.question)],
+    interrogation: next,
+    updatedAt: Date.now(),
+  };
 }
 
 function sanitizeSnapshot(raw: unknown, sessionId: string): Session | null {
@@ -307,9 +321,11 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
   // opens an explicit 继续/结束 decision gate — no auto-completion, no lost
   // input.
   if (streak > 0) {
+    const hintForGate = uncertainResponse(streak, withAnswer, state.assistantQuestion);
     if (streak >= 3) {
       const gated: Session = {
         ...withAnswer,
+        messages: [...withAnswer.messages, makeAssistantMessage(hintForGate.message)],
         interrogation: {
           round: state.round,
           strategy: state.strategy,
@@ -322,15 +338,15 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
         updatedAt: Date.now(),
       };
       await storage.saveSession(gated);
-      const hint = uncertainResponse(streak, withAnswer, state.assistantQuestion);
       return {
         ok: true,
-        body: toResponseBody(gated, { message: hint.message, hint: hint.hint }, true),
+        body: toResponseBody(gated, { message: hintForGate.message, hint: hintForGate.hint }, true),
       };
     }
 
     let assistantQuestion = state.assistantQuestion;
     let usedFallback = state.usedFallback;
+    const assistantMessages: Message[] = [];
     if (streak === 1) {
       // #17: the narrowed question is a rewrite of the current question,
       // generated through the context seam and the withFallback degradation
@@ -341,9 +357,11 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
       );
       assistantQuestion = fb.question;
       usedFallback = fb.usedFallback;
+      assistantMessages.push(makeAssistantMessage(fb.question));
     }
     const updated: Session = {
       ...withAnswer,
+      messages: [...withAnswer.messages, ...assistantMessages],
       interrogation: {
         round: state.round,
         strategy: state.strategy,

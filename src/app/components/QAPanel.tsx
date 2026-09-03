@@ -203,7 +203,7 @@ export default function QAPanel({
               ))}
               {/* Inline feedback cue inside the message list, also visible when
                   no messages have been sent yet (no-messages window). */}
-              {feedbackCueState && feedbackCueState !== 'retrieving' && (
+              {feedbackCueState && (
                 <SessionFeedbackCue
                   state={feedbackCueState}
                   className="inline-flex text-left"

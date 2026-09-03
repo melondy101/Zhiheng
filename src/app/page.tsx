@@ -431,31 +431,36 @@ export default function Home() {
     sess: Session,
     payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint; optimisticId?: string | null }
   ) => {
-    const res = await postInterrogate(sess, payload);
-    if (res.ok) {
-      await applyInterrogateResponse(res.data, {
-        setSession,
-        setMessages,
-        setSelectedViewpoint,
-        setUncertainStreak,
-        setHintMessage,
-        setHintOptions,
-        setCurrentQuestion,
-        setCurrentStrategy,
-        setCurrentRound,
-        setUsedFallback,
-        setCurrentSources,
-        setIsCheckpoint,
-        setPendingDecision,
-        setCompleteError,
-        setCompleted,
-        setResultCard,
-        setStorageNotice,
-      }, payload.optimisticId ?? null, () => setOptimisticMessageId(null));
-    } else if (res.storageUnavailable) {
-      // #21: explicit degradation — keep the local mirror, disclose honestly.
-      setStorageNotice(storageNoticeFor('unavailable'));
-      setOptimisticMessageId(null);
+    setLoading(true);
+    try {
+      const res = await postInterrogate(sess, payload);
+      if (res.ok) {
+        await applyInterrogateResponse(res.data, {
+          setSession,
+          setMessages,
+          setSelectedViewpoint,
+          setUncertainStreak,
+          setHintMessage,
+          setHintOptions,
+          setCurrentQuestion,
+          setCurrentStrategy,
+          setCurrentRound,
+          setUsedFallback,
+          setCurrentSources,
+          setIsCheckpoint,
+          setPendingDecision,
+          setCompleteError,
+          setCompleted,
+          setResultCard,
+          setStorageNotice,
+        }, payload.optimisticId ?? null, () => setOptimisticMessageId(null));
+      } else if (res.storageUnavailable) {
+        // #21: explicit degradation — keep the local mirror, disclose honestly.
+        setStorageNotice(storageNoticeFor('unavailable'));
+        setOptimisticMessageId(null);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 

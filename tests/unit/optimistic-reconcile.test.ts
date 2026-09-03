@@ -82,8 +82,11 @@ describe('reconcileOptimistic — server-side (#26/T3)', () => {
     });
 
     assert.ok(result.ok);
-    assert.strictEqual(result.body.session.messages.length, 2);
+    // After the answer the server plans the next round and persists the
+    // assistant question as an assistant message (#26/T3).
+    assert.strictEqual(result.body.session.messages.length, 3);
     assert.strictEqual(result.body.session.messages[0].id, 'real_1');
+    assert.strictEqual(result.body.session.messages[2].role, 'assistant');
   });
 
   it('null optimisticId is a no-op', async () => {

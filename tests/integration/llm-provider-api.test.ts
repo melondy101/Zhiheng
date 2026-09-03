@@ -124,9 +124,9 @@ describe('POST /api/interrogate with the real OpenAI-compatible provider (#20)',
       assert.ok(stored);
       assert.strictEqual(stored.interrogation?.usedFallback, false);
       assert.strictEqual(stored.interrogation?.assistantQuestion, MODEL_QUESTION);
-      // The model text is the assistant question — never written into a user message.
-      assert.ok(!stored.messages.some((m) => m.text === MODEL_QUESTION));
-      assert.deepStrictEqual(stored.messages, []);
+      // The model text is now persisted as an assistant message (#26/T3).
+      assert.ok(stored.messages.some((m) => m.role === 'assistant' && m.text === MODEL_QUESTION));
+      assert.strictEqual(stored.messages.length, 1, 'exactly one assistant message is persisted');
     } finally {
       restore();
     }
