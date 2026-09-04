@@ -50,6 +50,36 @@ export interface Viewpoint {
   selectedAt?: number;
 }
 
+/**
+ * One piece of support for a viewpoint (PRD v4.2 §3.2). `citationIds` are
+ * 1-based keys into `Report.citations` — a viewer can always trace an
+ * evidence item back to the material it came from.
+ */
+export interface ReportEvidence {
+  summary: string;
+  citationIds: number[];
+}
+
+/**
+ * A discussable position on the question (PRD v4.2 §3.2). `conclusion` is a
+ * claim, never a source title and never a lift from an excerpt.
+ */
+export interface ReportViewpoint {
+  id: string;
+  conclusion: string;
+  evidence: ReportEvidence[];
+}
+
+/**
+ * The structured multiple-viewpoint synthesis (PRD v4.2 §3.2). `summary`
+ * compares the viewpoints — support, applicable conditions and real-world
+ * feasibility — instead of declaring one winner.
+ */
+export interface ReportSynthesis {
+  summary: string;
+  viewpoints: ReportViewpoint[];
+}
+
 export interface Report {
   question: string;
   title: string;
@@ -61,6 +91,11 @@ export interface Report {
   structuredViewpoints?: Viewpoint[];
   references: Source[];
   citations: Record<number, Source>;
+  /**
+   * Multiple viewpoints with per-viewpoint evidence (PRD v4.2 §3). Optional:
+   * reports generated before this field existed must still render (§3.3).
+   */
+  synthesis?: ReportSynthesis;
 }
 
 // Source interface — a cited origin for a claim in the report.
@@ -288,6 +323,20 @@ export interface LLMProvider {
     strategy: import('./strategy-engine').StrategyId,
     session: Session
   ): Promise<string>;
+  /**
+   * PRD v4.2 §3: produce a structured multiple-viewpoint synthesis (summary +
+   * viewpoints) for a finished report. Optional because the fixture LLM
+   * provider declines to synthesize — returning null falls back to the
+   * deterministic material-based synthesis in the builder.
+   *
+   * The payload uses `SynthesisSource` (carrying a 1-based citationId) so the
+   * model can never reference a citation that does not exist in the report.
+   */
+  generateSynthesis?(args: {
+    question: string;
+    sources: import('./report-synthesis').SynthesisSource[];
+    historySources?: import('./report-synthesis').SynthesisSource[];
+  }): Promise<ReportSynthesis | null>;
 }
 
 export interface StorageProvider {

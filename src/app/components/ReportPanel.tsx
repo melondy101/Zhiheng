@@ -144,6 +144,58 @@ export default function ReportPanel({
 
       <h2 className="text-2xl font-bold mb-6">{report.title}</h2>
 
+      {/* PRD v4.2 §3.3: title → 核心观点 (each with its own evidence) →
+          综合结论. Reports generated before `synthesis` existed degrade to an
+          explicit notice instead of a fabricated set of viewpoints. */}
+      {report.synthesis && report.synthesis.viewpoints.length > 0 ? (
+        <div className="bg-white rounded-lg border p-6 mb-4" data-testid="report-synthesis">
+          <h3 className="font-semibold mb-4 text-blue-600" data-testid="report-viewpoints-heading">
+            核心观点
+          </h3>
+          <ol className="space-y-4 mb-4" data-testid="report-viewpoints">
+            {report.synthesis.viewpoints.map((viewpoint, index) => (
+              <li key={viewpoint.id} data-testid="report-viewpoint">
+                <p className="font-medium text-sm mb-2" data-testid="report-viewpoint-conclusion">
+                  观点 {index + 1}：{viewpoint.conclusion}
+                </p>
+                {viewpoint.evidence.length > 0 && (
+                  <ul
+                    className="list-disc list-inside space-y-1 text-sm text-gray-700 ml-2"
+                    data-testid="report-viewpoint-evidence"
+                  >
+                    {viewpoint.evidence.map((item, itemIndex) => (
+                      <li key={itemIndex}>
+                        {renderInlineCitations(
+                          `${item.summary} ${item.citationIds.map((id) => `[${id}]`).join('')}`
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ol>
+          <div className="border-t pt-3">
+            <h3 className="font-semibold mb-2 text-blue-600" data-testid="report-synthesis-heading">
+              综合结论
+            </h3>
+            <p
+              className="text-sm leading-relaxed text-gray-700"
+              data-testid="report-synthesis-summary"
+            >
+              {report.synthesis.summary}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div
+          className="bg-white rounded-lg border p-6 mb-4 text-sm text-gray-500"
+          data-testid="report-synthesis-legacy"
+        >
+          这份报告生成于「多观点」结构上线之前，未包含结构化的观点与依据；重新生成报告即可获得按观点组织的依据。
+        </div>
+      )}
+
       {report.knowledgePoints.length > 0 && (
         <div className="bg-white rounded-lg border p-6 mb-4">
           <h3 className="font-semibold mb-3 text-blue-600">核心知识点</h3>

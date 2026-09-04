@@ -6,6 +6,7 @@ import { createZhihuSearchProvider, createGlobalSearchProvider } from '@/lib/zhi
 import { HistorySearchProvider, type HistorySessionSnapshot } from '@/lib/history-search';
 import { buildReport } from '@/lib/report-builder';
 import { buildGraph } from '@/lib/knowledge-graph';
+import { llmProvider } from '@/lib/server-providers';
 
 export const runtime = 'nodejs';
 
@@ -118,6 +119,11 @@ export async function POST(request: Request) {
   };
 
   // Build the report with progress tracking including source state
+  // PRD v4.2 §3: the synthesis is model-backed when a model is configured and
+  // degrades to the deterministic material-based synthesis otherwise. Without
+  // LLM_API_KEY the server-providers module hands over the fixture, which
+  // declines to synthesize — the report then states each material's own
+  // position instead of inventing viewpoints.
   const { report, progress } = await buildReport({
     question,
     zhihuSources: zhihuResult.sources,
@@ -125,6 +131,7 @@ export async function POST(request: Request) {
     historySources: historyResult.sources,
     zhihuSourceState,
     webSourceState,
+    llmProvider,
   });
 
   // Build knowledge graph from report sources (non-blocking if it fails)

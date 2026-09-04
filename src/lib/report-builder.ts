@@ -2,7 +2,20 @@
 // Deterministic: same inputs always produce the same output.
 // No fabricated fields: missing author/title/url/excerpt stay null.
 
-import type { Report, ReportProgress, Source, SourceState } from './providers';
+import type {
+  LLMProvider,
+  Report,
+  ReportProgress,
+  ReportSynthesis,
+  Source,
+  SourceState,
+} from './providers';
+import {
+  buildFallbackSynthesis,
+  isSynthesisUsable,
+  sourceKindLabel,
+  toSynthesisSources,
+} from './report-synthesis';
 
 export interface ReportBuilderOptions {
   question: string;
@@ -12,6 +25,12 @@ export interface ReportBuilderOptions {
   zhihuSourceState?: SourceState;
   webSourceState?: SourceState;
   onProgress?: (progress: ReportProgress) => void;
+  /**
+   * Optional model used for the multiple-viewpoint synthesis (PRD v4.2 §3).
+   * When absent, or when the model fails, the deterministic material-based
+   * synthesis is used instead — never a fabricated set of viewpoints.
+   */
+  llmProvider?: LLMProvider | null;
 }
 
 export interface ReportBuildResult {
@@ -74,15 +93,6 @@ function evidenceExcerpt(source: Source): string {
   return excerpt.length <= 320 ? excerpt : `${excerpt.slice(0, 317)}…`;
 }
 
-function sourceKindLabel(source: Source): string {
-  switch (source.type) {
-    case 'zhihu': return '知乎社区观点材料';
-    case 'web': return '外部检索材料';
-    case 'personal_history': return '个人历史材料';
-    case 'ai_synthesis': return 'AI 综合材料';
-  }
-}
-
 function confidenceFor(source: Source): '低' | '中' {
   // A retrieved excerpt can support discussion, but a single source cannot
   // establish a universal conclusion. Community material receives the more
@@ -90,59 +100,20 @@ function confidenceFor(source: Source): '低' | '中' {
   return source.type === 'web' ? '中' : '低';
 }
 
-function limitationFor(source: Source): string {
-  if (!source.excerpt?.trim()) return '该来源没有摘要，不能据此判断其完整论证或结论。';
-  if (source.type === 'zhihu') return '这是单个社区来源的观点材料，不能据此推断群体共识或普遍事实。';
-  if (source.type === 'personal_history') return '这是个人历史上下文，只适用于该历史情境，不能外推为一般结论。';
-  return '当前仅保留检索摘要；需要阅读原文并与更多独立材料交叉核验。';
-}
-
-/** Build a claim–evidence–reasoning report without inventing unsupported facts. */
+/**
+ * Build the overview body. PRD v4.2 §3 removes the standalone 反例/限制、
+ * 尚待验证 and the generic 最终判断 sections: viewpoints and their support
+ * now live in the structured `synthesis` block, and the comparison lives in
+ * `synthesis.summary`. Nothing here fabricates unsupported facts.
+ */
 function buildContent(question: string, allSources: Source[]): string {
-  if (allSources.length === 0) {
-    return [
-      '## 问题',
-      question,
-      '',
-      '## 一句话结论',
-      '当前没有可引用材料，不能形成可验证的结论。',
-      '',
-      '## 尚待验证',
-      '- 需要补充至少一条可追溯的来源材料，再分析观点与证据之间的关系。',
-    ].join('\n');
-  }
   const lines: string[] = [];
 
   lines.push('## 问题');
   lines.push(question);
   lines.push('');
-  lines.push('## 一句话结论');
-  lines.push(`当前检索到 ${allSources.length} 条可追溯材料。它们可以支持讨论其中呈现的具体观点，但不足以单独证明关于“${question}”的普遍结论。`);
-  lines.push('');
-  lines.push('## 核心观点');
-
-  allSources.slice(0, 3).forEach((source, index) => {
-    const citation = allSources.indexOf(source) + 1;
-    const title = source.title?.trim() || `来源 ${citation}`;
-    const opposing = allSources.length > 1
-      ? '其余材料可能提供不同角度；当前未将它们自动归为对该观点的直接反证。'
-      : '当前仅有这一条材料，未检索到可直接比较的不同观点。';
-    lines.push('');
-    lines.push(`### 观点 ${index + 1}：${title}`);
-    lines.push(`- 结论强度：${confidenceFor(source)}`);
-    lines.push(`- 证明材料：[${citation}] ${sourceKindLabel(source)}${source.author ? `，作者：${source.author}` : ''}`);
-    lines.push(`  - 摘录：“${evidenceExcerpt(source)}”`);
-    lines.push(`- 推理：上述摘录是该来源对问题的直接相关表述，因此可作为讨论这一观点的材料；它不能单独推出超出摘录范围的事实或因果结论。`);
-    lines.push(`- 反证或不同观点：${opposing}`);
-    lines.push(`- 局限：${limitationFor(source)}`);
-  });
-
-  lines.push('');
-  lines.push('## 尚待验证');
-  lines.push('- 需要补充独立来源，并阅读原文上下文，才能判断各观点的代表性、适用边界与相互冲突。');
-  lines.push('');
-  lines.push('## 最终判断');
-  lines.push('本报告将材料、推理和局限分开呈现；结论应以证据覆盖范围为限，而不是由来源数量或模型措辞决定。');
+  lines.push('## 话题概述');
+  lines.push(`本次检索共获取 ${allSources.length} 条可追溯材料；结构化观点与依据见下方「核心观点」模块，综合结论见末尾。`);
 
   return lines.join('\n');
 }
@@ -167,16 +138,54 @@ function buildKnowledgePoints(allSources: Source[]): string[] {
   );
 }
 
-/** Generate viewpoints from sources. */
-function buildViewpoints(allSources: Source[]): string[] {
+/**
+ * Viewpoint summary lines. They mirror the structured synthesis conclusions
+ * instead of truncating source excerpts — PRD v4.2 §3 forbids passing an
+ * excerpt off as a viewpoint.
+ */
+function buildViewpoints(synthesis: ReportSynthesis | null, allSources: Source[]): string[] {
+  if (synthesis && synthesis.viewpoints.length > 0) {
+    return synthesis.viewpoints.map((vp, index) => `观点 ${index + 1}：${vp.conclusion}`);
+  }
   if (allSources.length === 0) {
     return [
       '暂无来源观点；需要先补充可追溯材料。',
     ];
   }
-  return allSources.slice(0, 3).map((source, index) =>
-    `观点 ${index + 1} [${index + 1}]：${evidenceExcerpt(source)}`
-  );
+  return [
+    '当前材料未能归纳出可讨论的观点；需要先补充可追溯材料。',
+  ];
+}
+
+/**
+ * Build the structured synthesis: model first, deterministic fallback on
+ * absence, failure or non-conforming output. One model attempt only — the
+ * search calls already cost quota and PRD §2.2 forbids unbounded retries.
+ */
+async function buildSynthesis(
+  question: string,
+  grouped: Source[],
+  llmProvider?: LLMProvider | null
+): Promise<ReportSynthesis | null> {
+  const request = { question, sources: toSynthesisSources(grouped) };
+  if (request.sources.length === 0) return null;
+  if (!llmProvider) return buildFallbackSynthesis(question, request.sources);
+
+  try {
+    if (!llmProvider.generateSynthesis) {
+      return buildFallbackSynthesis(question, request.sources);
+    }
+    const synthesis = await llmProvider.generateSynthesis(request);
+    // A provider that returns null simply cannot synthesize — not an error.
+    if (synthesis && synthesis.viewpoints.length > 0) return synthesis;
+  } catch (err) {
+    console.warn(
+      '[report] LLM synthesis failed — using the material-based synthesis:',
+      err instanceof Error ? err.message : String(err)
+    );
+    return buildFallbackSynthesis(question, request.sources);
+  }
+  return buildFallbackSynthesis(question, request.sources);
 }
 
 /**
@@ -251,7 +260,8 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
   const content = buildContent(options.question, grouped);
   const title = buildTitle(options.question);
   const knowledgePoints = buildKnowledgePoints(grouped);
-  const viewpoints = buildViewpoints(grouped);
+  const synthesis = await buildSynthesis(options.question, grouped, options.llmProvider);
+  const viewpoints = buildViewpoints(synthesis, grouped);
   const structuredViewpoints = buildStructuredViewpoints(options.question, grouped);
 
   // Stage 4: Complete
@@ -266,6 +276,7 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
     structuredViewpoints,
     references: grouped,
     citations,
+    ...(synthesis ? { synthesis } : {}),
   };
 
   return { report, progress: progressLog };
