@@ -14,6 +14,7 @@ import type {
 } from '@/lib/providers';
 import type { StrategyId } from '@/lib/strategy-engine';
 import { selectRoundSources } from '@/lib/interrogation-context';
+import { shouldSuggestSummary } from '@/lib/gentle-interrogation';
 import { FixtureRetrievalProvider } from '@/lib/fixture-providers';
 import { BrowserStorageProvider } from '@/lib/demo-providers';
 import { toHistorySessionSnapshots } from '@/lib/history-search';
@@ -93,6 +94,14 @@ interface InterrogateViewHooks {
   setResultCard: (c: ResultCard | null) => void;
   /** #21: honest server-storage status line (null = persisted remotely). */
   setStorageNotice: (n: string | null) => void;
+  /** #5: AI direct answer to a user question, or null. */
+  setAiReply: (r: string | null) => void;
+  /** #5: follow-up question, or null when summary gate is shown. */
+  setFollowUp: (f: string | null) => void;
+  /** #5: directive round counter (substantive responses). */
+  setDirectiveRound: (r: number) => void;
+  /** #5: true when the summary gate should be shown. */
+  setSuggestSummary: (s: boolean) => void;
 }
 
 /**
@@ -249,6 +258,11 @@ async function applyInterrogateResponse(
   hooks.setCompleteError(null);
   // #21: honest server-storage disclosure from the API response.
   hooks.setStorageNotice(storageNoticeFor(data.storage));
+  // #5: gentle fields
+  hooks.setAiReply(data.aiReply ?? null);
+  hooks.setFollowUp(data.followUp ?? null);
+  hooks.setDirectiveRound(data.directiveRound ?? 0);
+  hooks.setSuggestSummary(data.suggestSummary ?? false);
   await storageProvider.saveSession(data.session);
 
   if (data.decisionPending) {
@@ -306,6 +320,11 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   // #21: honest server-storage status line for the session view.
   const [storageNotice, setStorageNotice] = useState<string | null>(null);
+  // #5: gentle adaptive interrogation state
+  const [aiReply, setAiReply] = useState<string | null>(null);
+  const [followUp, setFollowUp] = useState<string | null>(null);
+  const [directiveRound, setDirectiveRound] = useState(0);
+  const [suggestSummary, setSuggestSummary] = useState(false);
   const [hotlist, setHotlist] = useState<{ items: { id: string; title: string; url: string | null }[]; source: 'live' | 'cache' | 'demo'; updatedAt: number; stale?: boolean } | null>(null);
   const [hotlistLoading, setHotlistLoading] = useState(true);
   // #18: honest live/cache/demo disclosure for the report panel.
@@ -401,6 +420,10 @@ export default function Home() {
       setCompleted,
       setResultCard,
       setStorageNotice,
+      setAiReply,
+      setFollowUp,
+      setDirectiveRound,
+      setSuggestSummary,
     });
   };
 
@@ -428,6 +451,10 @@ export default function Home() {
         setCompleted,
         setResultCard,
         setStorageNotice,
+        setAiReply,
+        setFollowUp,
+        setDirectiveRound,
+        setSuggestSummary,
       });
     } else if (res.storageUnavailable) {
       // #21: explicit degradation — keep the local mirror, disclose honestly.
@@ -481,6 +508,9 @@ export default function Home() {
               setCurrentSources(selectRoundSources(data));
               setUncertainStreak(st.uncertainStreak);
               setIsCheckpoint(true);
+              // #5: restore gentle state
+              setDirectiveRound(st.directiveRound ?? 0);
+              setSuggestSummary(false);
             } else if (st?.pendingDecision) {
               // Refreshed while the 继续/结束 decision gate was pending (#17).
               setCurrentRound(st.round);
@@ -491,6 +521,9 @@ export default function Home() {
               setUncertainStreak(st.uncertainStreak);
               setIsCheckpoint(false);
               setPendingDecision(true);
+              // #5: restore gentle state
+              setDirectiveRound(st.directiveRound ?? 0);
+              setSuggestSummary(shouldSuggestSummary(st.directiveRound ?? 0));
             } else if (st?.assistantQuestion) {
               // Refreshed while round N's question was pending.
               setCurrentRound(st.round);
@@ -501,6 +534,9 @@ export default function Home() {
               setCurrentSources(selectRoundSources(data));
               setUncertainStreak(st.uncertainStreak);
               setIsCheckpoint(false);
+              // #5: restore gentle state
+              setDirectiveRound(st.directiveRound ?? 0);
+              setSuggestSummary(shouldSuggestSummary(st.directiveRound ?? 0));
             } else {
               // Session predates the persisted interrogation state: ask the
               // API to resume — it decides checkpoint vs. next round.
@@ -522,6 +558,10 @@ export default function Home() {
                 setCompleted,
                 setResultCard,
                 setStorageNotice,
+                setAiReply,
+                setFollowUp,
+                setDirectiveRound,
+                setSuggestSummary,
               };
               const resp = await postInterrogate(data, {
                 action: 'start',
@@ -666,6 +706,11 @@ export default function Home() {
     await runInterrogate(session, { action: 'continue' });
   };
 
+  // #5: dismiss the summary gate suggestion (non-blocking — user can keep chatting).
+  const handleSummaryDismiss = () => {
+    setSuggestSummary(false);
+  };
+
   const handleNewSession = () => {
     setSession(null);
     setReport(null);
@@ -685,6 +730,10 @@ export default function Home() {
     setCurrentSources(null);
     setReportSourceState(null);
     setStorageNotice(null);
+    setAiReply(null);
+    setFollowUp(null);
+    setDirectiveRound(0);
+    setSuggestSummary(false);
     setAnswer('');
     setExcludedHistoryIds([]);
     setPage('home');
@@ -781,7 +830,12 @@ export default function Home() {
               onDecisionContinue={handleCheckpointContinue}
               onRetryComplete={() => { void handleCompleteNow(); }}
               onExit={() => { void handleCompleteNow(); }}
+              onSummaryContinue={handleSummaryDismiss}
               messagesEndRef={messagesEndRef}
+              aiReply={aiReply}
+              followUp={followUp}
+              directiveRound={directiveRound}
+              suggestSummary={suggestSummary}
             />
           )}
 

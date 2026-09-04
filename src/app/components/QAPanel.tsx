@@ -36,7 +36,17 @@ interface QAPanelProps {
   /** #17: retry the failed completion. */
   onRetryComplete?: () => void;
   onExit?: () => void;
+  /** #5: dismiss the summary gate suggestion (non-blocking). */
+  onSummaryContinue?: () => void;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
+  /** #5: AI direct answer to a user question. */
+  aiReply?: string | null;
+  /** #5: follow-up question, or null when summary gate is shown. */
+  followUp?: string | null;
+  /** #5: directive round counter (substantive responses). */
+  directiveRound?: number;
+  /** #5: true when the summary gate should be shown. */
+  suggestSummary?: boolean;
 }
 
 const STRATEGY_LABELS: Record<StrategyId, string> = {
@@ -127,7 +137,12 @@ export default function QAPanel({
   onDecisionContinue,
   onRetryComplete,
   onExit,
+  onSummaryContinue,
   messagesEndRef,
+  aiReply,
+  followUp,
+  directiveRound = 0,
+  suggestSummary = false,
 }: QAPanelProps) {
   return (
     <div className="w-[450px] flex flex-col bg-white">
@@ -173,14 +188,54 @@ export default function QAPanel({
             </div>
           )}
 
-          {currentQuestion && (
+          {/* #5: AI direct answer — shown as a distinct assistant message when
+              the user asked a question. */}
+          {aiReply && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4 mr-8">
+              <p className="text-xs text-green-600 mb-1 font-medium">AI 回答</p>
+              <p className="text-sm text-gray-800">{aiReply}</p>
+            </div>
+          )}
+
+          {(followUp || currentQuestion) && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-              <p className="text-sm font-medium mb-2">追问:</p>
-              <p className="text-sm">{currentQuestion}</p>
+              <p className="text-sm font-medium mb-2">
+                {followUp && !suggestSummary ? '追问:' : '当前问题:'}
+              </p>
+              <p className="text-sm">{followUp || currentQuestion}</p>
               <SourcesSection sources={sources} />
               {usedFallback && (
                 <p className="text-xs text-orange-600 mt-2">⚠️ AI 服务异常，已使用策略模板</p>
               )}
+            </div>
+          )}
+
+          {/* #5: three-round summary gate */}
+          {suggestSummary && !isCheckpoint && !pendingDecision && (
+            <div
+              data-testid="summary-gate"
+              className="bg-purple-50 border border-purple-200 rounded-lg p-4 text-sm mb-4"
+            >
+              <p className="font-medium text-purple-700 mb-1">阶段小结</p>
+              <p className="text-gray-600">
+                你已经完成了 {directiveRound} 轮定向思辨。可以选择继续深入讨论，也可以生成总结。
+              </p>
+              <div className="flex gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={onSummaryContinue}
+                  className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs hover:bg-purple-700"
+                >
+                  继续聊
+                </button>
+                <button
+                  type="button"
+                  onClick={onExit}
+                  className="px-3 py-1.5 border border-purple-300 text-purple-700 rounded-lg text-xs hover:bg-purple-100"
+                >
+                  生成总结
+                </button>
+              </div>
             </div>
           )}
 
@@ -281,7 +336,7 @@ export default function QAPanel({
         </div>
       )}
 
-      {!isCheckpoint && !pendingDecision && (
+      {!isCheckpoint && !pendingDecision && !suggestSummary && (
         <form onSubmit={onSubmit} className="p-4 border-t">
           <div className="flex gap-2">
             <input

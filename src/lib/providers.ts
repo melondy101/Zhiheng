@@ -18,7 +18,18 @@ export interface Message {
    * advance the interrogation round.
    */
   uncertain?: boolean;
+  /**
+   * #5: the classified intent for this user message. 'question' means the
+   * user was asking the AI something; 'response' means they were answering
+   * or expressing a viewpoint. Absent on legacy messages.
+   */
+  intent?: 'question' | 'response';
 }
+
+/**
+ * User intent classification for PRD v4.2 §5.
+ */
+export type UserIntent = 'question' | 'response';
 
 /**
  * A user message that counts as a completed interrogation round (#17).
@@ -141,6 +152,9 @@ export interface Session {
  * computes and stores it; `round` is the round whose question is pending
  * (0 = not started), `pendingCheckpoint` marks a checkpoint decision awaiting
  * the user, and `assistantQuestion` is the current pending question text.
+ *
+ * #5 gentle: `directiveRound` tracks completed directive (strategy-directed)
+ * rounds; `lastIntent` records the intent of the most recent user input.
  */
 export interface InterrogationState {
   round: number;
@@ -155,6 +169,19 @@ export interface InterrogationState {
    * the user must choose.
    */
   pendingDecision?: boolean;
+  /**
+   * #5: number of completed directive (strategy-directed, substantive) rounds.
+   * This is the counter that drives the three-round summary gate.
+   * Incremented only when the user provides a substantive response (not a
+   * question, not a non-substantive input).
+   */
+  directiveRound?: number;
+  /**
+   * #5: the classified intent of the most recent user input. Used to
+   * determine whether the next AI turn should answer directly or ask a
+   * strategy question.
+   */
+  lastIntent?: 'question' | 'response';
 }
 
 /** Actions accepted by the interrogation orchestration API (#15, #17). */
@@ -202,6 +229,28 @@ export interface InterrogateResponseBody {
    * was persisted remotely — the client must rely on its local mirror.
    */
   storage?: 'memory' | 'postgres' | 'unavailable';
+  /**
+   * #5 gentle: the AI's direct answer to a user question, or null when the
+   * user was expressing a viewpoint (not asking). Present in the response
+   * body and mirrored into the session's message history as an assistant
+   * message so it survives reload.
+   */
+  aiReply?: string | null;
+  /**
+   * #5 gentle: the follow-up question for the user. Null when the summary
+   * gate should be shown instead.
+   */
+  followUp?: string | null;
+  /**
+   * #5: number of completed directive (strategy-directed, substantive) rounds.
+   * Drives the three-round summary gate.
+   */
+  directiveRound?: number;
+  /**
+   * #5: true when the summary gate should be shown (after every 3rd directive
+   * round). The UI renders 继续聊 / 生成总结 when this is true.
+   */
+  suggestSummary?: boolean;
 }
 
 export interface ResultCard {
