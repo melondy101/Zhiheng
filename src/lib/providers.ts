@@ -13,6 +13,13 @@ export interface Message {
   text: string;
   timestamp: number;
   /**
+   * #26/T3: optimistic message status.
+   * - 'sent': confirmed by server (default for existing messages).
+   * - 'pending': client-side optimistic insert awaiting server confirmation.
+   * - 'failed': server rejected; the user can click to retry.
+   */
+  status?: 'sent' | 'pending' | 'failed';
+  /**
    * True when this user input was recorded while the user was uncertain
    * (#17). Uncertain inputs stay traceable in the conversation but never
    * advance the interrogation round.
@@ -41,12 +48,47 @@ export function isRoundAnswer(m: Message): boolean {
   return m.role === 'user' && m.uncertain !== true;
 }
 
+/**
+ * User intent classification for PRD v4.2 §5.
+ */
+export type UserIntent = 'question' | 'response';
+
 export interface Viewpoint {
   id: string;
   text: string;
   source: 'user_authored' | 'ai_suggested_and_selected' | 'ai_authored';
   /** If selected, when it was selected (timestamp). */
   selectedAt?: number;
+}
+
+/**
+ * One piece of support for a viewpoint (PRD v4.2 §3.2). `citationIds` are
+ * 1-based keys into `Report.citations` — a viewer can always trace an
+ * evidence item back to the material it came from.
+ */
+export interface ReportEvidence {
+  summary: string;
+  citationIds: number[];
+}
+
+/**
+ * A discussable position on the question (PRD v4.2 §3.2). `conclusion` is a
+ * claim, never a source title and never a lift from an excerpt.
+ */
+export interface ReportViewpoint {
+  id: string;
+  conclusion: string;
+  evidence: ReportEvidence[];
+}
+
+/**
+ * The structured multiple-viewpoint synthesis (PRD v4.2 §3.2). `summary`
+ * compares the viewpoints — support, applicable conditions and real-world
+ * feasibility — instead of declaring one winner.
+ */
+export interface ReportSynthesis {
+  summary: string;
+  viewpoints: ReportViewpoint[];
 }
 
 export interface Report {
@@ -60,6 +102,11 @@ export interface Report {
   structuredViewpoints?: Viewpoint[];
   references: Source[];
   citations: Record<number, Source>;
+  /**
+   * Multiple viewpoints with per-viewpoint evidence (PRD v4.2 §3). Optional:
+   * reports generated before this field existed must still render (§3.3).
+   */
+  synthesis?: ReportSynthesis;
 }
 
 // Source interface — a cited origin for a claim in the report.
@@ -230,15 +277,13 @@ export interface InterrogateResponseBody {
    */
   storage?: 'memory' | 'postgres' | 'unavailable';
   /**
-   * #5 gentle: the AI's direct answer to a user question, or null when the
-   * user was expressing a viewpoint (not asking). Present in the response
-   * body and mirrored into the session's message history as an assistant
-   * message so it survives reload.
+   * #5: AI direct answer text for the most recent user input. Present when
+   * the user asked a question; null when the user was responding.
    */
   aiReply?: string | null;
   /**
-   * #5 gentle: the follow-up question for the user. Null when the summary
-   * gate should be shown instead.
+   * #5: follow-up question or gentle encouragement text. Present when the
+   * user should see a next prompt; null when the summary gate is being shown.
    */
   followUp?: string | null;
   /**
@@ -289,6 +334,20 @@ export interface LLMProvider {
     strategy: import('./strategy-engine').StrategyId,
     session: Session
   ): Promise<string>;
+  /**
+   * PRD v4.2 §3: produce a structured multiple-viewpoint synthesis (summary +
+   * viewpoints) for a finished report. Optional because the fixture LLM
+   * provider declines to synthesize — returning null falls back to the
+   * deterministic material-based synthesis in the builder.
+   *
+   * The payload uses `SynthesisSource` (carrying a 1-based citationId) so the
+   * model can never reference a citation that does not exist in the report.
+   */
+  generateSynthesis?(args: {
+    question: string;
+    sources: import('./report-synthesis').SynthesisSource[];
+    historySources?: import('./report-synthesis').SynthesisSource[];
+  }): Promise<ReportSynthesis | null>;
 }
 
 export interface StorageProvider {

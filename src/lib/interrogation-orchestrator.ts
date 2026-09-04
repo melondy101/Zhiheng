@@ -30,9 +30,11 @@ import {
   classifyIntent,
   completedDirectiveRounds,
   generateGentleResponse,
+  gentleStateOf,
   isNonSubstantive,
   shouldSuggestSummary,
-  type GentleResponse,
+  type GentleState,
+  type UserIntent,
 } from './gentle-interrogation';
 
 export interface HandleInterrogateInput {
@@ -40,6 +42,14 @@ export interface HandleInterrogateInput {
   action: InterrogateAction;
   answer?: string;
   viewpoint?: Viewpoint;
+  /**
+   * #26/T3: the optimistic user message id sent by the client before the
+   * API call. When present and matching a `pending` message, the server
+   * confirms it as `sent` in the response session so the client can remove
+   * the optimistic insert. Absent or mismatched → the optimistic message
+   * stays `pending` and the client marks it as `failed`.
+   */
+  optimisticId?: string | null;
   /**
    * The client's persisted copy of the last API-returned session. Adopted
    * only when server storage has no such session (e.g. after a restart);
@@ -109,12 +119,7 @@ function toResponseBody(
   session: Session,
   hint: InterrogateHint | null,
   suggestComplete: boolean,
-  extra?: {
-    aiReply?: string | null;
-    followUp?: string | null;
-    directiveRound?: number;
-    suggestSummary?: boolean;
-  }
+  gentle: { aiReply?: string | null; followUp?: string | null; directiveRound?: number; suggestSummary?: boolean } = {}
 ): InterrogateResponseBody {
   const state = interrogationStateOf(session);
   return {
@@ -130,11 +135,11 @@ function toResponseBody(
     decisionPending: state.pendingDecision === true,
     completed: session.completed,
     session,
-    // #5 gentle fields
-    aiReply: extra?.aiReply ?? null,
-    followUp: extra?.followUp ?? null,
-    directiveRound: extra?.directiveRound ?? state.directiveRound ?? 0,
-    suggestSummary: extra?.suggestSummary ?? false,
+    // #5: gentle interrogation fields
+    aiReply: gentle.aiReply ?? null,
+    followUp: gentle.followUp ?? null,
+    directiveRound: gentle.directiveRound ?? completedDirectiveRounds(session),
+    suggestSummary: gentle.suggestSummary ?? false,
   };
 }
 
@@ -143,6 +148,15 @@ function toResponseBody(
  * provider with fallback, persist the strategy history, and store the new
  * interrogation state on the session.
  */
+function makeAssistantMessage(text: string): Message {
+  return {
+    id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    role: 'assistant',
+    text,
+    timestamp: Date.now(),
+  };
+}
+
 async function planNextRound(
   session: Session,
   generateQuestion: HandleInterrogateInput['generateQuestion'],
@@ -161,7 +175,12 @@ async function planNextRound(
     uncertainStreak,
     directiveRound: directiveRound ?? completedDirectiveRounds(session),
   };
-  return { ...session, interrogation: next, updatedAt: Date.now() };
+  return {
+    ...session,
+    messages: [...session.messages, makeAssistantMessage(fb.question)],
+    interrogation: next,
+    updatedAt: Date.now(),
+  };
 }
 
 function sanitizeSnapshot(raw: unknown, sessionId: string): Session | null {
@@ -257,7 +276,40 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
       await storage.saveSession(planned);
       return { ok: true, body: toResponseBody(planned, null, false) };
     }
-    return { ok: false, status: 409, error: 'No checkpoint decision pending' };
+    // #26/R3: PRD v4.2 §5.3 — the only continuation gate is the three-round
+    // summary gate (suggestSummary). When it is open, "继续聊" must always
+    // succeed and return the current session unchanged so the client can
+    // render the next AI turn. It is never 409.
+    return { ok: true, body: toResponseBody(session, null, false) };
+  }
+
+  // #26/T3: optimistic reconciliation — if the client sent an optimistic
+  // message id, locate the matching `pending` message and confirm it. The
+  // optimistic insert uses a `pending` status and a server-generated real id
+  // replaces the optimistic id. If no match is found, the server produces
+  // a normal message (the client will mark its optimistic insert as failed).
+  function reconcileOptimistic(session: Session, optimisticId?: string | null): Session {
+    if (!optimisticId) return session;
+    const optimisticIndex = session.messages.findIndex(
+      (m) => m.id === optimisticId && m.status === 'pending'
+    );
+    if (optimisticIndex === -1) return session;
+    const realMessage: Message = {
+      id: `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      role: 'user',
+      text: session.messages[optimisticIndex]!.text,
+      timestamp: Date.now(),
+      status: 'sent',
+      uncertain: session.messages[optimisticIndex]!.uncertain,
+    };
+    return {
+      ...session,
+      messages: [
+        ...session.messages.slice(0, optimisticIndex),
+        realMessage,
+        ...session.messages.slice(optimisticIndex + 1),
+      ],
+    };
   }
 
   // action === 'answer'
@@ -277,22 +329,34 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
 
   const streak = evaluateStreak(state.uncertainStreak, answer);
 
-  // #5 gentle: classify user intent and generate appropriate AI response
-  const gentleResponse = generateGentleResponse(answer, session, state.strategy ?? 'M1_evidence');
-  const userIntent = gentleResponse.intent;
+  // #26/T3: first reconcile any pending optimistic message with the real
+  // server-generated id, then proceed with the normal answer flow.
+  let currentSession = reconcileOptimistic(session, input.optimisticId);
 
-  // Record user message with intent
-  const userMessage = makeMessage(answer, streak > 0, userIntent);
-  const withUserMessage: Session = {
-    ...session,
-    messages: [...session.messages, userMessage],
+  // Every input is recorded — including uncertain ones (#17: an uncertain
+  // input is persisted as an uncertain user message and never discarded).
+  const withAnswer: Session = {
+    ...currentSession,
+    messages: [...currentSession.messages, makeMessage(answer, streak > 0)],
   };
 
-  // #17: uncertain answers NEVER advance the round
+  // #5: classify user intent and generate gentle response
+  const userIntent: UserIntent = classifyIntent(answer);
+  const currentDirectiveRound = completedDirectiveRounds(currentSession);
+  const currentStrategy = state.strategy ?? 'M1_evidence';
+  const gentle = generateGentleResponse(answer, currentSession, currentStrategy, true);
+  const nextDirectiveRound = gentle.directiveRound;
+
+  // #17: uncertain answers NEVER advance the round. The first two stay in
+  // the current round (1: narrowed question, 2: two directions); the third
+  // opens an explicit 继续/结束 decision gate — no auto-completion, no lost
+  // input.
   if (streak > 0) {
+    const hintForGate = uncertainResponse(streak, withAnswer, state.assistantQuestion);
     if (streak >= 3) {
       const gated: Session = {
-        ...withUserMessage,
+        ...withAnswer,
+        messages: [...withAnswer.messages, makeAssistantMessage(hintForGate.message)],
         interrogation: {
           round: state.round,
           strategy: state.strategy,
@@ -301,21 +365,24 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
           pendingCheckpoint: false,
           uncertainStreak: streak,
           pendingDecision: true,
-          directiveRound: state.directiveRound,
+          directiveRound: nextDirectiveRound,
           lastIntent: userIntent,
         },
         updatedAt: Date.now(),
       };
       await storage.saveSession(gated);
-      const hint = uncertainResponse(streak, withUserMessage, state.assistantQuestion);
       return {
         ok: true,
-        body: toResponseBody(gated, { message: hint.message, hint: hint.hint }, true),
+        body: toResponseBody(gated, { message: hintForGate.message, hint: hintForGate.hint }, true, {
+          directiveRound: nextDirectiveRound,
+          suggestSummary: shouldSuggestSummary(nextDirectiveRound),
+        }),
       };
     }
 
     let assistantQuestion = state.assistantQuestion;
     let usedFallback = state.usedFallback;
+    const assistantMessages: Message[] = [];
     if (streak === 1) {
       const strategy = state.strategy ?? 'M1_evidence';
       const fb = await withFallback(strategy, withUserMessage, async () =>
@@ -323,9 +390,11 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
       );
       assistantQuestion = fb.question;
       usedFallback = fb.usedFallback;
+      assistantMessages.push(makeAssistantMessage(fb.question));
     }
     const updated: Session = {
-      ...withUserMessage,
+      ...withAnswer,
+      messages: [...withAnswer.messages, ...assistantMessages],
       interrogation: {
         round: state.round,
         strategy: state.strategy,
@@ -333,7 +402,7 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
         usedFallback,
         pendingCheckpoint: false,
         uncertainStreak: streak,
-        directiveRound: state.directiveRound,
+        directiveRound: nextDirectiveRound,
         lastIntent: userIntent,
       },
       updatedAt: Date.now(),
@@ -342,7 +411,10 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     const hintResponse = uncertainResponse(streak, withUserMessage, assistantQuestion);
     return {
       ok: true,
-      body: toResponseBody(updated, { message: hintResponse.message, hint: hintResponse.hint }, false),
+      body: toResponseBody(updated, { message: hintResponse.message, hint: hintResponse.hint }, false, {
+        directiveRound: nextDirectiveRound,
+        suggestSummary: shouldSuggestSummary(nextDirectiveRound),
+      }),
     };
   }
 
@@ -386,115 +458,53 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     // Keep the existing question; gentle nudge goes to followUp/hint
   }
 
-  // After a checkpoint-round answer (5, 8, 11…) the next step is the
-  // checkpoint decision, not a new question (#14 state machine).
-  if (actionAfterAnswer(state.round) === 'checkpoint') {
-    const updated: Session = {
-      ...withUserMessage,
-      messages: [...withUserMessage.messages, ...aiMessages],
-      interrogation: {
-        round: state.round,
-        strategy: state.strategy,
-        assistantQuestion: null,
-        usedFallback: state.usedFallback,
-        pendingCheckpoint: true,
-        uncertainStreak: streak,
-        directiveRound: nextDirectiveRound,
-        lastIntent: userIntent,
-      },
-      updatedAt: Date.now(),
-    };
-    await storage.saveSession(updated);
-    return {
-      ok: true,
-      body: toResponseBody(updated, null, false, {
-        aiReply: nextAiReply,
-        followUp: nextFollowUp,
-        directiveRound: nextDirectiveRound,
-        suggestSummary: nextSuggestSummary,
-      }),
-    };
-  }
+  // #26/R3: PRD v4.2 §5.3 removed the v4.1 fixed 5/8/11 round checkpoints.
+  // The only legitimate gate is the three-round summary gate, surfaced as
+  // `suggestSummary` after every 3rd directive round. Substantive answers
+  // directly advance the round and may keep going; the user is free to
+  // tap 生成总结 at any moment via action='complete'.
 
-  // #5 gentle: questions use the gentle follow-up and advance the round
-  // without calling planNextRound. Non-substantive responses also advance
-  // the round but keep the existing question.
-  if (isQuestion) {
-    const updated: Session = {
-      ...withUserMessage,
-      messages: [...withUserMessage.messages, ...aiMessages],
-      interrogation: {
-        round: state.round + 1,
-        strategy: state.strategy,
-        assistantQuestion: nextAssistantQuestion,
-        usedFallback: state.usedFallback,
-        pendingCheckpoint: false,
-        uncertainStreak: streak,
-        directiveRound: nextDirectiveRound,
-        lastIntent: userIntent,
-      },
-      updatedAt: Date.now(),
-    };
-    await storage.saveSession(updated);
-    return {
-      ok: true,
-      body: toResponseBody(updated, null, false, {
-        aiReply: nextAiReply,
-        followUp: nextFollowUp,
-        directiveRound: nextDirectiveRound,
-        suggestSummary: nextSuggestSummary,
-      }),
-    };
-  }
-
-  if (!isSubstantiveResponse) {
-    const updated: Session = {
-      ...withUserMessage,
-      messages: [...withUserMessage.messages, ...aiMessages],
-      interrogation: {
-        round: state.round + 1,
-        strategy: state.strategy,
-        assistantQuestion: state.assistantQuestion,
-        usedFallback: state.usedFallback,
-        pendingCheckpoint: false,
-        uncertainStreak: streak,
-        directiveRound: nextDirectiveRound,
-        lastIntent: userIntent,
-      },
-      updatedAt: Date.now(),
-    };
-    await storage.saveSession(updated);
-    return {
-      ok: true,
-      body: toResponseBody(updated, null, false, {
-        aiReply: nextAiReply,
-        followUp: nextFollowUp,
-        directiveRound: nextDirectiveRound,
-        suggestSummary: nextSuggestSummary,
-      }),
-    };
-  }
-
-  // Non-checkpoint: plan the next round for substantive responses
-  // The planned session has the new question as assistantQuestion
-  const planned = await planNextRound(
-    { ...withUserMessage, messages: [...withUserMessage.messages, ...aiMessages] },
-    generateQuestion,
-    streak,
-    nextDirectiveRound
+  // #5: for questions, the AI replies directly and provides a follow-up;
+  // for substantive responses, the AI acknowledges and asks a strategy question.
+  const nextStrategy = pickNextStrategy(withAnswer, nextDirectiveRound);
+  const fb = await withFallback(nextStrategy, withAnswer, () =>
+    generateQuestion(nextStrategy, withAnswer)
   );
-  await storage.saveSession(planned);
+  recordStrategy(withAnswer, nextStrategy);
 
-  const hint: InterrogateHint | null = null;
-  // For substantive responses, followUp IS the generated question
-  const plannedFollowUp = planned.interrogation?.assistantQuestion ?? null;
-  return {
-    ok: true,
-    body: toResponseBody(planned, hint, false, {
-      aiReply: nextAiReply,
-      followUp: plannedFollowUp,
+  // #26/R3: PRD v4.2 §4.1 — the AI's direct answer and the gentle follow-up
+  // MUST be persisted as a single assistant message. Saving them as two
+  // separate messages causes the UI to render the AI reply twice and breaks
+  // the round counter semantics.
+  const gentleMessages: Message[] = [];
+  const directAnswer = gentle.aiReply;
+  const nextAssistantQuestion =
+    gentle.intent === 'question' ? gentle.followUp : fb.question;
+  const combined = [directAnswer, nextAssistantQuestion].filter(Boolean).join('\n\n');
+  if (combined) {
+    gentleMessages.push(makeAssistantMessage(combined));
+  }
+
+  const planned = {
+    ...withAnswer,
+    messages: [...withAnswer.messages, ...gentleMessages],
+    interrogation: {
+      round: state.round + 1,
+      strategy: nextStrategy,
+      assistantQuestion: nextAssistantQuestion,
+      usedFallback: fb.usedFallback,
+      pendingCheckpoint: false,
+      uncertainStreak: streak,
       directiveRound: nextDirectiveRound,
-      suggestSummary: nextSuggestSummary,
-    }),
+      lastIntent: userIntent,
+    },
+    updatedAt: Date.now(),
   };
+  await storage.saveSession(planned);
+  return { ok: true, body: toResponseBody(planned, hint, false, {
+    directiveRound: nextDirectiveRound,
+    suggestSummary: gentle.suggestSummary,
+    aiReply: gentle.aiReply,
+    followUp: gentle.followUp,
+  }) };
 }

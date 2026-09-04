@@ -30,10 +30,18 @@ function formatTime(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function sourceLabel(source: 'live' | 'cache' | 'demo', ts: number, stale?: boolean): string {
+// PRD v4.2 §2.3: the label must state the real source and, for cache, the
+// real update time — demo data is always disclosed as 演示数据.
+//
+// Exported so the exact wording is pinned by a unit test inside `npm test`
+// (the e2e suite is a separate script and cannot guard it on its own).
+export function sourceLabel(source: 'live' | 'cache' | 'demo', ts: number, stale?: boolean): string {
   switch (source) {
-    case 'live': return '实时检索';
-    case 'cache': return stale ? `缓存（已过期）· ${formatTime(ts)}` : `缓存 · ${formatTime(ts)}`;
+    case 'live': return '实时热榜';
+    case 'cache':
+      return stale
+        ? `缓存已过期 · 更新于 ${formatTime(ts)}`
+        : `缓存 · 更新于 ${formatTime(ts)}`;
     case 'demo': return '演示数据';
   }
 }
@@ -75,9 +83,8 @@ export default function HomePage({ onStart, hotlist, hotlistLoading }: HomePageP
           <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">知乎热榜</h2>
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-gray-500" data-testid="hotlist-source-state">
                 {sourceLabel(hotlist.source, hotlist.updatedAt, hotlist.stale)}
-                <span className="text-gray-400 ml-1">{formatTime(hotlist.updatedAt)}</span>
               </span>
             </div>
             <ol className="space-y-2">

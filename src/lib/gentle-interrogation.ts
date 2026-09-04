@@ -59,7 +59,7 @@ const QUESTION_MARKERS = [
   // Ends with a Chinese question mark or contains one mid-string
   /[？?]/,
   // Starts with a Chinese question word
-  /^(什么|怎么|如何|为什么|为何|哪|哪个|哪些|是不是|是不是|有没有|可以|能|会不会|何时|多少|几)/,
+  /^(什么|怎么|如何|为什么|为何|哪|哪个|哪些|是不是|有没有|可以|能|会不会|何时|多少|几)/,
   // Common question starters
   /^(请问|我想问|我问|告诉我|请解释|请说明|帮忙|帮我|请教)/,
   // Short clarifying questions (≤15 chars with question-like structure)
@@ -149,7 +149,6 @@ export function shouldSuggestSummary(directiveRound: number): boolean {
 function buildDirectAnswer(session: Session, questionText: string): string {
   const stance = session.selectedViewpoint?.text;
   const topic = session.question;
-
   if (stance) {
     return `关于你提出的问题，结合我们正在讨论的「${stance.slice(0, 30)}${stance.length > 30 ? '…' : ''}」这一立场，在当前的信息范围内，这需要我们进一步辨析。建议你可以从报告中的观点对比来理解，也可以继续追问具体细节。`;
   }

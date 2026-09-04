@@ -55,6 +55,16 @@ export class FixtureLLMProvider implements LLMProvider {
     const template = STRATEGY_QUESTION_TEMPLATES[strategy];
     return claim ? template.withClaim(claim) : template.plain;
   }
+
+  /**
+   * The fixture has no model and therefore cannot synthesize viewpoints.
+   * Returning null (instead of a canned list) is what lets the report builder
+   * fall back to its deterministic, material-attributed synthesis — fixture
+   * output is never dressed up as a model synthesis.
+   */
+  async generateSynthesis(): Promise<null> {
+    return null;
+  }
 }
 
 export class AnonymousIdentityProvider implements IdentityProvider {

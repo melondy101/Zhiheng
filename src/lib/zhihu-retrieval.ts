@@ -27,10 +27,13 @@
 import type { Source, SourceState } from './providers';
 import { getDemoSources } from './demo-sources';
 import type { HotlistItem } from './hotlist-providers';
+import type { HotlistSnapshot, HotlistSnapshotStore } from './db/hotlist-snapshot-store';
 
 export const DEFAULT_ZHIHU_API_BASE_URL = 'https://developer.zhihu.com';
 export const RETRIEVAL_TTL_MS = 86_400_000; // 24 hours
 export const DEFAULT_LIVE_TIMEOUT_MS = 5_000;
+/** PRD v4.2 §2: the persisted hotlist snapshot is trusted for 6 hours. */
+export const HOTLIST_SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
 
 export type RetrievalKind = 'zhihu_search' | 'global_search' | 'hot_list';
 
@@ -450,6 +453,12 @@ export interface LiveHotlistProviderOptions {
   timeoutMs?: number;
   ttlMs?: number;
   now?: () => number;
+  /**
+   * Persistent snapshot store (PRD v4.2 §2). When present the provider runs
+   * the CACHE-FIRST decision order; when absent it keeps the #22/#19 live
+   * -first chain in retrieveWithDegradation, which search still relies on.
+   */
+  snapshotStore?: HotlistSnapshotStore;
 }
 
 const HOTLIST_ENDPOINT = '/api/v1/content/hot_list';
@@ -477,6 +486,7 @@ export class LiveHotlistProvider {
   private readonly cache: TtlCache<HotlistItem[]>;
   private readonly timeoutMs: number;
   private readonly now: () => number;
+  private readonly snapshotStore: HotlistSnapshotStore | null;
 
   constructor(options: LiveHotlistProviderOptions) {
     this.config = options.config;
@@ -484,40 +494,129 @@ export class LiveHotlistProvider {
     this.cache = options.cache ?? new TtlCache<HotlistItem[]>({ ttlMs: options.ttlMs });
     this.timeoutMs = options.timeoutMs ?? DEFAULT_LIVE_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
+    this.snapshotStore = options.snapshotStore ?? null;
   }
 
   /** Fetch the hotlist with the full degradation chain; never throws. */
   async fetchHotlist(): Promise<RetrievalHotlistResult> {
-    const outcome = await retrieveWithDegradation({
-      kind: 'hot_list',
-      query: '', // the hotlist is one global feed — a single cache slot
-      config: this.config,
-      cache: this.cache,
-      now: this.now,
-      fetchLive: this.config === null ? null : async () => {
-        const config = this.config;
-        if (!config) throw new Error('Zhihu API is not configured');
-        const body = await getJson(
-          { config, transport: this.transport, timeoutMs: this.timeoutMs, now: this.now },
-          HOTLIST_ENDPOINT,
-          null
-        );
-        const items = extractItems(body);
-        if (items === null) throw new Error('Zhihu API returned an unexpected response shape');
-        return items
-          .map((item, index) => mapHotlistItem(item, index))
-          .filter((item): item is HotlistItem => item !== null)
-          .slice(0, HOTLIST_LIMIT);
-      },
-      isUsable: (items) => items.length > 0,
-      demo: () => DEMO_HOTLIST_ITEMS.map(item => ({ ...item })),
-    });
+    // Two deliberate paths: with a persistent snapshot store the hotlist is
+    // cache-first (PRD v4.2 §2.2); without one (search, legacy hotlist tests)
+    // the #22 live-first chain stays untouched.
+    if (this.snapshotStore) {
+      return this.fetchHotlistFromSnapshot(this.snapshotStore);
+    }
+    // No persistent DB snapshot: never use the in-memory TtlCache and never
+    // claim source='cache'. Every request is a fresh live attempt (when a
+    // secret is configured) or an honest demo fallback.
+    try {
+      const items = await this.fetchLiveItems();
+      return { items, source: 'live', updatedAt: this.now() };
+    } catch {
+      // Timeout / network / HTTP 4xx-5xx / invalid body / unconfigured —
+      // honest degradation to demo, no cache label.
+    }
     return {
-      items: outcome.value,
-      source: outcome.source,
-      ...(outcome.stale !== undefined ? { stale: outcome.stale } : {}),
-      updatedAt: outcome.updatedAt,
+      items: DEMO_HOTLIST_ITEMS.map((item) => ({ ...item })),
+      source: 'demo',
+      updatedAt: this.now(),
     };
+  }
+
+  /** One live hot_list call, mapped and trimmed to the visible top 10. */
+  private async fetchLiveItems(): Promise<HotlistItem[]> {
+    const config = this.config;
+    if (!config) throw new Error('Zhihu API is not configured');
+    const body = await getJson(
+      { config, transport: this.transport, timeoutMs: this.timeoutMs, now: this.now },
+      HOTLIST_ENDPOINT,
+      null
+    );
+    const items = extractItems(body);
+    if (items === null) throw new Error('Zhihu API returned an unexpected response shape');
+    return items
+      .map((item, index) => mapHotlistItem(item, index))
+      .filter((item): item is HotlistItem => item !== null)
+      .slice(0, HOTLIST_LIMIT);
+  }
+
+  /**
+   * PRD v4.2 §2.2 decision order, used only when a snapshot store exists:
+   *   1. fresh snapshot (<= 6h)  → source 'cache', ZERO external calls;
+   *   2. missing/expired snapshot + live success → persist, source 'live';
+   *   3. live failure + any snapshot → source 'cache' + stale:true, the
+   *      snapshot's REAL updatedAt is preserved;
+   *   4. live failure + no snapshot → demo (never persisted);
+   *   5. store failures are logged, never disguised as a cache hit.
+   */
+  private async fetchHotlistFromSnapshot(
+    store: HotlistSnapshotStore
+  ): Promise<RetrievalHotlistResult> {
+    const startedAt = this.now();
+    const snapshot = await this.readSnapshotSafely(store);
+
+    if (snapshot && startedAt - snapshot.updatedAt <= HOTLIST_SNAPSHOT_TTL_MS) {
+      // Fresh: return it without touching the live transport at all.
+      return { items: snapshot.items, source: 'cache', updatedAt: snapshot.updatedAt };
+    }
+
+    let liveItems: HotlistItem[] | null = null;
+    if (this.config !== null) {
+      try {
+        const items = await this.fetchLiveItems();
+        if (items.length > 0) liveItems = items;
+      } catch {
+        // Timeout / network / HTTP 4xx-5xx / invalid body / unusable payload —
+        // degrade, never throw.
+      }
+    }
+
+    if (liveItems) {
+      const updatedAt = this.now();
+      try {
+        await store.write({ items: liveItems, updatedAt });
+      } catch (err) {
+        // Known limitation: the data IS live, only the persistence failed.
+        // The response stays 'live' (honest about where the data came from)
+        // and the failure is logged server-side — it is never reported as a
+        // successful write, and the next request simply misses the cache.
+        console.warn(
+          '[hotlist] live hotlist could not be persisted:',
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+      return { items: liveItems, source: 'live', updatedAt };
+    }
+
+    if (snapshot) {
+      return {
+        items: snapshot.items,
+        source: 'cache',
+        stale: true,
+        updatedAt: snapshot.updatedAt,
+      };
+    }
+
+    return {
+      items: DEMO_HOTLIST_ITEMS.map(item => ({ ...item })),
+      source: 'demo',
+      updatedAt: this.now(),
+    };
+  }
+
+  /**
+   * A snapshot read failure (database down, bad row) means "no snapshot" —
+   * never a cache hit and never a silent success.
+   */
+  private async readSnapshotSafely(store: HotlistSnapshotStore): Promise<HotlistSnapshot | null> {
+    try {
+      return await store.read();
+    } catch (err) {
+      console.warn(
+        '[hotlist] snapshot read failed — falling back to live/demo:',
+        err instanceof Error ? err.message : String(err)
+      );
+      return null;
+    }
   }
 }
 

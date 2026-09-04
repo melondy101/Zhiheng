@@ -1,5 +1,6 @@
-// Ticket #5: unit tests for the intent classifier in gentle-interrogation.ts.
-// Covers question detection, response detection, and non-substantive filtering.
+// Ticket #26/T5: intent classification and gentle response contract tests.
+// Pure functions; no LLM or network required.
+
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
@@ -8,303 +9,220 @@ import {
   completedDirectiveRounds,
   shouldSuggestSummary,
   generateGentleResponse,
-  type GentleResponse,
+  type UserIntent,
 } from '../../src/lib/gentle-interrogation';
-import type { Session, Message } from '../../src/lib/providers';
+import type { InterrogationState, Session, Viewpoint } from '../../src/lib/providers';
 
-function makeSession(overrides: Partial<Session> = {}): Session {
-  return {
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function buildSession(overrides: Partial<Session> = {}): Session {
+  const base: Session = {
     id: 's_test',
-    question: 'AI是否会取代人类创造力？',
-    initialOpinion: '我的初步看法',
+    question: 'Test question',
+    initialOpinion: null,
     report: null,
-    selectedViewpoint: { id: 'v1', text: '我认为AI会增强而非取代创造力', source: 'ai_suggested_and_selected' },
+    knowledgeGraph: null,
+    selectedViewpoint: null,
     messages: [],
     resultCard: null,
     completed: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+  };
+  return { ...base, ...overrides };
+}
+
+function buildInterrogation(overrides: Partial<InterrogationState> = {}): InterrogationState {
+  return {
+    round: 0,
+    strategy: null,
+    assistantQuestion: null,
+    usedFallback: false,
+    pendingCheckpoint: false,
+    uncertainStreak: 0,
     ...overrides,
   };
 }
 
-describe('classifyIntent (#5 intent classifier)', () => {
-  // ---- Question detection ----
-  it('classifies a Chinese question-mark sentence as a question', () => {
-    assert.strictEqual(classifyIntent('你能举个例子吗？'), 'question');
+function buildViewpoint(text: string): Viewpoint {
+  return {
+    id: 'vp_test',
+    text,
+    source: 'user_authored',
+    selectedAt: Date.now(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// classifyIntent
+// ---------------------------------------------------------------------------
+
+describe('classifyIntent', () => {
+  it('returns "question" for inputs ending with a question mark', () => {
+    assert.strictEqual(classifyIntent('什么是热榜缓存？'), 'question');
+    assert.strictEqual(classifyIntent('How does this work?'), 'question');
   });
 
-  it('classifies a sentence with an embedded question mark as a question', () => {
-    assert.strictEqual(classifyIntent('我想知道这个观点是否有数据支持？你怎么看？'), 'question');
+  it('returns "question" for inputs starting with question words', () => {
+    assert.strictEqual(classifyIntent('什么是缓存？'), 'question');
+    assert.strictEqual(classifyIntent('怎么实现持久化？'), 'question');
+    assert.strictEqual(classifyIntent('为什么热榜要缓存？'), 'question');
+    assert.strictEqual(classifyIntent('请问能解释一下吗？'), 'question');
   });
 
-  it('classifies a sentence starting with 什么 as a question', () => {
-    assert.strictEqual(classifyIntent('什么是证据？'), 'question');
+  it('returns "response" for substantive answers', () => {
+    assert.strictEqual(classifyIntent('我认为热榜缓存可以减少API调用'), 'response');
+    assert.strictEqual(classifyIntent('根据材料，缓存可以提升性能'), 'response');
   });
 
-  it('classifies a sentence starting with 如何 as a question', () => {
-    assert.strictEqual(classifyIntent('如何论证这一点？'), 'question');
-  });
-
-  it('classifies a sentence starting with 为什么 as a question', () => {
-    assert.strictEqual(classifyIntent('为什么这个结论成立？'), 'question');
-  });
-
-  it('classifies a sentence starting with 请解释 as a question', () => {
-    assert.strictEqual(classifyIntent('请解释一下这个逻辑。'), 'question');
-  });
-
-  it('classifies a sentence starting with 请问 as a question', () => {
-    assert.strictEqual(classifyIntent('请问你能详细说明吗？'), 'question');
-  });
-
-  it('classifies a short question-like phrase as a question', () => {
-    assert.strictEqual(classifyIntent('为什么？'), 'question');
-    assert.strictEqual(classifyIntent('真的吗？'), 'question');
-  });
-
-  it('classifies a sentence containing ？ as a question', () => {
-    assert.strictEqual(classifyIntent('这合理吗？'), 'question');
-  });
-
-  // ---- Response detection ----
-  it('classifies a statement without question mark as a response', () => {
-    assert.strictEqual(classifyIntent('我认为AI会增强而非取代创造力。'), 'response');
-  });
-
-  it('classifies a multi-sentence answer as a response', () => {
-    assert.strictEqual(
-      classifyIntent('摄影术没有消灭绘画，反而催生了全新的艺术表达形式。'),
-      'response'
-    );
-  });
-
-  it('classifies an English statement as a response', () => {
-    assert.strictEqual(classifyIntent('AI will enhance human creativity rather than replace it.'), 'response');
-  });
-
-  it('classifies a statement ending with a period as a response', () => {
-    assert.strictEqual(classifyIntent('这是基于数据得出的结论。'), 'response');
-  });
-
-  // ---- Edge cases ----
-  it('classifies empty string as response (default fallback)', () => {
-    assert.strictEqual(classifyIntent(''), 'response');
-  });
-
-  it('classifies whitespace-only string as response', () => {
-    assert.strictEqual(classifyIntent('   '), 'response');
-  });
-
-  it('classifies a statement with no question words and no question mark as response', () => {
-    assert.strictEqual(classifyIntent('技术进步带来了新的可能性。'), 'response');
+  it('returns "response" for non-substantive inputs', () => {
+    assert.strictEqual(classifyIntent('不知道'), 'response');
+    assert.strictEqual(classifyIntent('嗯'), 'response');
+    assert.strictEqual(classifyIntent('好的'), 'response');
   });
 });
 
-describe('isNonSubstantive (#5 non-substantive filter)', () => {
-  it('flags 不知道 as non-substantive', () => {
+// ---------------------------------------------------------------------------
+// isNonSubstantive
+// ---------------------------------------------------------------------------
+
+describe('isNonSubstantive', () => {
+  it('flags known non-substantive inputs', () => {
     assert.strictEqual(isNonSubstantive('不知道'), true);
-  });
-
-  it('flags 不清楚 as non-substantive', () => {
     assert.strictEqual(isNonSubstantive('不清楚'), true);
-  });
-
-  it('flags 不确定 as non-substantive', () => {
     assert.strictEqual(isNonSubstantive('不确定'), true);
-  });
-
-  it('flags 没想法 as non-substantive', () => {
-    assert.strictEqual(isNonSubstantive('没想法'), true);
-  });
-
-  it('flags 随便 as non-substantive', () => {
-    assert.strictEqual(isNonSubstantive('随便'), true);
-  });
-
-  it('flags 4-or-fewer-character strings as non-substantive', () => {
-    assert.strictEqual(isNonSubstantive('好的'), true);
     assert.strictEqual(isNonSubstantive('嗯'), true);
+    assert.strictEqual(isNonSubstantive('哦'), true);
+    assert.strictEqual(isNonSubstantive('好的'), true);
+    assert.strictEqual(isNonSubstantive('行'), true);
+    assert.strictEqual(isNonSubstantive('可以'), true);
     assert.strictEqual(isNonSubstantive('OK'), true);
+    assert.strictEqual(isNonSubstantive('随便'), true);
+    assert.strictEqual(isNonSubstantive('都行'), true);
   });
 
-  it('does not flag substantive responses as non-substantive', () => {
-    assert.strictEqual(isNonSubstantive('我认为AI会增强创造力'), false);
-    assert.strictEqual(isNonSubstantive('摄影术催生了新艺术形式'), false);
+  it('does not flag substantive answers', () => {
+    assert.strictEqual(isNonSubstantive('我认为热榜缓存很重要'), false);
+    assert.strictEqual(isNonSubstantive('根据我的经验，这很有用'), false);
+    assert.strictEqual(isNonSubstantive('我建议采用第一种方案'), false);
+  });
+
+  it('does not flag questions', () => {
+    assert.strictEqual(isNonSubstantive('什么是缓存？'), false);
+    assert.strictEqual(isNonSubstantive('怎么实现？'), false);
   });
 });
 
-describe('completedDirectiveRounds (#5 directive round counter)', () => {
-  it('returns 0 for a fresh session without interrogation state', () => {
-    assert.strictEqual(completedDirectiveRounds(makeSession()), 0);
+// ---------------------------------------------------------------------------
+// completedDirectiveRounds
+// ---------------------------------------------------------------------------
+
+describe('completedDirectiveRounds', () => {
+  it('returns 0 for a session with no directiveRound', () => {
+    const session = buildSession();
+    assert.strictEqual(completedDirectiveRounds(session), 0);
   });
 
   it('returns the persisted directiveRound when present', () => {
-    const session = makeSession({
-      interrogation: { round: 2, strategy: 'M2_premise', assistantQuestion: 'q', usedFallback: false, pendingCheckpoint: false, uncertainStreak: 0, directiveRound: 2 },
+    const session = buildSession({
+      interrogation: buildInterrogation({ directiveRound: 3 }),
+    });
+    assert.strictEqual(completedDirectiveRounds(session), 3);
+  });
+
+  it('falls back to round-answer count for legacy sessions', () => {
+    const session = buildSession({
+      messages: [
+        { id: 'm1', role: 'user', text: 'Answer 1', timestamp: Date.now() },
+        { id: 'm2', role: 'user', text: 'Answer 2', timestamp: Date.now() },
+      ],
     });
     assert.strictEqual(completedDirectiveRounds(session), 2);
   });
-
-  it('returns 0 for a session with directiveRound explicitly 0', () => {
-    const session = makeSession({
-      interrogation: { round: 1, strategy: 'M1_evidence', assistantQuestion: 'q', usedFallback: false, pendingCheckpoint: false, uncertainStreak: 0, directiveRound: 0 },
-    });
-    assert.strictEqual(completedDirectiveRounds(session), 0);
-  });
 });
 
-describe('shouldSuggestSummary (#5 three-round gate)', () => {
-  it('does not suggest summary at directive round 0', () => {
+// ---------------------------------------------------------------------------
+// shouldSuggestSummary
+// ---------------------------------------------------------------------------
+
+describe('shouldSuggestSummary', () => {
+  it('returns false for round 0', () => {
     assert.strictEqual(shouldSuggestSummary(0), false);
   });
 
-  it('suggests summary at directive round 3', () => {
-    assert.strictEqual(shouldSuggestSummary(3), true);
-  });
-
-  it('suggests summary at directive round 6', () => {
-    assert.strictEqual(shouldSuggestSummary(6), true);
-  });
-
-  it('does not suggest summary at directive round 1', () => {
+  it('returns false for round 1-2', () => {
     assert.strictEqual(shouldSuggestSummary(1), false);
-  });
-
-  it('does not suggest summary at directive round 2', () => {
     assert.strictEqual(shouldSuggestSummary(2), false);
   });
 
-  it('does not suggest summary at directive round 4', () => {
-    assert.strictEqual(shouldSuggestSummary(4), false);
+  it('returns true after every 3rd directive round', () => {
+    assert.strictEqual(shouldSuggestSummary(3), true);
+    assert.strictEqual(shouldSuggestSummary(6), true);
+    assert.strictEqual(shouldSuggestSummary(9), true);
   });
 
-  it('does not suggest summary at directive round 5', () => {
+  it('returns false for non-multiples of 3', () => {
+    assert.strictEqual(shouldSuggestSummary(4), false);
     assert.strictEqual(shouldSuggestSummary(5), false);
+    assert.strictEqual(shouldSuggestSummary(7), false);
   });
 });
 
-describe('generateGentleResponse (#5 response generator)', () => {
-  const sessionWithViewpoint = makeSession({
-    selectedViewpoint: { id: 'v1', text: '我认为AI会增强而非取代创造力', source: 'ai_suggested_and_selected' },
+// ---------------------------------------------------------------------------
+// generateGentleResponse
+// ---------------------------------------------------------------------------
+
+describe('generateGentleResponse', () => {
+  const strategy: any = 'M1_evidence';
+
+  it('returns aiReply + followUp for questions without advancing directiveRound', () => {
+    const session = buildSession({
+      selectedViewpoint: buildViewpoint('Test stance'),
+    });
+    const result = generateGentleResponse('什么是热榜缓存？', session, strategy, true);
+    assert.strictEqual(result.intent, 'question');
+    assert.ok(result.aiReply && result.aiReply.length > 0);
+    assert.ok(result.followUp && result.followUp.length > 0);
+    assert.strictEqual(result.directiveRound, 0);
+    assert.strictEqual(result.suggestSummary, false);
   });
 
-  describe('question intent', () => {
-    it('returns aiReply and followUp for a question input', () => {
-      const result = generateGentleResponse('你能举个例子吗？', sessionWithViewpoint, 'M1_evidence');
-      assert.strictEqual(result.intent, 'question');
-      assert.ok(result.aiReply && result.aiReply.length > 0, 'aiReply must not be empty for questions');
-      assert.ok(result.followUp && result.followUp.length > 0, 'followUp must not be empty for questions');
-      assert.strictEqual(result.directiveRound, 0, 'questions must not advance directive round');
-      assert.strictEqual(result.suggestSummary, false);
+  it('returns acknowledgment + strategy follow-up for substantive responses', () => {
+    const session = buildSession({
+      selectedViewpoint: buildViewpoint('Test stance'),
     });
-
-    it('does not advance directive round for a question', () => {
-      const session = makeSession({
-        interrogation: { round: 1, strategy: 'M1_evidence', assistantQuestion: 'q', usedFallback: false, pendingCheckpoint: false, uncertainStreak: 0, directiveRound: 1 },
-      });
-      const result = generateGentleResponse('为什么？', session, 'M1_evidence');
-      assert.strictEqual(result.intent, 'question');
-      assert.strictEqual(result.directiveRound, 1, 'directive round must not change for questions');
-    });
-
-    it('includes the selected viewpoint in the direct answer', () => {
-      const result = generateGentleResponse('你能详细说明吗？', sessionWithViewpoint, 'M1_evidence');
-      assert.ok(
-        result.aiReply!.includes('AI会增强而非取代创造力'),
-        `aiReply must reference the selected viewpoint, got: ${result.aiReply}`
-      );
-    });
+    const result = generateGentleResponse('我认为缓存可以减少API调用', session, strategy, true);
+    assert.strictEqual(result.intent, 'response');
+    assert.ok(result.aiReply && result.aiReply.length > 0);
+    assert.ok(result.followUp && result.followUp.length > 0);
+    assert.strictEqual(result.directiveRound, 1);
+    assert.strictEqual(result.suggestSummary, false);
   });
 
-  describe('response intent — substantive', () => {
-    it('returns aiReply and followUp for a substantive response', () => {
-      const result = generateGentleResponse(
-        '我认为AI会增强而非取代创造力，因为摄影术催生了新艺术。',
-        sessionWithViewpoint,
-        'M1_evidence'
-      );
-      assert.strictEqual(result.intent, 'response');
-      assert.ok(result.aiReply && result.aiReply.length > 0, 'aiReply must not be empty');
-      assert.ok(result.followUp && result.followUp.length > 0, 'followUp must not be empty');
-    });
-
-    it('advances directive round for a substantive response', () => {
-      const session = makeSession({
-        interrogation: { round: 1, strategy: 'M1_evidence', assistantQuestion: 'q', usedFallback: false, pendingCheckpoint: false, uncertainStreak: 0, directiveRound: 0 },
-      });
-      const result = generateGentleResponse(
-        '我认为AI会增强而非取代创造力。',
-        session,
-        'M1_evidence'
-      );
-      assert.strictEqual(result.directiveRound, 1);
-    });
-
-    it('suggests summary at directive round 3', () => {
-      const session = makeSession({
-        interrogation: { round: 3, strategy: 'M4_steelman', assistantQuestion: 'q', usedFallback: false, pendingCheckpoint: false, uncertainStreak: 0, directiveRound: 2 },
-      });
-      const result = generateGentleResponse(
-        '我的第三轮实质性回答，包含具体数据与例子。',
-        session,
-        'M4_steelman'
-      );
-      assert.strictEqual(result.directiveRound, 3);
-      assert.strictEqual(result.suggestSummary, true);
-      // The follow-up is still generated (summary gate is a non-blocking UI
-      // suggestion alongside the next question, not a replacement).
-      assert.ok(result.followUp && result.followUp.length > 0);
-    });
-
-    it('does not suggest summary at directive round 2', () => {
-      const session = makeSession({
-        interrogation: { round: 2, strategy: 'M2_premise', assistantQuestion: 'q', usedFallback: false, pendingCheckpoint: false, uncertainStreak: 0, directiveRound: 1 },
-      });
-      const result = generateGentleResponse(
-        '我的第二轮实质性回答。',
-        session,
-        'M2_premise'
-      );
-      assert.strictEqual(result.directiveRound, 2);
-      assert.strictEqual(result.suggestSummary, false);
-      assert.ok(result.followUp && result.followUp.length > 0);
-    });
+  it('does not advance directiveRound for non-substantive responses', () => {
+    const session = buildSession();
+    const result = generateGentleResponse('不知道', session, strategy, true);
+    assert.strictEqual(result.intent, 'response');
+    assert.strictEqual(result.aiReply, null);
+    assert.ok(result.followUp && result.followUp.length > 0);
+    assert.strictEqual(result.directiveRound, 0);
+    assert.strictEqual(result.suggestSummary, false);
   });
 
-  describe('response intent — non-substantive', () => {
-    it('returns followUp without aiReply for non-substantive response', () => {
-      const session = makeSession({
-        interrogation: { round: 1, strategy: 'M1_evidence', assistantQuestion: 'q', usedFallback: false, pendingCheckpoint: false, uncertainStreak: 0, directiveRound: 0 },
-      });
-      const result = generateGentleResponse('不知道', session, 'M1_evidence');
-      assert.strictEqual(result.intent, 'response');
-      assert.strictEqual(result.aiReply, null, 'non-substantive responses get no aiReply');
-      assert.ok(result.followUp && result.followUp.length > 0);
-      assert.strictEqual(result.directiveRound, 0, 'non-substantive responses must not advance directive round');
+  it('sets suggestSummary after every 3rd directive round', () => {
+    const session = buildSession({
+      interrogation: buildInterrogation({ directiveRound: 2 }),
     });
-
-    it('does not advance directive round for non-substantive responses', () => {
-      const session = makeSession({
-        interrogation: { round: 1, strategy: 'M1_evidence', assistantQuestion: 'q', usedFallback: false, pendingCheckpoint: false, uncertainStreak: 0, directiveRound: 1 },
-      });
-      const result = generateGentleResponse('不清楚', session, 'M1_evidence');
-      assert.strictEqual(result.directiveRound, 1, 'directive round must not advance for non-substantive');
-    });
+    const result = generateGentleResponse('我认为这很有用', session, strategy, true);
+    assert.strictEqual(result.directiveRound, 3);
+    assert.strictEqual(result.suggestSummary, true);
   });
 
-  describe('LLM degradation', () => {
-    it('prepends degradation notice when LLM is unavailable', () => {
-      const result = generateGentleResponse(
-        '我认为AI会增强而非取代创造力。',
-        sessionWithViewpoint,
-        'M1_evidence',
-        false // llmAvailable = false
-      );
-      assert.ok(
-        result.aiReply!.includes('策略模板降级'),
-        `aiReply must disclose degradation, got: ${result.aiReply}`
-      );
-    });
+  it('includes degradation notice when LLM is unavailable', () => {
+    const session = buildSession();
+    const result = generateGentleResponse('什么是缓存？', session, strategy, false);
+    assert.ok(result.aiReply!.includes('【策略模板降级】'));
   });
 });

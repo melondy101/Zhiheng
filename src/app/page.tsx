@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   CitedSource,
   Session,
@@ -20,11 +20,14 @@ import { BrowserStorageProvider } from '@/lib/demo-providers';
 import { toHistorySessionSnapshots } from '@/lib/history-search';
 import { ownerHeaders } from '@/lib/owner-id';
 import { pickRecoverySession, storageNoticeFor } from '@/lib/session-recovery';
+import { shouldSuggestSummary } from '@/lib/gentle-interrogation';
 import HomePage from './components/HomePage';
 import ReportPanel from './components/ReportPanel';
 import StanceSelector from './components/StanceSelector';
 import QAPanel from './components/QAPanel';
 import ResultCardView, { ResultCardViewFromSession } from './components/ResultCardView';
+import SessionFeedbackCue from './components/SessionFeedbackCue';
+import { deriveFeedbackCueState } from '@/lib/feedback-cue-state';
 
 const retrievalProvider = new FixtureRetrievalProvider();
 const storageProvider = new BrowserStorageProvider();
@@ -94,13 +97,10 @@ interface InterrogateViewHooks {
   setResultCard: (c: ResultCard | null) => void;
   /** #21: honest server-storage status line (null = persisted remotely). */
   setStorageNotice: (n: string | null) => void;
-  /** #5: AI direct answer to a user question, or null. */
+  /** #5: gentle interrogation state. */
   setAiReply: (r: string | null) => void;
-  /** #5: follow-up question, or null when summary gate is shown. */
   setFollowUp: (f: string | null) => void;
-  /** #5: directive round counter (substantive responses). */
   setDirectiveRound: (r: number) => void;
-  /** #5: true when the summary gate should be shown. */
   setSuggestSummary: (s: boolean) => void;
 }
 
@@ -249,16 +249,30 @@ async function completeSession(sess: Session, hooks: InterrogateViewHooks): Prom
  */
 async function applyInterrogateResponse(
   data: InterrogateResponseBody,
-  hooks: InterrogateViewHooks
+  hooks: InterrogateViewHooks,
+  optimisticId: string | null,
+  clearOptimistic: () => void
 ): Promise<void> {
+  // #26/T3: optimistic reconciliation — the server replaces the optimistic
+  // message (different id) if accepted, or leaves it as pending if not.
+  // If the optimistic id is still in the response messages, mark it as
+  // `failed` so the user can click to retry.
+  let finalMessages = data.session.messages;
+  if (optimisticId && data.session.messages.some(m => m.id === optimisticId)) {
+    finalMessages = data.session.messages.map((m) =>
+      m.id === optimisticId ? { ...m, status: 'failed' } : m
+    );
+  }
+  clearOptimistic();
+
   hooks.setSession(data.session);
-  hooks.setMessages(data.session.messages);
+  hooks.setMessages(finalMessages);
   if (data.session.selectedViewpoint) hooks.setSelectedViewpoint(data.session.selectedViewpoint);
   hooks.setUncertainStreak(data.uncertainStreak);
   hooks.setCompleteError(null);
   // #21: honest server-storage disclosure from the API response.
   hooks.setStorageNotice(storageNoticeFor(data.storage));
-  // #5: gentle fields
+  // #5: gentle interrogation state
   hooks.setAiReply(data.aiReply ?? null);
   hooks.setFollowUp(data.followUp ?? null);
   hooks.setDirectiveRound(data.directiveRound ?? 0);
@@ -332,6 +346,18 @@ export default function Home() {
   // #23: IDs of personal_history sources excluded by the user for the current report.
   const [excludedHistoryIds, setExcludedHistoryIds] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // #26/T3: instant form feedback — disables the input while the answer
+  // is being sent so the user sees immediate visual confirmation.
+  const [formLoading, setFormLoading] = useState(false);
+  // #26/T3: optimistic message tracking — id of the pending user message
+  // awaiting server confirmation, or null when no optimistic insert exists.
+  const [optimisticMessageId, setOptimisticMessageId] = useState<string | null>(null);
+  // #26/T5: gentle interrogation state
+  const [aiReply, setAiReply] = useState<string | null>(null);
+  const [followUp, setFollowUp] = useState<string | null>(null);
+  const [directiveRound, setDirectiveRound] = useState(0);
+  const [suggestSummary, setSuggestSummary] = useState(false);
 
   // #23: toggle a personal_history source in/out of the report context.
   const handleHistorySourceToggle = (sourceSessionId: string, included: boolean) => {
@@ -429,36 +455,46 @@ export default function Home() {
 
   const runInterrogate = async (
     sess: Session,
-    payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint }
+    payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint; optimisticId?: string | null }
   ) => {
-    const res = await postInterrogate(sess, payload);
-    if (res.ok) {
-      await applyInterrogateResponse(res.data, {
-        setSession,
-        setMessages,
-        setSelectedViewpoint,
-        setUncertainStreak,
-        setHintMessage,
-        setHintOptions,
-        setCurrentQuestion,
-        setCurrentStrategy,
-        setCurrentRound,
-        setUsedFallback,
-        setCurrentSources,
-        setIsCheckpoint,
-        setPendingDecision,
-        setCompleteError,
-        setCompleted,
-        setResultCard,
-        setStorageNotice,
-        setAiReply,
-        setFollowUp,
-        setDirectiveRound,
-        setSuggestSummary,
-      });
-    } else if (res.storageUnavailable) {
-      // #21: explicit degradation — keep the local mirror, disclose honestly.
-      setStorageNotice(storageNoticeFor('unavailable'));
+    // Answer submission has its own inline pending state. Replacing the page
+    // with the global loading view here unmounts the conversation and looks
+    // like a full-page reload on every message.
+    const usesFullPageLoading = payload.action !== 'answer';
+    if (usesFullPageLoading) setLoading(true);
+    try {
+      const res = await postInterrogate(sess, payload);
+      if (res.ok) {
+        await applyInterrogateResponse(res.data, {
+          setSession,
+          setMessages,
+          setSelectedViewpoint,
+          setUncertainStreak,
+          setHintMessage,
+          setHintOptions,
+          setCurrentQuestion,
+          setCurrentStrategy,
+          setCurrentRound,
+          setUsedFallback,
+          setCurrentSources,
+          setIsCheckpoint,
+          setPendingDecision,
+          setCompleteError,
+          setCompleted,
+          setResultCard,
+          setStorageNotice,
+          setAiReply,
+          setFollowUp,
+          setDirectiveRound,
+          setSuggestSummary,
+        }, payload.optimisticId ?? null, () => setOptimisticMessageId(null));
+      } else if (res.storageUnavailable) {
+        // #21: explicit degradation — keep the local mirror, disclose honestly.
+        setStorageNotice(storageNoticeFor('unavailable'));
+        setOptimisticMessageId(null);
+      }
+    } finally {
+      if (usesFullPageLoading) setLoading(false);
     }
   };
 
@@ -510,7 +546,11 @@ export default function Home() {
               setIsCheckpoint(true);
               // #5: restore gentle state
               setDirectiveRound(st.directiveRound ?? 0);
-              setSuggestSummary(false);
+              setAiReply(null);
+              setFollowUp(null);
+              // #26/R3: PRD v4.2 §5.3 — the summary gate must survive a
+              // reload when directiveRound is 3, 6, 9...
+              setSuggestSummary(shouldSuggestSummary(st.directiveRound ?? 0));
             } else if (st?.pendingDecision) {
               // Refreshed while the 继续/结束 decision gate was pending (#17).
               setCurrentRound(st.round);
@@ -523,6 +563,10 @@ export default function Home() {
               setPendingDecision(true);
               // #5: restore gentle state
               setDirectiveRound(st.directiveRound ?? 0);
+              setAiReply(null);
+              setFollowUp(null);
+              // #26/R3: PRD v4.2 §5.3 — the summary gate must survive a
+              // reload when directiveRound is 3, 6, 9...
               setSuggestSummary(shouldSuggestSummary(st.directiveRound ?? 0));
             } else if (st?.assistantQuestion) {
               // Refreshed while round N's question was pending.
@@ -536,6 +580,10 @@ export default function Home() {
               setIsCheckpoint(false);
               // #5: restore gentle state
               setDirectiveRound(st.directiveRound ?? 0);
+              setAiReply(null);
+              setFollowUp(null);
+              // #26/R3: PRD v4.2 §5.3 — the summary gate must survive a
+              // reload when directiveRound is 3, 6, 9...
               setSuggestSummary(shouldSuggestSummary(st.directiveRound ?? 0));
             } else {
               // Session predates the persisted interrogation state: ask the
@@ -567,7 +615,7 @@ export default function Home() {
                 action: 'start',
                 viewpoint: data.selectedViewpoint,
               });
-              if (resp.ok) await applyInterrogateResponse(resp.data, hooks);
+              if (resp.ok) await applyInterrogateResponse(resp.data, hooks, null, () => {});
             }
           }
           setPage('session');
@@ -691,10 +739,25 @@ export default function Home() {
 
     const userAnswer = answer.trim();
     setAnswer('');
+    setFormLoading(true);
+
+    // #26/T3: optimistic insert — the user message appears instantly as
+    // pending while the API call is in flight.
+    const optimisticId = `opt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const optimisticMsg: Message = {
+      id: optimisticId,
+      role: 'user',
+      text: userAnswer,
+      timestamp: Date.now(),
+      status: 'pending',
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+    setOptimisticMessageId(optimisticId);
 
     // Ticket #15: the API records the answer, updates the uncertain streak,
     // gates the checkpoint, and plans/persists the next round.
-    await runInterrogate(session, { action: 'answer', answer: userAnswer });
+    await runInterrogate(session, { action: 'answer', answer: userAnswer, optimisticId });
+    setFormLoading(false);
   };
 
   // Ticket #14/#17: continue from the checkpoint decision (or the #17
@@ -706,10 +769,16 @@ export default function Home() {
     await runInterrogate(session, { action: 'continue' });
   };
 
-  // #5: dismiss the summary gate suggestion (non-blocking — user can keep chatting).
-  const handleSummaryDismiss = () => {
-    setSuggestSummary(false);
-  };
+  // #26/T3: retry handler for failed optimistic messages.
+  const handleRetryMessage = useCallback((msgId: string) => {
+    if (!session || !messages.find(m => m.id === msgId)) return;
+    const msg = messages.find(m => m.id === msgId)!;
+    if (msg.status !== 'failed') return;
+    // Retry: mark as pending and re-submit
+    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'pending' } : m));
+    setOptimisticMessageId(msgId);
+    void runInterrogate(session, { action: 'answer', answer: msg.text, optimisticId: msgId });
+  }, [session, messages]);
 
   const handleNewSession = () => {
     setSession(null);
@@ -736,16 +805,34 @@ export default function Home() {
     setSuggestSummary(false);
     setAnswer('');
     setExcludedHistoryIds([]);
+    setFormLoading(false);
+    setOptimisticMessageId(null);
+    setAiReply(null);
+    setFollowUp(null);
+    setDirectiveRound(0);
+    setSuggestSummary(false);
     setPage('home');
     window.history.pushState({}, '', '/');
   };
+
+  // #48: the cue is derived ONLY from existing state — no parallel business
+  // state is introduced (see src/lib/feedback-cue-state.ts).
+  const feedbackCueState = deriveFeedbackCueState({
+    loading: loading || formLoading,
+    hasSelectedViewpoint: selectedViewpoint !== null,
+    completed,
+    currentStrategy,
+  });
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="text-2xl mb-4">知研</div>
-          <p className="text-gray-600">加载中...</p>
+          <p className="text-gray-600 mb-3">加载中...</p>
+          {feedbackCueState === 'retrieving' && (
+            <SessionFeedbackCue state="retrieving" className="inline-flex text-left" />
+          )}
         </div>
       </div>
     );
@@ -801,6 +888,13 @@ export default function Home() {
         />
 
         <div className="flex flex-col flex-1 min-w-0">
+          {/* External 刘看山 cue during stance selection (#48); also visible
+              after completion so the result card can show the completed cue.
+              Hidden once inside QAPanel where the inline cue takes over (#26/T3). */}
+          {(!selectedViewpoint || feedbackCueState === 'completed') && feedbackCueState && feedbackCueState !== 'retrieving' && (
+            <SessionFeedbackCue state={feedbackCueState} className="m-3" />
+          )}
+
           {!selectedViewpoint && !completed && (
             <StanceSelector
               viewpoints={report?.viewpoints ?? []}
@@ -829,9 +923,12 @@ export default function Home() {
               onContinue={handleCheckpointContinue}
               onDecisionContinue={handleCheckpointContinue}
               onRetryComplete={() => { void handleCompleteNow(); }}
+              onRetryMessage={handleRetryMessage}
               onExit={() => { void handleCompleteNow(); }}
               onSummaryContinue={handleSummaryDismiss}
               messagesEndRef={messagesEndRef}
+              formLoading={formLoading}
+              feedbackCueState={feedbackCueState}
               aiReply={aiReply}
               followUp={followUp}
               directiveRound={directiveRound}
@@ -840,7 +937,9 @@ export default function Home() {
           )}
 
           {completed && session && (
-            <ResultCardViewFromSession session={session} onNewSession={handleNewSession} />
+            <div>
+              <ResultCardViewFromSession session={session} onNewSession={handleNewSession} />
+            </div>
           )}
         </div>
       </div>

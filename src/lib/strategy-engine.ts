@@ -99,17 +99,12 @@ const strategyHistory = (session: Session): StrategyId[] => {
   return ((session as unknown as { _strategyHistory?: StrategyId[] })._strategyHistory) ?? [];
 };
 
-/**
- * Pure: pick the next strategy. By default uses the round-advancing answer
- * count (directive round when the gentle system has set directiveRound on the
- * interrogation state). Pass `directiveRound` explicitly to override (used by
- * the gentle system when the round has been advanced but directiveRound
- * tracks separately).
- */
+/** Pure: pick the next strategy based on round number and history. */
 export function pickNextStrategy(session: Session, directiveRound?: number): StrategyId {
-  const round = directiveRound !== undefined
-    ? directiveRound + 1
-    : roundCount(session) + 1; // next round number (1-based)
+  // #5: when a directiveRound is provided (gentle interrogation), use it
+  // instead of the message-based round count so strategy selection follows
+  // the user's substantive responses, not every input.
+  const round = directiveRound !== undefined ? directiveRound + 1 : roundCount(session) + 1;
   const history = strategyHistory(session);
 
   // Round-by-round planned sequence

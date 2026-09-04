@@ -40,7 +40,9 @@ test('LLM failure degrades to the strategy template and preserves the round', as
   //     honest degradation marker and the M1 evidence template body
   //     (round 1 is always 证据追问; both the plain and the claim-quoting
   //     variants contain "数据或例子").
-  const question = page.getByText('【策略模板降级】');
+  //     The question text appears both in the message list (persisted assistant
+  //     message) and in the current question panel; target the first one.
+  const question = page.getByText('【策略模板降级】').first();
   await expect(question).toBeVisible();
   await expect(question).toContainText('数据或例子');
 
@@ -53,5 +55,5 @@ test('LLM failure degrades to the strategy template and preserves the round', as
   await page.click('button:has-text("发送")');
   await expect(page.getByText(ANSWER_1).first()).toBeVisible();
   await expect(page.getByText('第 2 轮').first()).toBeVisible();
-  await expect(page.getByText('【策略模板降级】')).toBeVisible();
+  await expect(page.getByText('【策略模板降级】').first()).toBeVisible();
 });

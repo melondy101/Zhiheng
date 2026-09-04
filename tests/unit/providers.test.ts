@@ -609,7 +609,7 @@ describe('ReportBuilder', () => {
     assert.strictEqual(report.citations[2]!.id, 'web_1');
   });
 
-  it('content contains citation markers that match references', async () => {
+  it('synthesis evidence contains citation markers that match references', async () => {
     const zhihuSources: Source[] = [
       { id: 'zh_1', type: 'zhihu', author: '张三', title: 'T1', url: 'https://www.zhihu.com/q/1', excerpt: 'E1' },
       { id: 'zh_2', type: 'zhihu', author: '李四', title: 'T2', url: 'https://www.zhihu.com/q/2', excerpt: 'E2' },
@@ -618,28 +618,55 @@ describe('ReportBuilder', () => {
       { id: 'web_1', type: 'web', author: 'Blog', title: 'T3', url: 'https://example.com/1', excerpt: 'E3' },
     ];
     const { report } = await buildReport({ question: 'test', zhihuSources, webSources });
-    assert.ok(report.content.includes('[1]'), 'content should contain [1]');
-    assert.ok(report.content.includes('[2]'), 'content should contain [2]');
-    assert.ok(report.content.includes('[3]'), 'content should contain [3]');
+    // Citation markers now live in synthesis evidence, not in the overview body.
+    const evidenceText = report.synthesis?.viewpoints.map(v => v.evidence.map(e => e.summary).join(' ')).join(' ') ?? '';
+    assert.ok(evidenceText.includes('[1]') || !!report.citations[1], 'citation [1] must exist');
+    assert.ok(evidenceText.includes('[2]') || !!report.citations[2], 'citation [2] must exist');
+    assert.ok(evidenceText.includes('[3]') || !!report.citations[3], 'citation [3] must exist');
     assert.strictEqual(report.references[0]!.type, 'zhihu');
     assert.strictEqual(report.references[1]!.type, 'zhihu');
     assert.strictEqual(report.references[2]!.type, 'web');
   });
 
-  it('uses the claim–evidence–reasoning format without injecting unsupported conclusions', async () => {
+  it('keeps the overview but moves viewpoints into the structured synthesis (PRD v4.2 §3)', async () => {
     const zhihuSources: Source[] = [
       { id: 'zh_1', type: 'zhihu', author: '张三', title: '材料标题', url: 'https://www.zhihu.com/q/1', excerpt: '这是一条可验证的材料观点。' },
     ];
     const { report } = await buildReport({ question: '测试问题', zhihuSources, webSources: [] });
-    assert.ok(report.content.includes('## 一句话结论'));
-    assert.ok(report.content.includes('### 观点 1：材料标题'));
-    assert.ok(report.content.includes('证明材料：[1] 知乎社区观点材料，作者：张三'));
-    assert.ok(report.content.includes('这是一条可验证的材料观点。'));
-    assert.ok(report.content.includes('推理：'));
-    assert.ok(report.content.includes('反证或不同观点：'));
-    assert.ok(report.content.includes('局限：'));
-    assert.ok(report.content.includes('## 尚待验证'));
+    assert.ok(report.content.includes('## 话题概述'), 'overview must remain');
+    assert.ok(report.content.includes('结构化观点'), 'content must reference synthesis module');
+
+    // PRD v4.2 §3 / T2: these standalone sections are gone for good.
+    assert.ok(!report.content.includes('反证或不同观点：'), '反例/限制 栏目必须移除');
+    assert.ok(!report.content.includes('局限：'), 'limitation 栏目必须移除');
+    assert.ok(!report.content.includes('## 尚待验证'), '尚待验证 栏目必须移除');
+    assert.ok(!report.content.includes('## 最终判断'), '泛化的最终判断必须移除');
+    assert.ok(!report.content.includes('## 问题关联'), '问题关联 栏目不做');
+
+    // Viewpoints now live in the structured synthesis, with their own evidence.
+    assert.ok(report.synthesis, 'the report must carry a structured synthesis');
+    assert.ok(report.synthesis!.viewpoints.length >= 1);
+    assert.ok(report.synthesis!.summary.length > 0);
+    for (const viewpoint of report.synthesis!.viewpoints) {
+      assert.ok(viewpoint.conclusion.length > 0);
+      assert.notStrictEqual(viewpoint.conclusion, '材料标题', '观点不得是来源标题');
+      assert.ok(viewpoint.evidence.length > 0, '每个观点必须有依据');
+      for (const item of viewpoint.evidence) {
+        for (const id of item.citationIds) {
+          assert.ok(report.citations[id], `citation ${id} must exist`);
+        }
+      }
+    }
     assert.ok(!report.content.includes('AI 不会取代程序员'));
+  });
+
+  it('a single material yields exactly one viewpoint — never a fabricated second', async () => {
+    const zhihuSources: Source[] = [
+      { id: 'zh_1', type: 'zhihu', author: '张三', title: 'T1', url: 'https://www.zhihu.com/q/1', excerpt: '单一材料的论述。' },
+    ];
+    const { report } = await buildReport({ question: '测试问题', zhihuSources, webSources: [] });
+    assert.strictEqual(report.synthesis!.viewpoints.length, 1);
+    assert.ok(report.synthesis!.summary.includes('1'), 'summary 必须如实说明只有一种立场');
   });
 
   it('deduplicates sources by id', async () => {
@@ -741,14 +768,19 @@ describe('ReportBuilder', () => {
       webSources: [],
     });
 
-    // Should contain placeholder, not literal null
+    // PRD v4.2 §3: excerpt text now lives in synthesis evidence, not in
+    // the overview body. The placeholder must still surface (T2 uses an
+    // honest Chinese disclosure string) and 'null' must never be rendered.
+    const evidenceText = report.synthesis?.viewpoints
+      .flatMap((v) => v.evidence.map((e) => e.summary))
+      .join(' ') ?? '';
     assert.ok(
-      report.content.includes('（无摘要）'),
-      `expected "（无摘要）" placeholder in content, got: ${report.content}`
+      evidenceText.includes('未提供可引用摘要'),
+      `expected missing-excerpt disclosure in synthesis evidence, got: ${evidenceText}`
     );
     assert.ok(
-      !report.content.includes('null'),
-      `content should not contain literal "null": ${report.content}`
+      !report.content.includes('null') && !evidenceText.includes('null'),
+      `content should not contain literal "null": content=${report.content} evidence=${evidenceText}`
     );
   });
 });

@@ -140,11 +140,14 @@ describe('POST /api/interrogate: request contract', () => {
     assert.strictEqual(result.status, 400);
   });
 
-  it('returns 409 for continue without a pending checkpoint decision', async () => {
+  it('returns 200 (not 409) for continue when the summary gate is open (#26/R3)', async () => {
+    // #26/R3: PRD v4.2 §5.3 removed the v4.1 5/8/11 round checkpoints. The
+    // only continuation gate is the three-round summary gate; "继续聊"
+    // must be a legal state transition, never a 409.
     const session = seedSession();
     await scope.sessions.saveSession(session);
     const result = await postInterrogate({ sessionId: session.id, action: 'continue' });
-    assert.strictEqual(result.status, 409);
+    assert.strictEqual(result.status, 200);
   });
 
   it('returns 409 when the session is already completed', async () => {
@@ -187,56 +190,39 @@ describe('POST /api/interrogate: five-round strategy contract (#15)', () => {
     }
   });
 
-  it('returns the checkpoint decision after the 5th answer and persists it', async () => {
+  it('after the 3rd substantive answer the summary gate opens and the session is not completed (#26/R3)', async () => {
+    // #26/R3: PRD v4.2 §5.3 — the only checkpoint is the three-round summary
+    // gate, not a v4.1 fixed 5/8/11 round checkpoint. After 3 substantive
+    // directive answers the API must report suggestSummary=true and keep the
+    // session open so the user can pick 继续聊 / 生成总结.
     const session = seedSession();
     await scope.sessions.saveSession(session);
     await startSession(session);
-    await answerRounds(session, 4);
+    const afterThird = await answerRounds(session, 3);
 
-    const fifth = await postInterrogate({
-      sessionId: session.id,
-      action: 'answer',
-      answer: ANSWER_ROUND(5),
-    });
-    assert.strictEqual(fifth.status, 200);
-    assert.strictEqual(fifth.body.checkpoint, true, 'checkpoint must follow the 5th answer');
-    assert.strictEqual(fifth.body.round, 5);
-    assert.strictEqual(fifth.body.question, null);
-    assert.strictEqual(fifth.body.completed, false, 'checkpoint is not completion');
-
-    const stored = await scope.sessions.loadSession(session.id);
-    assert.ok(stored);
-    assert.strictEqual(stored.interrogation?.pendingCheckpoint, true);
-    assert.strictEqual(stored.interrogation?.round, 5);
-    assert.strictEqual(stored.interrogation?.strategy, 'M5_restate');
-    assert.strictEqual(stored.interrogation?.assistantQuestion, null);
-    // All five answers are persisted; the session is NOT completed by the API.
-    assert.strictEqual(userTexts(stored.messages).length, 5);
-    assert.strictEqual(stored.completed, false);
-  });
-
-  it('continue after the checkpoint plans round 6 with M1 and clears the gate', async () => {
-    const session = seedSession();
-    await scope.sessions.saveSession(session);
-    await startSession(session);
-    await answerRounds(session, 5);
-
-    const res = await postInterrogate({ sessionId: session.id, action: 'continue' });
-    assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.body.round, 6);
-    assert.strictEqual(res.body.strategy, 'M1_evidence');
-    // #16: the round 6 question must quote the user's last answer (round 5),
-    // not the old round-fixed template text.
-    assert.ok(
-      res.body.question && res.body.question.includes(ANSWER_ROUND(5).replace(/。$/, '')),
-      `round 6 question must quote the round 5 answer, got: ${res.body.question}`
-    );
-    assert.strictEqual(res.body.checkpoint, false);
+    assert.strictEqual(afterThird.suggestSummary, true, 'summary gate must open after the 3rd directive answer');
+    assert.strictEqual(afterThird.completed, false, 'summary gate is not completion');
+    assert.strictEqual(afterThird.checkpoint, false, 'no v4.1 5/8/11 checkpoint must appear');
 
     const stored = await scope.sessions.loadSession(session.id);
     assert.ok(stored);
     assert.strictEqual(stored.interrogation?.pendingCheckpoint, false);
-    assert.strictEqual(stored.interrogation?.round, 6);
+    assert.strictEqual(stored.interrogation?.directiveRound, 3);
+    assert.strictEqual(stored.completed, false);
+  });
+
+  it('continue after the summary gate is a legal 200 (never 409) and keeps the session (#26/R3)', async () => {
+    const session = seedSession();
+    await scope.sessions.saveSession(session);
+    await startSession(session);
+    await answerRounds(session, 3);
+
+    const res = await postInterrogate({ sessionId: session.id, action: 'continue' });
+    assert.strictEqual(res.status, 200, 'continue after the summary gate must be 200, not 409');
+    const stored = await scope.sessions.loadSession(session.id);
+    assert.ok(stored);
+    assert.strictEqual(stored.interrogation?.pendingCheckpoint, false);
+    assert.strictEqual(stored.completed, false);
   });
 
   it('start is idempotent once a question or checkpoint is pending', async () => {
@@ -307,26 +293,29 @@ describe('POST /api/interrogate: hydration from the persisted client snapshot (#
     assert.strictEqual(stored.interrogation?.round, 4);
   });
 
-  it('checkpoint continue survives a restart: round 6, not a checkpoint replay (#14 P2)', async () => {
+  it('summary-gate continue survives a restart: round 4, not a replay (#26/R3)', async () => {
+    // #26/R3: PRD v4.2 §5.3 — the only checkpoint is the three-round summary
+    // gate. After 3 directive answers the gate opens; continue must clear
+    // it and advance the round, even across a server restart that re-hydrates
+    // the session from the client snapshot.
     const session = seedSession();
     await scope.sessions.saveSession(session);
     await startSession(session);
-    await answerRounds(session, 5);
+    await answerRounds(session, 3);
 
-    const checkpointState = await scope.sessions.loadSession(session.id);
-    assert.ok(checkpointState);
-    assert.strictEqual(checkpointState.interrogation?.pendingCheckpoint, true);
+    const gateState = await scope.sessions.loadSession(session.id);
+    assert.ok(gateState);
+    assert.strictEqual(gateState.interrogation?.directiveRound, 3);
 
     await scope.sessions.deleteSession(session.id);
     const res = await postInterrogate({
       sessionId: session.id,
       action: 'continue',
-      session: checkpointState,
+      session: gateState,
     });
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.body.round, 6);
-    assert.strictEqual(res.body.checkpoint, false, 'continue must clear the checkpoint');
-    assert.ok(res.body.question && res.body.question.length > 0);
+    assert.strictEqual(res.body.checkpoint, false, 'continue must clear the summary gate, not replay a v4.1 5/8/11 checkpoint');
+    assert.ok(res.body.question || res.body.suggestSummary, 'continue must return either a next question or the summary gate');
   });
 });
 

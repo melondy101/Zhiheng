@@ -26,9 +26,11 @@
 // Secrets are read from the server environment only. No NEXT_PUBLIC_ variable
 // is used anywhere in this module, so nothing here can reach the browser.
 
-import type { LLMProvider, Session } from './providers';
+import type { LLMProvider, ReportSynthesis, Session } from './providers';
 import { STRATEGIES, type StrategyId } from './strategy-engine';
 import { buildInterrogationContext, selectRoundSources } from './interrogation-context';
+import { buildSynthesisMessages, parseSynthesisResponse } from './report-synthesis';
+import type { SynthesisRequest } from './report-synthesis';
 
 // ---------------------------------------------------------------------------
 // Server-side configuration (env-only, never exposed to the browser)
@@ -291,6 +293,38 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
       );
     }
     return question;
+  }
+
+  /**
+   * Synthesize the report's multiple viewpoints (PRD v4.2 §3). Unlike the
+   * question path there is no template to degrade into, so a non-conforming
+   * response throws once and the caller records the degradation and uses its
+   * own deterministic synthesis. This method never retries: report generation
+   * already costs search quota and PRD §2.2 forbids unbounded retries.
+   */
+  async generateSynthesis(request: SynthesisRequest): Promise<ReportSynthesis | null> {
+    if (request.sources.length === 0) return null;
+
+    const messages = buildSynthesisMessages(request);
+    const body = await this.postChatCompletion(
+      JSON.stringify({
+        model: this.config.model,
+        messages,
+        temperature: 0.3,
+        max_tokens: 2048,
+      })
+    );
+    const content = extractChoiceContent(body);
+    if (content === null) {
+      throw new Error('LLM API returned an unexpected response shape');
+    }
+    const synthesis = parseSynthesisResponse(content, request.sources);
+    if (!synthesis) {
+      throw new Error(
+        'LLM synthesis failed validation (unparseable, or every viewpoint was a source title, an excerpt lift, or unbacked by a real citation)'
+      );
+    }
+    return synthesis;
   }
 
   /**
