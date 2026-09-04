@@ -13,6 +13,17 @@
 
 import type { SqlExecutor } from './sql-executor';
 
+// The hotlist snapshot is GLOBAL public data: a single row, never sharded by
+// owner (#T1). It is declared as its own exported constant so the hotlist
+// route wiring can migrate only this table, while `MIGRATION_STATEMENTS`
+// below still carries it (so `npm run db:migrate` and the storage bootstrap
+// create it as well).
+export const HOTLIST_SNAPSHOT_MIGRATION = `CREATE TABLE IF NOT EXISTS zhiyan_hotlist_snapshot (
+  id SMALLINT NOT NULL PRIMARY KEY,
+  items JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+)`;
+
 export const MIGRATION_STATEMENTS: readonly string[] = [
   // One row per (owner, session). The full Session (report, messages, result
   // card, interrogation state) is stored as JSONB so the adapter stays
@@ -42,6 +53,9 @@ export const MIGRATION_STATEMENTS: readonly string[] = [
     deleted_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
+
+  // The hotlist snapshot (#T1).
+  HOTLIST_SNAPSHOT_MIGRATION,
 ];
 
 /**

@@ -670,7 +670,7 @@ describe('Ticket #22: live-first degradation order', () => {
     assert.strictEqual(zhihuCalls, 2, 'live called again on third zhihu query');
   });
 
-  it('#22: hotlist live always fires when configured; cache is used only after live failure', async () => {
+  it('#22: hotlist live always fires when configured; without a DB snapshot store live failure degrades directly to demo (no cache)', async () => {
     const clock = makeClock();
     let fail = false;
     const { transport } = recordingTransport(() => {
@@ -689,33 +689,14 @@ describe('Ticket #22: live-first degradation order', () => {
     const live = await provider.fetchHotlist();
     assert.strictEqual(live.source, 'live');
 
-    // Step 2: live fires again (fresh cache is NOT used as default path per #22)
+    // Step 2: live fires again (no in-memory cache is used when no DB snapshot store)
     const second = await provider.fetchHotlist();
-    assert.strictEqual(second.source, 'live', '#22: live always fires, not cache');
+    assert.strictEqual(second.source, 'live', 'every request goes live when no DB snapshot store is present');
 
-    // Step 3: live fails → fresh cache fallback
+    // Step 3: live fails → demo (not cache, because there is no persistent snapshot store)
     fail = true;
-    const freshFallback = await provider.fetchHotlist();
-    assert.strictEqual(freshFallback.source, 'cache');
-    assert.strictEqual(freshFallback.stale, false);
-
-    // Step 4: stale cache fallback (TTL expired)
-    clock.advance(86_400_001);
-    const staleFallback = await provider.fetchHotlist();
-    assert.strictEqual(staleFallback.source, 'cache');
-    assert.strictEqual(staleFallback.stale, true);
-
-    // Step 5: no cache + live fails → demo
-    const { transport: t2 } = recordingTransport(() => { throw new TypeError('network error'); });
-    const demoProvider = new LiveHotlistProvider({
-      config: CONFIG, transport: t2,
-      cache: new TtlCache<Array<{ id: string; title: string; url: string | null }>>({
-        ttlMs: 86_400_000, now: clock.nowFn,
-      }),
-      timeoutMs: 5_000, ttlMs: 86_400_000, now: clock.nowFn,
-    });
-    const demo = await demoProvider.fetchHotlist();
-    assert.strictEqual(demo.source, 'demo', 'no cache + live fails → demo');
+    const demo = await provider.fetchHotlist();
+    assert.strictEqual(demo.source, 'demo', 'live failure without DB snapshot store → honest demo');
     assert.strictEqual(demo.items.length, 10);
   });
 });
@@ -779,7 +760,7 @@ describe('LiveHotlistProvider', () => {
     assert.strictEqual(calls[0]!.options.headers['Authorization'], 'Bearer test-secret');
   });
 
-  it('caches per hot_list kind and returns stale cache when live fails', async () => {
+  it('without a DB snapshot store the hotlist never claims cache — live failure goes straight to demo', async () => {
     const clock = makeClock();
     let fail = false;
     const { transport } = recordingTransport(() => {
@@ -794,21 +775,15 @@ describe('LiveHotlistProvider', () => {
     const first = await provider.fetchHotlist();
     assert.strictEqual(first.source, 'live');
 
-    // Second call: #22 — live always fires when configured, so this is also live
+    // Second call still goes live — the in-memory cache is ignored without a DB snapshot store
     const second = await provider.fetchHotlist();
     assert.strictEqual(second.source, 'live');
 
-    // Now live starts failing — falls to fresh cache
+    // Live failure now degrades to demo, never to in-memory cache
     fail = true;
-    const freshFallback = await provider.fetchHotlist();
-    assert.strictEqual(freshFallback.source, 'cache');
-    assert.strictEqual(freshFallback.stale, false);
-
-    clock.advance(1_001);
-    const stale = await provider.fetchHotlist();
-    assert.strictEqual(stale.source, 'cache');
-    assert.strictEqual(stale.stale, true);
-    assert.strictEqual(stale.updatedAt, first.updatedAt);
+    const demo = await provider.fetchHotlist();
+    assert.strictEqual(demo.source, 'demo', 'must never use in-memory cache without a DB snapshot store');
+    assert.strictEqual(demo.items.length, 10);
   });
 
   it('degrades to the deterministic 10-item demo hotlist on failure', async () => {
@@ -830,7 +805,56 @@ describe('LiveHotlistProvider', () => {
     assert.strictEqual(result.source, 'demo');
     assert.strictEqual(result.items.length, 10);
   });
+  it('DB不可用+已配置Zhihu key+连续两次请求：第二次不得返回cache，始终返回live或demo', async () => {
+    const clock = makeClock();
+    let callCount = 0;
+    const { transport } = recordingTransport(() => {
+      callCount += 1;
+      return jsonResponse([{ title: '热榜问题A' }]);
+    });
+    // No snapshotStore simulates DB不可用
+    const provider = new LiveHotlistProvider({
+      config: CONFIG, transport,
+      cache: new TtlCache<Array<{ id: string; title: string; url: string | null }>>({
+        ttlMs: 86_400_000, now: clock.nowFn,
+      }),
+      timeoutMs: 5_000, ttlMs: 86_400_000, now: clock.nowFn,
+    });
+
+    const first = await provider.fetchHotlist();
+    assert.strictEqual(first.source, 'live');
+    assert.strictEqual(callCount, 1, 'first request must call live');
+
+    const second = await provider.fetchHotlist();
+    assert.strictEqual(second.source, 'live');
+    assert.strictEqual(callCount, 2, 'second request must also call live — no in-memory cache hit');
+    assert.notStrictEqual(second.items, first.items, 'each response is freshly fetched');
+  });
+
+  it('DB不可用+live成功返回live', async () => {
+    const { transport } = recordingTransport(() => jsonResponse([{ title: '实时热榜' }]));
+    const provider = new LiveHotlistProvider({
+      config: CONFIG, transport,
+      // no snapshotStore prop → undefined → treated as null
+    });
+    const result = await provider.fetchHotlist();
+    assert.strictEqual(result.source, 'live');
+    assert.strictEqual(result.items[0].title, '实时热榜');
+  });
+
+  it('DB不可用+live失败返回demo', async () => {
+    const { transport } = recordingTransport(() => { throw new TypeError('network down'); });
+    const provider = new LiveHotlistProvider({
+      config: CONFIG, transport,
+      // no snapshotStore prop → undefined → treated as null
+    });
+    const result = await provider.fetchHotlist();
+    assert.strictEqual(result.source, 'demo');
+    assert.strictEqual(result.items.length, 10);
+  });
 });
+
+// ---------------------------------------------------------------------------});
 
 // ---------------------------------------------------------------------------
 // Knowledge graph keeps deriving from real provider sources (#19 verification)

@@ -1,16 +1,16 @@
 import { NextResponse } from 'next/server';
-import { createHotlistProvider } from '@/lib/zhihu-retrieval';
+import { loadHotlistForRoute } from '@/lib/hotlist-route-wiring';
 
 export const runtime = 'nodejs';
 
 /**
- * Real hotlist retrieval (#19): degrades live → fresh cache → stale cache →
- * demo internally and never throws. Without a configured ZHIHU_ACCESS_SECRET
- * the provider never touches the network and returns the same deterministic
- * 10-item demo list as before #19, labeled source:'demo'.
+ * Real hotlist retrieval (#19 + PRD v4.2 §2): the provider is cache-first
+ * when a database snapshot store is available (6h TTL) and degrades
+ * live → stale snapshot → demo otherwise. It never throws; without a
+ * configured ZHIHU_ACCESS_SECRET it returns the deterministic 10-item demo
+ * list labeled source:'demo'.
  */
 export async function GET() {
-  const provider = createHotlistProvider();
-  const result = await provider.fetchHotlist();
+  const result = await loadHotlistForRoute();
   return NextResponse.json(result);
 }
