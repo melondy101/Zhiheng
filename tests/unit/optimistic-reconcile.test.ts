@@ -84,9 +84,11 @@ describe('reconcileOptimistic — server-side (#26/T3)', () => {
     assert.ok(result.ok);
     // After the answer the server plans the next round and persists the
     // assistant question as an assistant message (#26/T3).
-    assert.strictEqual(result.body.session.messages.length, 3);
+    // #26/T5: also adds an AI direct-answer message for the user's response.
+    assert.strictEqual(result.body.session.messages.length, 4);
     assert.strictEqual(result.body.session.messages[0].id, 'real_1');
-    assert.strictEqual(result.body.session.messages[2].role, 'assistant');
+    // The last message should be the assistant's follow-up question.
+    assert.strictEqual(result.body.session.messages[3].role, 'assistant');
   });
 
   it('null optimisticId is a no-op', async () => {

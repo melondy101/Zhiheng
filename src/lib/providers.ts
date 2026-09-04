@@ -37,6 +37,11 @@ export function isRoundAnswer(m: Message): boolean {
   return m.role === 'user' && m.uncertain !== true;
 }
 
+/**
+ * User intent classification for PRD v4.2 §5.
+ */
+export type UserIntent = 'question' | 'response';
+
 export interface Viewpoint {
   id: string;
   text: string;
@@ -148,6 +153,9 @@ export interface Session {
  * computes and stores it; `round` is the round whose question is pending
  * (0 = not started), `pendingCheckpoint` marks a checkpoint decision awaiting
  * the user, and `assistantQuestion` is the current pending question text.
+ *
+ * #5 gentle: `directiveRound` tracks completed directive (strategy-directed)
+ * rounds; `lastIntent` records the intent of the most recent user input.
  */
 export interface InterrogationState {
   round: number;
@@ -162,6 +170,19 @@ export interface InterrogationState {
    * the user must choose.
    */
   pendingDecision?: boolean;
+  /**
+   * #5: number of completed directive (strategy-directed, substantive) rounds.
+   * This is the counter that drives the three-round summary gate.
+   * Incremented only when the user provides a substantive response (not a
+   * question, not a non-substantive input).
+   */
+  directiveRound?: number;
+  /**
+   * #5: the classified intent of the most recent user input. Used to
+   * determine whether the next AI turn should answer directly or ask a
+   * strategy question.
+   */
+  lastIntent?: 'question' | 'response';
 }
 
 /** Actions accepted by the interrogation orchestration API (#15, #17). */
@@ -209,6 +230,26 @@ export interface InterrogateResponseBody {
    * was persisted remotely — the client must rely on its local mirror.
    */
   storage?: 'memory' | 'postgres' | 'unavailable';
+  /**
+   * #5: AI direct answer text for the most recent user input. Present when
+   * the user asked a question; null when the user was responding.
+   */
+  aiReply?: string | null;
+  /**
+   * #5: follow-up question or gentle encouragement text. Present when the
+   * user should see a next prompt; null when the summary gate is being shown.
+   */
+  followUp?: string | null;
+  /**
+   * #5: number of completed directive (strategy-directed, substantive) rounds.
+   * Drives the three-round summary gate.
+   */
+  directiveRound?: number;
+  /**
+   * #5: true when the summary gate should be shown (after every 3rd directive
+   * round). The UI renders 继续聊 / 生成总结 when this is true.
+   */
+  suggestSummary?: boolean;
 }
 
 export interface ResultCard {

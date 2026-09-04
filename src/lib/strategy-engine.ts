@@ -100,8 +100,11 @@ const strategyHistory = (session: Session): StrategyId[] => {
 };
 
 /** Pure: pick the next strategy based on round number and history. */
-export function pickNextStrategy(session: Session): StrategyId {
-  const round = roundCount(session) + 1; // next round number (1-based)
+export function pickNextStrategy(session: Session, directiveRound?: number): StrategyId {
+  // #5: when a directiveRound is provided (gentle interrogation), use it
+  // instead of the message-based round count so strategy selection follows
+  // the user's substantive responses, not every input.
+  const round = directiveRound !== undefined ? directiveRound + 1 : roundCount(session) + 1;
   const history = strategyHistory(session);
 
   // Round-by-round planned sequence
