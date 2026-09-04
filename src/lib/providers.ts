@@ -25,18 +25,7 @@ export interface Message {
    * advance the interrogation round.
    */
   uncertain?: boolean;
-  /**
-   * #5: the classified intent for this user message. 'question' means the
-   * user was asking the AI something; 'response' means they were answering
-   * or expressing a viewpoint. Absent on legacy messages.
-   */
-  intent?: 'question' | 'response';
 }
-
-/**
- * User intent classification for PRD v4.2 §5.
- */
-export type UserIntent = 'question' | 'response';
 
 /**
  * A user message that counts as a completed interrogation round (#17).

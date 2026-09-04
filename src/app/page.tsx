@@ -14,7 +14,6 @@ import type {
 } from '@/lib/providers';
 import type { StrategyId } from '@/lib/strategy-engine';
 import { selectRoundSources } from '@/lib/interrogation-context';
-import { shouldSuggestSummary } from '@/lib/gentle-interrogation';
 import { FixtureRetrievalProvider } from '@/lib/fixture-providers';
 import { BrowserStorageProvider } from '@/lib/demo-providers';
 import { toHistorySessionSnapshots } from '@/lib/history-search';
@@ -334,11 +333,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   // #21: honest server-storage status line for the session view.
   const [storageNotice, setStorageNotice] = useState<string | null>(null);
-  // #5: gentle adaptive interrogation state
-  const [aiReply, setAiReply] = useState<string | null>(null);
-  const [followUp, setFollowUp] = useState<string | null>(null);
-  const [directiveRound, setDirectiveRound] = useState(0);
-  const [suggestSummary, setSuggestSummary] = useState(false);
   const [hotlist, setHotlist] = useState<{ items: { id: string; title: string; url: string | null }[]; source: 'live' | 'cache' | 'demo'; updatedAt: number; stale?: boolean } | null>(null);
   const [hotlistLoading, setHotlistLoading] = useState(true);
   // #18: honest live/cache/demo disclosure for the report panel.
@@ -799,10 +793,6 @@ export default function Home() {
     setCurrentSources(null);
     setReportSourceState(null);
     setStorageNotice(null);
-    setAiReply(null);
-    setFollowUp(null);
-    setDirectiveRound(0);
-    setSuggestSummary(false);
     setAnswer('');
     setExcludedHistoryIds([]);
     setFormLoading(false);
@@ -925,7 +915,6 @@ export default function Home() {
               onRetryComplete={() => { void handleCompleteNow(); }}
               onRetryMessage={handleRetryMessage}
               onExit={() => { void handleCompleteNow(); }}
-              onSummaryContinue={handleSummaryDismiss}
               messagesEndRef={messagesEndRef}
               formLoading={formLoading}
               feedbackCueState={feedbackCueState}
