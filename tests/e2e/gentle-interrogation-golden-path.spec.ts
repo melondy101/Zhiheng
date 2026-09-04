@@ -45,6 +45,34 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
     }).toPass({ timeout: 15_000 });
   });
 
+  test('scenario 1a: sending an answer keeps the conversation mounted while the API is pending', async ({ page }) => {
+    await seedReportAndStart(page);
+    let releaseRequest: () => void = () => undefined;
+    const requestHeld = new Promise<void>((resolve) => {
+      releaseRequest = resolve;
+    });
+    let noteRequestStarted: () => void = () => undefined;
+    const requestStarted = new Promise<void>((resolve) => {
+      noteRequestStarted = resolve;
+    });
+    await page.route('**/api/interrogate', async (route) => {
+      noteRequestStarted();
+      await requestHeld;
+      await route.continue();
+    });
+
+    await page.getByPlaceholder('输入你的回答...').fill('发送期间不应卸载整个对话页面。');
+    await page.getByRole('button', { name: /发送/ }).click();
+    await requestStarted;
+    try {
+      await expect(page.getByTestId('qa-panel')).toBeVisible();
+      await expect(page.getByPlaceholder('正在发送...')).toBeVisible();
+      await expect(page.getByText('加载中...')).toHaveCount(0);
+    } finally {
+      releaseRequest();
+    }
+  });
+
   test('scenario 2: three substantive answers open the decision gate (3/6/9 summary gate)', async ({ page }) => {
     await seedReportAndStart(page);
     const input = page.getByPlaceholder('输入你的回答...');

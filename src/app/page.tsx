@@ -451,7 +451,11 @@ export default function Home() {
     sess: Session,
     payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint; optimisticId?: string | null }
   ) => {
-    setLoading(true);
+    // Answer submission has its own inline pending state. Replacing the page
+    // with the global loading view here unmounts the conversation and looks
+    // like a full-page reload on every message.
+    const usesFullPageLoading = payload.action !== 'answer';
+    if (usesFullPageLoading) setLoading(true);
     try {
       const res = await postInterrogate(sess, payload);
       if (res.ok) {
@@ -484,7 +488,7 @@ export default function Home() {
         setOptimisticMessageId(null);
       }
     } finally {
-      setLoading(false);
+      if (usesFullPageLoading) setLoading(false);
     }
   };
 
@@ -804,7 +808,7 @@ export default function Home() {
   // #48: the cue is derived ONLY from existing state — no parallel business
   // state is introduced (see src/lib/feedback-cue-state.ts).
   const feedbackCueState = deriveFeedbackCueState({
-    loading,
+    loading: loading || formLoading,
     hasSelectedViewpoint: selectedViewpoint !== null,
     completed,
     currentStrategy,
