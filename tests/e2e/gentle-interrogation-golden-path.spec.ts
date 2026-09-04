@@ -21,17 +21,19 @@ const HOME = '/';
 
 async function seedReportAndStart(page: import('@playwright/test').Page) {
   await page.goto(HOME);
-  await page.getByPlaceholder('输入你想研究的问题…').fill('缓存优先有什么好处？');
-  await page.getByRole('button', { name: /生成报告|研究一下/ }).first().click();
-  await expect(page.getByTestId('report-panel')).toBeVisible({ timeout: 30_000 });
-  await page.getByTestId('opinion-card').first().click();
-  await expect(page.getByTestId('qa-panel')).toBeVisible({ timeout: 15_000 });
+  await page.getByPlaceholder(/例如：AI是否会取代人类创造力/).fill('缓存优先有什么好处？');
+  await page.getByRole('button', { name: /开始思考/ }).click();
+  // After the report loads, the StanceSelector appears (the entry point to
+  // the interrogation panel). Pick the first AI-suggested stance.
+  await expect(page.getByTestId('stance-selector')).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId('stance-option').first().click();
+  await expect(page.getByTestId('qa-panel')).toBeVisible({ timeout: 30_000 });
 }
 
 test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
   test('scenario 1: a user question gets a direct answer + a follow-up and the round does not advance', async ({ page }) => {
     await seedReportAndStart(page);
-    const input = page.getByPlaceholder('输入你的回答…');
+    const input = page.getByPlaceholder('输入你的回答...');
     await input.fill('什么是缓存？');
     const messagesBefore = await page.locator('[data-testid="qa-panel"] li').count();
     await page.getByRole('button', { name: /发送/ }).click();
@@ -45,7 +47,7 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
 
   test('scenario 2: three substantive answers open the decision gate (3/6/9 summary gate)', async ({ page }) => {
     await seedReportAndStart(page);
-    const input = page.getByPlaceholder('输入你的回答…');
+    const input = page.getByPlaceholder('输入你的回答...');
     for (const answer of [
       '我认为缓存能减少外部 API 调用。',
       '因为数据库查询快且一致。',
@@ -55,14 +57,13 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
       await page.getByRole('button', { name: /发送/ }).click();
       await page.waitForTimeout(500);
     }
-    // After 3 directive answers the gate is shown via the existing
-    // decision-gate testid (the three-round summary gate reuses it).
-    await expect(page.getByTestId('decision-gate')).toBeVisible({ timeout: 30_000 });
+    // After 3 directive answers the summary gate is shown.
+    await expect(page.getByTestId('summary-gate')).toBeVisible({ timeout: 30_000 });
   });
 
   test('scenario 3: 继续聊 is a legal 200 transition and a fresh question appears', async ({ page }) => {
     await seedReportAndStart(page);
-    const input = page.getByPlaceholder('输入你的回答…');
+    const input = page.getByPlaceholder('输入你的回答...');
     for (const answer of [
       '我看好缓存优先。',
       '它能改善断网体验。',
@@ -72,19 +73,15 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
       await page.getByRole('button', { name: /发送/ }).click();
       await page.waitForTimeout(500);
     }
-    const gate = page.getByTestId('decision-gate');
+    const gate = page.getByTestId('summary-gate');
     await expect(gate).toBeVisible({ timeout: 30_000 });
-    // Click the first decision-gate button (继续聊) — must NOT throw.
-    await gate.getByRole('button').first().click();
-    // After continue the gate may still be open (next 3-round cycle) or
-    // closed — either way, the page must remain interactive and the
-    // qa-panel must still be present.
+    await page.getByTestId('summary-gate-continue').click();
     await expect(page.getByTestId('qa-panel')).toBeVisible({ timeout: 15_000 });
   });
 
   test('scenario 4: 生成总结 completes the session and shows the result card', async ({ page }) => {
     await seedReportAndStart(page);
-    const input = page.getByPlaceholder('输入你的回答…');
+    const input = page.getByPlaceholder('输入你的回答...');
     for (const answer of [
       '缓存优先能减少外部调用。',
       '它能改善断网体验。',
@@ -94,18 +91,15 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
       await page.getByRole('button', { name: /发送/ }).click();
       await page.waitForTimeout(500);
     }
-    const gate = page.getByTestId('decision-gate');
+    const gate = page.getByTestId('summary-gate');
     await expect(gate).toBeVisible({ timeout: 30_000 });
-    // The second decision-gate button is 生成总结.
-    await gate.getByRole('button').nth(1).click();
-    // After completion the qa-panel may still be present but a result-card
-    // section is the success signal.
+    await page.getByTestId('summary-gate-complete').click();
     await expect(page.getByText(/成果卡|总结|Result|已完成|完成/).first()).toBeVisible({ timeout: 30_000 });
   });
 
-  test('scenario 5: reload restores full history and the open decision gate', async ({ page }) => {
+  test('scenario 5: reload restores full history and the open summary gate', async ({ page }) => {
     await seedReportAndStart(page);
-    const input = page.getByPlaceholder('输入你的回答…');
+    const input = page.getByPlaceholder('输入你的回答...');
     for (const answer of [
       '缓存优先能减少外部调用。',
       '它能改善断网体验。',
@@ -115,10 +109,10 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
       await page.getByRole('button', { name: /发送/ }).click();
       await page.waitForTimeout(500);
     }
-    await expect(page.getByTestId('decision-gate')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('summary-gate')).toBeVisible({ timeout: 30_000 });
     const messagesBefore = await page.locator('[data-testid="qa-panel"] li').count();
     await page.reload();
-    await expect(page.getByTestId('decision-gate')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('summary-gate')).toBeVisible({ timeout: 30_000 });
     const messagesAfter = await page.locator('[data-testid="qa-panel"] li').count();
     expect(messagesAfter).toBe(messagesBefore);
   });
@@ -127,7 +121,7 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
     await seedReportAndStart(page);
     const cue = page.getByTestId('session-feedback-cue');
     await expect(cue).toBeVisible();
-    const input = page.getByPlaceholder('输入你的回答…');
+    const input = page.getByPlaceholder('输入你的回答...');
     await input.fill('什么是缓存？');
     await page.getByRole('button', { name: /发送/ }).click();
     // The cue is server-state driven: the request is in flight, then done.

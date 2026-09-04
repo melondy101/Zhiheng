@@ -161,7 +161,7 @@ export default function QAPanel({
   }, [messages.length]);
 
   return (
-    <div className="w-[450px] flex flex-col bg-white">
+    <div className="w-[450px] flex flex-col bg-white" data-testid="qa-panel">
       <div className="px-4 py-2 border-b flex items-center justify-between bg-gray-50">
         <span className="text-xs text-gray-600">
           第 {currentRound || messages.filter(isRoundAnswer).length + 1} 轮
@@ -253,7 +253,10 @@ export default function QAPanel({
 
           {/* #5: three-round summary gate */}
           {suggestSummary && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+            <div
+              className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4"
+              data-testid="summary-gate"
+            >
               <p className="text-sm font-medium mb-2 text-green-700">
                 你已经完成了 {directiveRound} 轮定向思考，要不要继续聊，还是就此生成总结？
               </p>
@@ -261,6 +264,7 @@ export default function QAPanel({
                 <button
                   type="button"
                   onClick={onContinue}
+                  data-testid="summary-gate-continue"
                   className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs hover:bg-green-700"
                 >
                   继续聊
@@ -268,6 +272,7 @@ export default function QAPanel({
                 <button
                   type="button"
                   onClick={onExit}
+                  data-testid="summary-gate-complete"
                   className="px-3 py-1.5 border border-green-300 text-green-700 rounded-lg text-xs hover:bg-green-100"
                 >
                   生成总结
