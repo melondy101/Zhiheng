@@ -272,7 +272,11 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
       await storage.saveSession(planned);
       return { ok: true, body: toResponseBody(planned, null, false) };
     }
-    return { ok: false, status: 409, error: 'No checkpoint decision pending' };
+    // #26/R3: PRD v4.2 §5.3 — the only continuation gate is the three-round
+    // summary gate (suggestSummary). When it is open, "继续聊" must always
+    // succeed and return the current session unchanged so the client can
+    // render the next AI turn. It is never 409.
+    return { ok: true, body: toResponseBody(session, null, false) };
   }
 
   // #26/T3: optimistic reconciliation — if the client sent an optimistic
@@ -415,29 +419,11 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
 
   const hint: InterrogateHint | null = null;
 
-  // After a checkpoint-round answer (5, 8, 11…) the next step is the
-  // checkpoint decision, not a new question (#14 state machine).
-  if (actionAfterAnswer(state.round) === 'checkpoint') {
-    const updated: Session = {
-      ...withAnswer,
-      interrogation: {
-        round: state.round,
-        strategy: state.strategy,
-        assistantQuestion: null,
-        usedFallback: state.usedFallback,
-        pendingCheckpoint: true,
-        uncertainStreak: streak,
-        directiveRound: nextDirectiveRound,
-        lastIntent: userIntent,
-      },
-      updatedAt: Date.now(),
-    };
-    await storage.saveSession(updated);
-    return { ok: true, body: toResponseBody(updated, hint, false, {
-      directiveRound: nextDirectiveRound,
-      suggestSummary: shouldSuggestSummary(nextDirectiveRound),
-    }) };
-  }
+  // #26/R3: PRD v4.2 §5.3 removed the v4.1 fixed 5/8/11 round checkpoints.
+  // The only legitimate gate is the three-round summary gate, surfaced as
+  // `suggestSummary` after every 3rd directive round. Substantive answers
+  // directly advance the round and may keep going; the user is free to
+  // tap 生成总结 at any moment via action='complete'.
 
   // #5: for questions, the AI replies directly and provides a follow-up;
   // for substantive responses, the AI acknowledges and asks a strategy question.
@@ -447,14 +433,17 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
   );
   recordStrategy(withAnswer, nextStrategy);
 
+  // #26/R3: PRD v4.2 §4.1 — the AI's direct answer and the gentle follow-up
+  // MUST be persisted as a single assistant message. Saving them as two
+  // separate messages causes the UI to render the AI reply twice and breaks
+  // the round counter semantics.
   const gentleMessages: Message[] = [];
-  if (gentle.aiReply) {
-    gentleMessages.push(makeAssistantMessage(gentle.aiReply));
-  }
+  const directAnswer = gentle.aiReply;
   const nextAssistantQuestion =
     gentle.intent === 'question' ? gentle.followUp : fb.question;
-  if (nextAssistantQuestion) {
-    gentleMessages.push(makeAssistantMessage(nextAssistantQuestion));
+  const combined = [directAnswer, nextAssistantQuestion].filter(Boolean).join('\n\n');
+  if (combined) {
+    gentleMessages.push(makeAssistantMessage(combined));
   }
 
   const planned = {

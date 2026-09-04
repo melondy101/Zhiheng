@@ -11,7 +11,7 @@ import {
   generateGentleResponse,
   type UserIntent,
 } from '../../src/lib/gentle-interrogation';
-import type { Session, Viewpoint } from '../../src/lib/providers';
+import type { InterrogationState, Session, Viewpoint } from '../../src/lib/providers';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -32,6 +32,18 @@ function buildSession(overrides: Partial<Session> = {}): Session {
     updatedAt: Date.now(),
   };
   return { ...base, ...overrides };
+}
+
+function buildInterrogation(overrides: Partial<InterrogationState> = {}): InterrogationState {
+  return {
+    round: 0,
+    strategy: null,
+    assistantQuestion: null,
+    usedFallback: false,
+    pendingCheckpoint: false,
+    uncertainStreak: 0,
+    ...overrides,
+  };
 }
 
 function buildViewpoint(text: string): Viewpoint {
@@ -115,7 +127,7 @@ describe('completedDirectiveRounds', () => {
 
   it('returns the persisted directiveRound when present', () => {
     const session = buildSession({
-      interrogation: { directiveRound: 3 } as any,
+      interrogation: buildInterrogation({ directiveRound: 3 }),
     });
     assert.strictEqual(completedDirectiveRounds(session), 3);
   });
@@ -201,7 +213,7 @@ describe('generateGentleResponse', () => {
 
   it('sets suggestSummary after every 3rd directive round', () => {
     const session = buildSession({
-      interrogation: { directiveRound: 2 } as any,
+      interrogation: buildInterrogation({ directiveRound: 2 }),
     });
     const result = generateGentleResponse('我认为这很有用', session, strategy, true);
     assert.strictEqual(result.directiveRound, 3);

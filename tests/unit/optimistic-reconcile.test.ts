@@ -82,13 +82,16 @@ describe('reconcileOptimistic — server-side (#26/T3)', () => {
     });
 
     assert.ok(result.ok);
-    // After the answer the server plans the next round and persists the
-    // assistant question as an assistant message (#26/T3).
-    // #26/T5: also adds an AI direct-answer message for the user's response.
-    assert.strictEqual(result.body.session.messages.length, 4);
+    // #26/R3: PRD v4.2 §4.1 — the AI's direct answer and the gentle follow-up
+    // are persisted as a single assistant message (no duplicate / triple
+    // render in the UI). The session started with 1 message and gains:
+    //   - the user's new answer (1) and
+    //   - one combined assistant message (1) = 3 total.
+    assert.strictEqual(result.body.session.messages.length, 3);
     assert.strictEqual(result.body.session.messages[0].id, 'real_1');
-    // The last message should be the assistant's follow-up question.
-    assert.strictEqual(result.body.session.messages[3].role, 'assistant');
+    // The single assistant message carries both the direct answer and the
+    // follow-up question.
+    assert.strictEqual(result.body.session.messages[2].role, 'assistant');
   });
 
   it('null optimisticId is a no-op', async () => {
