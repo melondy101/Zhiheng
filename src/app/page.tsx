@@ -19,6 +19,7 @@ import { BrowserStorageProvider } from '@/lib/demo-providers';
 import { toHistorySessionSnapshots } from '@/lib/history-search';
 import { ownerHeaders } from '@/lib/owner-id';
 import { pickRecoverySession, storageNoticeFor } from '@/lib/session-recovery';
+import { shouldSuggestSummary } from '@/lib/gentle-interrogation';
 import HomePage from './components/HomePage';
 import ReportPanel from './components/ReportPanel';
 import StanceSelector from './components/StanceSelector';
@@ -537,7 +538,9 @@ export default function Home() {
               setDirectiveRound(st.directiveRound ?? 0);
               setAiReply(null);
               setFollowUp(null);
-              setSuggestSummary(false);
+              // #26/R3: PRD v4.2 §5.3 — the summary gate must survive a
+              // reload when directiveRound is 3, 6, 9...
+              setSuggestSummary(shouldSuggestSummary(st.directiveRound ?? 0));
             } else if (st?.pendingDecision) {
               // Refreshed while the 继续/结束 decision gate was pending (#17).
               setCurrentRound(st.round);
@@ -552,7 +555,9 @@ export default function Home() {
               setDirectiveRound(st.directiveRound ?? 0);
               setAiReply(null);
               setFollowUp(null);
-              setSuggestSummary(false);
+              // #26/R3: PRD v4.2 §5.3 — the summary gate must survive a
+              // reload when directiveRound is 3, 6, 9...
+              setSuggestSummary(shouldSuggestSummary(st.directiveRound ?? 0));
             } else if (st?.assistantQuestion) {
               // Refreshed while round N's question was pending.
               setCurrentRound(st.round);
@@ -567,7 +572,9 @@ export default function Home() {
               setDirectiveRound(st.directiveRound ?? 0);
               setAiReply(null);
               setFollowUp(null);
-              setSuggestSummary(false);
+              // #26/R3: PRD v4.2 §5.3 — the summary gate must survive a
+              // reload when directiveRound is 3, 6, 9...
+              setSuggestSummary(shouldSuggestSummary(st.directiveRound ?? 0));
             } else {
               // Session predates the persisted interrogation state: ask the
               // API to resume — it decides checkpoint vs. next round.
