@@ -47,6 +47,14 @@ interface QAPanelProps {
   formLoading?: boolean;
   /** #26/T3: inline 刘看山 feedback cue state derived from page state. */
   feedbackCueState?: FeedbackCueState | null;
+  /** #26/T5: AI direct answer text for the most recent user input. */
+  aiReply?: string | null;
+  /** #26/T5: follow-up question or gentle encouragement text. */
+  followUp?: string | null;
+  /** #26/T5: number of completed directive (strategy-directed) rounds. */
+  directiveRound?: number;
+  /** #26/T5: true when the summary gate should be shown (after every 3rd directive round). */
+  suggestSummary?: boolean;
 }
 
 const STRATEGY_LABELS: Record<StrategyId, string> = {
@@ -138,6 +146,10 @@ export default function QAPanel({
   messagesEndRef,
   formLoading = false,
   feedbackCueState = null,
+  aiReply,
+  followUp,
+  directiveRound = 0,
+  suggestSummary = false,
 }: QAPanelProps) {
   const scrollTargetRef = useRef<HTMLDivElement | null>(null);
 
@@ -221,6 +233,46 @@ export default function QAPanel({
               {usedFallback && (
                 <p className="text-xs text-orange-600 mt-2">⚠️ AI 服务异常，已使用策略模板</p>
               )}
+            </div>
+          )}
+
+          {/* #5: AI direct answer for user questions */}
+          {aiReply && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+              <p className="text-sm font-medium mb-1 text-blue-700">AI 回答</p>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{aiReply}</p>
+            </div>
+          )}
+
+          {/* #5: follow-up question or gentle encouragement */}
+          {followUp && !suggestSummary && (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
+              <p className="text-sm text-gray-700">{followUp}</p>
+            </div>
+          )}
+
+          {/* #5: three-round summary gate */}
+          {suggestSummary && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+              <p className="text-sm font-medium mb-2 text-green-700">
+                你已经完成了 {directiveRound} 轮定向思考，要不要继续聊，还是就此生成总结？
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={onContinue}
+                  className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs hover:bg-green-700"
+                >
+                  继续聊
+                </button>
+                <button
+                  type="button"
+                  onClick={onExit}
+                  className="px-3 py-1.5 border border-green-300 text-green-700 rounded-lg text-xs hover:bg-green-100"
+                >
+                  生成总结
+                </button>
+              </div>
             </div>
           )}
 

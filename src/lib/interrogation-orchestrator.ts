@@ -28,6 +28,16 @@ import type { StrategyId } from './strategy-engine';
 import { isUncertainAnswer, uncertainResponse, withFallback } from './llm-fallback';
 import { buildNarrowedQuestion, selectRoundSources } from './interrogation-context';
 import { buildSimpleResultCard } from './result-card-builder';
+import {
+  classifyIntent,
+  completedDirectiveRounds,
+  generateGentleResponse,
+  gentleStateOf,
+  isNonSubstantive,
+  shouldSuggestSummary,
+  type GentleState,
+  type UserIntent,
+} from './gentle-interrogation';
 
 export interface HandleInterrogateInput {
   sessionId: string;
@@ -99,7 +109,8 @@ function makeMessage(text: string, uncertain = false): Message {
 function toResponseBody(
   session: Session,
   hint: InterrogateHint | null,
-  suggestComplete: boolean
+  suggestComplete: boolean,
+  gentle: { aiReply?: string | null; followUp?: string | null; directiveRound?: number; suggestSummary?: boolean } = {}
 ): InterrogateResponseBody {
   const state = interrogationStateOf(session);
   return {
@@ -119,6 +130,11 @@ function toResponseBody(
     decisionPending: state.pendingDecision === true,
     completed: session.completed,
     session,
+    // #5: gentle interrogation fields
+    aiReply: gentle.aiReply ?? null,
+    followUp: gentle.followUp ?? null,
+    directiveRound: gentle.directiveRound ?? completedDirectiveRounds(session),
+    suggestSummary: gentle.suggestSummary ?? false,
   };
 }
 
@@ -316,6 +332,13 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     messages: [...currentSession.messages, makeMessage(answer, streak > 0)],
   };
 
+  // #5: classify user intent and generate gentle response
+  const userIntent: UserIntent = classifyIntent(answer);
+  const currentDirectiveRound = completedDirectiveRounds(currentSession);
+  const currentStrategy = state.strategy ?? 'M1_evidence';
+  const gentle = generateGentleResponse(answer, currentSession, currentStrategy, true);
+  const nextDirectiveRound = gentle.directiveRound;
+
   // #17: uncertain answers NEVER advance the round. The first two stay in
   // the current round (1: narrowed question, 2: two directions); the third
   // opens an explicit 继续/结束 decision gate — no auto-completion, no lost
@@ -334,13 +357,18 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
           pendingCheckpoint: false,
           uncertainStreak: streak,
           pendingDecision: true,
+          directiveRound: nextDirectiveRound,
+          lastIntent: userIntent,
         },
         updatedAt: Date.now(),
       };
       await storage.saveSession(gated);
       return {
         ok: true,
-        body: toResponseBody(gated, { message: hintForGate.message, hint: hintForGate.hint }, true),
+        body: toResponseBody(gated, { message: hintForGate.message, hint: hintForGate.hint }, true, {
+          directiveRound: nextDirectiveRound,
+          suggestSummary: shouldSuggestSummary(nextDirectiveRound),
+        }),
       };
     }
 
@@ -369,6 +397,8 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
         usedFallback,
         pendingCheckpoint: false,
         uncertainStreak: streak,
+        directiveRound: nextDirectiveRound,
+        lastIntent: userIntent,
       },
       updatedAt: Date.now(),
     };
@@ -376,7 +406,10 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     const hintResponse = uncertainResponse(streak, withAnswer, assistantQuestion);
     return {
       ok: true,
-      body: toResponseBody(updated, { message: hintResponse.message, hint: hintResponse.hint }, false),
+      body: toResponseBody(updated, { message: hintResponse.message, hint: hintResponse.hint }, false, {
+        directiveRound: nextDirectiveRound,
+        suggestSummary: shouldSuggestSummary(nextDirectiveRound),
+      }),
     };
   }
 
@@ -394,14 +427,56 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
         usedFallback: state.usedFallback,
         pendingCheckpoint: true,
         uncertainStreak: streak,
+        directiveRound: nextDirectiveRound,
+        lastIntent: userIntent,
       },
       updatedAt: Date.now(),
     };
     await storage.saveSession(updated);
-    return { ok: true, body: toResponseBody(updated, hint, false) };
+    return { ok: true, body: toResponseBody(updated, hint, false, {
+      directiveRound: nextDirectiveRound,
+      suggestSummary: shouldSuggestSummary(nextDirectiveRound),
+    }) };
   }
 
-  const planned = await planNextRound(withAnswer, generateQuestion, streak);
+  // #5: for questions, the AI replies directly and provides a follow-up;
+  // for substantive responses, the AI acknowledges and asks a strategy question.
+  const nextStrategy = pickNextStrategy(withAnswer, nextDirectiveRound);
+  const fb = await withFallback(nextStrategy, withAnswer, () =>
+    generateQuestion(nextStrategy, withAnswer)
+  );
+  recordStrategy(withAnswer, nextStrategy);
+
+  const gentleMessages: Message[] = [];
+  if (gentle.aiReply) {
+    gentleMessages.push(makeAssistantMessage(gentle.aiReply));
+  }
+  const nextAssistantQuestion =
+    gentle.intent === 'question' ? gentle.followUp : fb.question;
+  if (nextAssistantQuestion) {
+    gentleMessages.push(makeAssistantMessage(nextAssistantQuestion));
+  }
+
+  const planned = {
+    ...withAnswer,
+    messages: [...withAnswer.messages, ...gentleMessages],
+    interrogation: {
+      round: state.round + 1,
+      strategy: nextStrategy,
+      assistantQuestion: nextAssistantQuestion,
+      usedFallback: fb.usedFallback,
+      pendingCheckpoint: false,
+      uncertainStreak: streak,
+      directiveRound: nextDirectiveRound,
+      lastIntent: userIntent,
+    },
+    updatedAt: Date.now(),
+  };
   await storage.saveSession(planned);
-  return { ok: true, body: toResponseBody(planned, hint, false) };
+  return { ok: true, body: toResponseBody(planned, hint, false, {
+    directiveRound: nextDirectiveRound,
+    suggestSummary: gentle.suggestSummary,
+    aiReply: gentle.aiReply,
+    followUp: gentle.followUp,
+  }) };
 }
