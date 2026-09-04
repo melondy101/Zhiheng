@@ -70,13 +70,15 @@ export interface ReportViewpoint {
   evidence: ReportEvidence[];
 }
 
-/**
- * The structured multiple-viewpoint synthesis (PRD v4.2 §3.2). `summary`
- * compares the viewpoints — support, applicable conditions and real-world
- * feasibility — instead of declaring one winner.
+/** The structured multiple-viewpoint synthesis (PRD v4.2 §3.2).
+ *
+ * The report deliberately has no separate final verdict. Each viewpoint owns
+ * its directly supporting material, so readers can assess the evidence rather
+ * than being handed an uncited overall conclusion.
  */
 export interface ReportSynthesis {
-  summary: string;
+  /** Older stored reports may carry this field. New reports do not generate or render it. */
+  summary?: string;
   viewpoints: ReportViewpoint[];
 }
 
@@ -324,8 +326,8 @@ export interface LLMProvider {
     session: Session
   ): Promise<string>;
   /**
-   * PRD v4.2 §3: produce a structured multiple-viewpoint synthesis (summary +
-   * viewpoints) for a finished report. Optional because the fixture LLM
+   * PRD v4.2 §3: produce a structured multiple-viewpoint synthesis (core
+   * viewpoints with evidence) for a finished report. Optional because the fixture LLM
    * provider declines to synthesize — returning null falls back to the
    * deterministic material-based synthesis in the builder.
    *

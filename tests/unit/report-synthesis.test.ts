@@ -38,7 +38,6 @@ const SOURCES: SynthesisSource[] = [
 ];
 
 const VALID_RESPONSE = JSON.stringify({
-  summary: '两种立场各有依据：前者更贴近当下工程实践，后者更长于历史趋势；现实可行性都受限于样本。',
   viewpoints: [
     {
       conclusion: '短期内 AI 无法独立承担需求理解，因此不会整体取代程序员。',
@@ -58,7 +57,6 @@ describe('parseSynthesisResponse — strict validation', () => {
     assert.strictEqual(result.viewpoints.length, 2);
     assert.deepStrictEqual(result.viewpoints[0]!.evidence[0]!.citationIds, [1]);
     assert.deepStrictEqual(result.viewpoints[1]!.evidence[0]!.citationIds, [2]);
-    assert.ok(result.summary.length > 0);
   });
 
   it('strips a markdown code fence before parsing', () => {
@@ -69,7 +67,6 @@ describe('parseSynthesisResponse — strict validation', () => {
 
   it('rejects a conclusion that is exactly a source title', () => {
     const response = JSON.stringify({
-      summary: '综合结论。',
       viewpoints: [
         {
           conclusion: 'AI 会取代程序员吗',
@@ -82,7 +79,6 @@ describe('parseSynthesisResponse — strict validation', () => {
 
   it('rejects a conclusion lifted verbatim out of an excerpt', () => {
     const response = JSON.stringify({
-      summary: '综合结论。',
       viewpoints: [
         {
           conclusion: '因为需求理解与系统设计难以自动化',
@@ -95,7 +91,6 @@ describe('parseSynthesisResponse — strict validation', () => {
 
   it('rejects a conclusion that merely swallows a whole excerpt', () => {
     const response = JSON.stringify({
-      summary: '综合结论。',
       viewpoints: [
         {
           conclusion: '多数从业者认为短期内不会，因为需求理解与系统设计难以自动化。总之。',
@@ -108,7 +103,6 @@ describe('parseSynthesisResponse — strict validation', () => {
 
   it('drops citation ids that do not exist and deduplicates the rest', () => {
     const response = JSON.stringify({
-      summary: '综合结论。',
       viewpoints: [
         {
           conclusion: '工程实践中的隐性知识是自动化的主要障碍。',
@@ -127,7 +121,6 @@ describe('parseSynthesisResponse — strict validation', () => {
 
   it('drops evidence with no valid citation and then the whole viewpoint', () => {
     const response = JSON.stringify({
-      summary: '综合结论。',
       viewpoints: [
         {
           conclusion: '一个没有任何可追溯依据的断言。',
@@ -144,7 +137,6 @@ describe('parseSynthesisResponse — strict validation', () => {
 
   it('keeps surviving viewpoints when only some are invalid', () => {
     const response = JSON.stringify({
-      summary: '综合结论。',
       viewpoints: [
         { conclusion: 'AI 会取代程序员吗', evidence: [{ summary: 'x', citationIds: [1] }] },
         {
@@ -163,14 +155,13 @@ describe('parseSynthesisResponse — strict validation', () => {
     assert.strictEqual(parseSynthesisResponse('not json', SOURCES), null);
     assert.strictEqual(parseSynthesisResponse('[]', SOURCES), null);
     assert.strictEqual(parseSynthesisResponse('null', SOURCES), null);
-    assert.strictEqual(parseSynthesisResponse('{"viewpoints":[]}', SOURCES), null, 'no summary');
+    assert.strictEqual(parseSynthesisResponse('{"viewpoints":[]}', SOURCES), null, 'no viewpoints');
     assert.strictEqual(
-      parseSynthesisResponse(JSON.stringify({ summary: 'x', viewpoints: [] }), SOURCES),
+      parseSynthesisResponse(JSON.stringify({ viewpoints: [] }), SOURCES),
       null,
       'no viewpoints'
     );
     const overlong = JSON.stringify({
-      summary: 'x',
       viewpoints: [
         { conclusion: '观'.repeat(500), evidence: [{ summary: 'x', citationIds: [1] }] },
       ],
@@ -180,7 +171,6 @@ describe('parseSynthesisResponse — strict validation', () => {
 
   it('rejects an over-long evidence summary', () => {
     const response = JSON.stringify({
-      summary: 'x',
       viewpoints: [
         {
           conclusion: '一个明确的判断。',
@@ -197,7 +187,7 @@ describe('parseSynthesisResponse — strict validation', () => {
       evidence: [{ summary: '依据。', citationIds: [1] }],
     }));
     const result = parseSynthesisResponse(
-      JSON.stringify({ summary: '综合结论。', viewpoints }),
+      JSON.stringify({ viewpoints }),
       SOURCES
     );
     assert.ok(result);
@@ -283,90 +273,14 @@ describe('buildFallbackSynthesis — deterministic, material-based, honest', () 
     assert.strictEqual(buildFallbackSynthesis('测试问题', []), null);
   });
 
-  it('the summary compares support, applicability and feasibility — not just counts', () => {
-    const sources: Source[] = [
-      {
-        id: 'zh_1',
-        type: 'zhihu',
-        author: null,
-        title: 'T1',
-        url: null,
-        excerpt: '社区经验认为落地成本高。',
-      },
-      {
-        id: 'web_1',
-        type: 'web',
-        author: null,
-        title: 'T2',
-        url: null,
-        excerpt: '外部数据显示投入在上升。',
-      },
-    ];
-    const summary = buildFallbackSynthesis('测试问题', toSources(sources))!.summary;
-    assert.ok(summary.includes('支撑') || summary.includes('依据'), 'summary 必须比较支撑度');
-    assert.ok(summary.includes('适用') || summary.includes('情境'), 'summary 必须说明适用情境');
-    assert.ok(summary.includes('可行性') || summary.includes('核验'), 'summary 必须说明可行性/证据局限');
-  });
-
-  it('a single-material summary states that no consensus is inferred', () => {
-    const summary = buildFallbackSynthesis('测试问题', toSources(oneSource))!.summary;
-    assert.ok(summary.includes('这一种立场'), '必须如实说明只呈现一种立场');
-    assert.ok(summary.includes('不会'), '必须说明不虚构第二种观点');
-    assert.ok(!summary.includes('多种立场'), '单一材料不得声称存在多种立场');
-    assert.ok(!/材料呈现\s*2\s*种立场/.test(summary), '单一材料不得声称有两种立场');
-  });
 });
-
-  it('同等证据量时 summary 不宣称某观点支撑更多', () => {
-    // Two sources, each with exactly one piece of evidence → equal support.
-    const sources: Source[] = [
-      {
-        id: 'a',
-        type: 'zhihu',
-        author: null,
-        title: 'A 材料',
-        url: null,
-        excerpt: 'A 材料的具体论述内容。',
-      },
-      {
-        id: 'b',
-        type: 'web',
-        author: null,
-        title: 'B 材料',
-        url: null,
-        excerpt: 'B 材料的具体论述内容。',
-      },
-    ];
-    const summary = buildFallbackSynthesis('测试问题', toSynthesisSources(sources))!.summary;
-    assert.ok(!summary.includes('相对更多'), 'summary must not claim one viewpoint is stronger when evidence is equal');
-    assert.ok(!summary.includes('支撑度更高'), 'summary must not claim higher support when evidence is equal');
-    assert.ok(summary.includes('均有独立依据'), 'summary should state equal support');
-  });
-
-  it('单来源时不编造多观点或综合冲突', () => {
-    const sources: Source[] = [
-      {
-        id: 's1',
-        type: 'zhihu',
-        author: null,
-        title: '唯一材料',
-        url: null,
-        excerpt: '这是唯一一条材料的论述。',
-      },
-    ];
-    const result = buildFallbackSynthesis('测试问题', toSynthesisSources(sources))!;
-    assert.strictEqual(result.viewpoints.length, 1, 'single source yields exactly one viewpoint');
-    assert.ok(result.summary.includes('这一种立场'));
-    assert.ok(!result.summary.includes('多种立场'));
-    assert.ok(!result.summary.includes('2 种立场'));
-  });
 
   it('无来源时返回 null 而非虚构综合', () => {
     assert.strictEqual(buildFallbackSynthesis('测试问题', []), null);
   });
 
 describe('buildSynthesisMessages', () => {
-  it('sends the question and every numbered material, and names the constraints', () => {
+  it('asks for 1–3 core viewpoints and exhaustive direct support under each viewpoint', () => {
     const messages = buildSynthesisMessages({ question: '测试问题', sources: SOURCES });
     assert.strictEqual(messages.length, 2);
     assert.strictEqual(messages[0]!.role, 'system');
@@ -375,6 +289,17 @@ describe('buildSynthesisMessages', () => {
     assert.ok(user.includes('[1]'), 'materials are numbered');
     assert.ok(user.includes('[2]'));
     assert.ok(user.includes('不得直接照抄或截断材料摘录'), 'the prompt states the red line');
+    assert.ok(user.includes('所有直接支持该观点的材料'), 'the prompt requires complete support coverage');
+    assert.ok(user.includes('1 到 3 条'), 'the prompt limits the report to 1–3 core viewpoints');
+    assert.ok(!user.includes('}],"summary"'), 'the report no longer asks for a standalone synthesis conclusion');
+  });
+
+  it('rejects a standalone summary field because the report has no final verdict section', () => {
+    const viewpoints = JSON.parse(VALID_RESPONSE).viewpoints;
+    assert.strictEqual(
+      parseSynthesisResponse(JSON.stringify({ summary: '不应出现的结论。', viewpoints }), SOURCES),
+      null
+    );
   });
 });
 

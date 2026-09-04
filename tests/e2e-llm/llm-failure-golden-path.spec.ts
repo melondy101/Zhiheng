@@ -28,7 +28,7 @@ test('LLM failure degrades to the strategy template and preserves the round', as
   await page.fill('textarea[placeholder="你目前的看法是什么？"]', '我认为大模型幻觉被夸大了');
   await page.click('button[type="submit"]');
   await expect(page).toHaveURL(/session=\w+/);
-  await expect(page.locator('text=核心知识点')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId('report-viewpoints-heading')).toBeVisible({ timeout: 15000 });
   await page.waitForLoadState('networkidle');
 
   // Select a stance -> the round 1 question is generated (LLM fails twice).

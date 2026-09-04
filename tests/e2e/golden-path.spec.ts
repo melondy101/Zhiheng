@@ -44,6 +44,18 @@ async function answer(page: Page, text: string) {
 }
 
 test.describe('Golden Path: gentle adaptive interrogation (PRD v4.2 §5)', () => {
+  test('report follows the vertical evidence structure without a standalone verdict', async ({ page }) => {
+    await startSession(page, QUESTION, INITIAL_OPINION);
+
+    const report = page.getByTestId('report-synthesis');
+    await expect(report).toBeVisible();
+    await expect(report.getByTestId('report-viewpoints-heading')).toHaveText('核心观点');
+    await expect(report.getByText('📖 主要内容').first()).toBeVisible();
+    await expect(page.getByTestId('report-synthesis-heading')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: '🕸️ 知识图谱' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '引用来源' })).toBeVisible();
+  });
+
   test('three substantive answers open the summary gate, not a v4.1 5/8/11 checkpoint', async ({ page }) => {
     await startSession(page, QUESTION, INITIAL_OPINION);
     for (const a of ANSWERS) {

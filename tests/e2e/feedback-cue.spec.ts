@@ -27,7 +27,7 @@ async function startSession(page: Page) {
   await page.fill('textarea[placeholder="你目前的看法是什么？"]', INITIAL_OPINION);
   await page.click('button[type="submit"]');
   await expect(page).toHaveURL(/session=\w+/);
-  await expect(page.locator('h3:has-text("核心知识点")')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId('report-viewpoints-heading')).toBeVisible({ timeout: 15000 });
   await page.locator('.space-y-2 button').first().click();
 }
 
@@ -59,7 +59,7 @@ test.describe('Feedback cue Golden Path: four derived states (#48)', () => {
     await expect(page).toHaveURL(/session=\w+/);
 
     // No cue during stance selection (before a viewpoint is chosen).
-    await expect(page.locator('h3:has-text("核心知识点")')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('report-viewpoints-heading')).toBeVisible({ timeout: 15000 });
     await expect(cue(page)).toHaveCount(0);
     await page.locator('.space-y-2 button').first().click();
 

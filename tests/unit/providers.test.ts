@@ -646,7 +646,6 @@ describe('ReportBuilder', () => {
     // Viewpoints now live in the structured synthesis, with their own evidence.
     assert.ok(report.synthesis, 'the report must carry a structured synthesis');
     assert.ok(report.synthesis!.viewpoints.length >= 1);
-    assert.ok(report.synthesis!.summary.length > 0);
     for (const viewpoint of report.synthesis!.viewpoints) {
       assert.ok(viewpoint.conclusion.length > 0);
       assert.notStrictEqual(viewpoint.conclusion, '材料标题', '观点不得是来源标题');
@@ -666,7 +665,6 @@ describe('ReportBuilder', () => {
     ];
     const { report } = await buildReport({ question: '测试问题', zhihuSources, webSources: [] });
     assert.strictEqual(report.synthesis!.viewpoints.length, 1);
-    assert.ok(report.synthesis!.summary.includes('1'), 'summary 必须如实说明只有一种立场');
   });
 
   it('deduplicates sources by id', async () => {

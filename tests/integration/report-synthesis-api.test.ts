@@ -38,7 +38,6 @@ function synthesisViolations(report: Report): string[] {
   const synthesis = report.synthesis;
   if (!synthesis) return ['report.synthesis is missing'];
   if (synthesis.viewpoints.length === 0) problems.push('no viewpoints');
-  if (synthesis.summary.trim().length === 0) problems.push('empty summary');
 
   for (const viewpoint of synthesis.viewpoints) {
     if (viewpoint.conclusion.trim().length === 0) problems.push('empty conclusion');
@@ -132,7 +131,6 @@ function fakeLLM(handler: (request: SynthesisRequest) => Promise<ReportSynthesis
 describe('buildReport synthesis wiring (PRD v4.2 §3)', () => {
   it('uses a valid model synthesis verbatim', async () => {
     const synthesis: ReportSynthesis = {
-      summary: '两种立场各有支撑：前者贴近当下工程实践，后者更长于历史趋势；可行性都受样本限制。',
       viewpoints: [
         {
           id: 'vp_1',
@@ -159,6 +157,21 @@ describe('buildReport synthesis wiring (PRD v4.2 §3)', () => {
       '观点 1：短期内 AI 难以独立承担需求理解，因此不会整体取代程序员。',
       '观点 2：自动化更可能重塑岗位结构而非减少总量。',
     ]);
+  });
+
+  it('orders citations for the reader: Zhihu, web, then personal history', async () => {
+    const { report } = await buildReport({
+      question: '测试问题',
+      zhihuSources: [TWO_SOURCES[0]!],
+      webSources: [TWO_SOURCES[1]!],
+      historySources: [source('history_1', 'personal_history', '我的旧报告', '历史报告中的相关分析。')],
+      llmProvider: fakeLLM(async () => null),
+    });
+
+    assert.deepStrictEqual(
+      report.references.map((item) => item.type),
+      ['zhihu', 'web', 'personal_history']
+    );
   });
 
   it('falls back when the model throws, and still produces a valid synthesis', async () => {
@@ -195,7 +208,6 @@ describe('buildReport synthesis wiring (PRD v4.2 §3)', () => {
       llmProvider: fakeLLM(async () => null),
     });
     assert.strictEqual(report.synthesis!.viewpoints.length, 1, 'no fabricated second viewpoint');
-    assert.ok(report.synthesis!.summary.includes('这一种立场'));
   });
 
   it('no material yields no synthesis rather than an invented one', async () => {

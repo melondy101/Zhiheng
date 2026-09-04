@@ -67,8 +67,8 @@ function mergeSources(zhihu: Source[], web: Source[], history: Source[] = []): S
 
 /** Produce a numbered list of references grouped by type. */
 function groupReferences(allSources: Source[]): Source[] {
-  // Preserve order: zhihu first, then web, then ai_synthesis, then personal_history
-  const order: Record<string, number> = { zhihu: 0, web: 1, ai_synthesis: 2, personal_history: 3 };
+  // Match the reader-facing citation groups.
+  const order: Record<string, number> = { zhihu: 0, web: 1, personal_history: 2, ai_synthesis: 3 };
   return [...allSources].sort((a, b) => {
     const diff = (order[a.type] ?? 9) - (order[b.type] ?? 9);
     return diff !== 0 ? diff : a.id.localeCompare(b.id);
@@ -104,7 +104,7 @@ function confidenceFor(source: Source): '低' | '中' {
  * Build the overview body. PRD v4.2 §3 removes the standalone 反例/限制、
  * 尚待验证 and the generic 最终判断 sections: viewpoints and their support
  * now live in the structured `synthesis` block, and the comparison lives in
- * `synthesis.summary`. Nothing here fabricates unsupported facts.
+ * the per-viewpoint evidence block. Nothing here fabricates unsupported facts.
  */
 function buildContent(question: string, allSources: Source[]): string {
   const lines: string[] = [];
@@ -113,7 +113,7 @@ function buildContent(question: string, allSources: Source[]): string {
   lines.push(question);
   lines.push('');
   lines.push('## 话题概述');
-  lines.push(`本次检索共获取 ${allSources.length} 条可追溯材料；结构化观点与依据见下方「核心观点」模块，综合结论见末尾。`);
+  lines.push(`本次检索共获取 ${allSources.length} 条可追溯材料；结构化观点与每个观点的支持依据见下方「核心观点」模块。`);
 
   return lines.join('\n');
 }
@@ -177,7 +177,7 @@ async function buildSynthesis(
     }
     const synthesis = await llmProvider.generateSynthesis(request);
     // A provider that returns null simply cannot synthesize — not an error.
-    if (synthesis && synthesis.viewpoints.length > 0) return synthesis;
+    if (synthesis && isSynthesisUsable(synthesis, request.sources)) return synthesis;
   } catch (err) {
     console.warn(
       '[report] LLM synthesis failed — using the material-based synthesis:',

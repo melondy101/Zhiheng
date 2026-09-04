@@ -29,7 +29,6 @@ import type {
 export const MAX_SYNTHESIS_VIEWPOINTS = 3;
 export const MAX_CONCLUSION_CHARS = 200;
 export const MAX_EVIDENCE_SUMMARY_CHARS = 320;
-export const MAX_SYNTHESIS_SUMMARY_CHARS = 600;
 
 /** Prompt/serialization limits so one report cannot blow up the request. */
 export const SOURCE_TITLE_MAX_CHARS = 60;
@@ -60,13 +59,13 @@ const SYNTHESIS_SYSTEM_PROMPT =
 
 const SYNTHESIS_CONSTRAINTS = [
   '约束：',
-  '1. 只输出一个 JSON 对象，形如 {"viewpoints":[{"conclusion":"...","evidence":[{"summary":"...","citationIds":[1]}]}],"summary":"..."}。',
-  `2. viewpoints 最多 ${MAX_SYNTHESIS_VIEWPOINTS} 条，每条 conclusion 不超过 ${MAX_CONCLUSION_CHARS} 字，必须是一条明确判断。`,
+  '1. 只输出一个 JSON 对象，形如 {"viewpoints":[{"conclusion":"...","evidence":[{"summary":"...","citationIds":[1]}]}]}。',
+  `2. viewpoints 输出 1 到 ${MAX_SYNTHESIS_VIEWPOINTS} 条，每条 conclusion 不超过 ${MAX_CONCLUSION_CHARS} 字，必须是一条明确判断。`,
   '3. conclusion 不得等于任一材料标题，不得直接照抄或截断材料摘录，不得编造材料未表达的事实、数据或因果。',
-  '4. evidence 只放直接支持该观点的短依据，每条 summary 不超过 ' +
+  '4. 对每个观点，罗列所有直接支持该观点的材料；同一材料可支持多个观点，无关材料不要硬塞。',
+  '5. evidence 只放直接支持该观点的短依据，每条 summary 不超过 ' +
     `${MAX_EVIDENCE_SUMMARY_CHARS} 字；citationIds 只能使用下面给出的材料编号。`,
-  '5. 只依据所给材料；材料不足以支持某个观点时，就不要输出该观点。',
-  `6. summary 不超过 ${MAX_SYNTHESIS_SUMMARY_CHARS} 字，比较各观点的支撑多少、各自更适用的情境、以及现实可行性或证据局限；不要宣布唯一正确答案。`,
+  '6. 只依据所给材料；材料不足以支持某个观点时，就不要输出该观点。不要输出综合结论、最终判断或额外字段。',
 ].join('\n');
 
 function truncate(text: string, max: number): string {
@@ -202,9 +201,7 @@ export function parseSynthesisResponse(
   }
   if (typeof parsed !== 'object' || parsed === null) return null;
   const record = parsed as Record<string, unknown>;
-
-  const summary = asString(record.summary);
-  if (summary === null || summary.length > MAX_SYNTHESIS_SUMMARY_CHARS) return null;
+  if (Object.keys(record).some((key) => key !== 'viewpoints')) return null;
 
   if (!Array.isArray(record.viewpoints)) return null;
   const viewpoints: ReportViewpoint[] = [];
@@ -216,7 +213,7 @@ export function parseSynthesisResponse(
     });
 
   if (viewpoints.length === 0) return null;
-  return { summary, viewpoints };
+  return { viewpoints };
 }
 
 /**
@@ -229,11 +226,10 @@ export function isSynthesisUsable(
   synthesis: ReportSynthesis,
   sources: SynthesisSource[]
 ): boolean {
-  if (synthesis.summary.trim().length === 0) return false;
   if (synthesis.viewpoints.length === 0) return false;
 
   const validIds = new Set(sources.map((s) => s.citationId));
-  return synthesis.viewpoints.some((viewpoint) => {
+  return synthesis.viewpoints.every((viewpoint) => {
     if (viewpoint.conclusion.trim().length === 0) return false;
     if (isLiftedFromMaterial(viewpoint.conclusion, sources)) return false;
     return viewpoint.evidence.some(
@@ -270,7 +266,7 @@ export function firstSentence(text: string): string {
  * viewpoint — a second one is never invented.
  */
 export function buildFallbackSynthesis(
-  question: string,
+  _question: string,
   sources: SynthesisSource[]
 ): ReportSynthesis | null {
   if (sources.length === 0) return null;
@@ -297,53 +293,7 @@ export function buildFallbackSynthesis(
       };
     });
 
-  return { summary: buildFallbackSummary(question, sources, viewpoints), viewpoints };
-}
-
-/**
- * A summary that actually compares: how much support each position has, what
- * each is more applicable to, and where the evidence is thin.
- */
-function buildFallbackSummary(
-  _question: string,
-  sources: SynthesisSource[],
-  viewpoints: ReportViewpoint[]
-): string {
-  if (viewpoints.length === 1) {
-    return (
-      `当前只有 1 条可追溯材料，因此只呈现这一种立场；系统不会据此推断它代表普遍共识，` +
-      `也不会虚构第二种观点。该立场仅由材料[${sources[0]!.citationId}]支持，` +
-      `且只依据检索摘要、未阅读原文，现实可行性有待核验。`
-    );
-  }
-
-  const supportCounts = viewpoints.map((vp) => {
-    const ids = new Set<number>();
-    for (const item of vp.evidence) for (const id of item.citationIds) ids.add(id);
-    return ids.size;
-  });
-  const allEqual = supportCounts.every((c) => c === supportCounts[0]);
-  const kinds = new Set(sources.map((s) => s.kindLabel));
-  const situational =
-    kinds.size > 1
-      ? '来自不同类型材料的立场适用情境不同：社区材料更贴近具体经验，外部检索材料更适合作为背景参照，个人历史材料只适用于其原本情境。'
-      : '这些立场来自同一类材料，适用场景相近，相互之间的可替代性较高。';
-
-  if (allEqual) {
-    return (
-      `材料呈现 ${viewpoints.length} 种立场，各立场均有独立依据支撑，不能断言某观点显著多于另一观点。` +
-      `${situational}共同局限：这里只依据检索摘要、未阅读原文也未经模型交叉综合，` +
-      `因此各立场的现实可行性均有待进一步核验。`
-    );
-  }
-
-  const strongest = supportCounts.indexOf(Math.max(...supportCounts));
-  return (
-    `材料呈现 ${viewpoints.length} 种立场，其中材料[${sources[strongest]!.citationId}]所代表的立场` +
-    `拥有相对更多的独立依据，支撑度更高；其余立场各有 ${supportCounts.filter((c) => c === 1).length} 条依据支持，更适合作为补充或反面对照。` +
-    `${situational}共同局限：这里只依据检索摘要，未阅读原文也未经模型交叉综合，` +
-    `因此各立场的现实可行性均有待进一步核验。`
-  );
+  return { viewpoints };
 }
 
 /** Turn grouped report sources into the numbered form both paths share. */

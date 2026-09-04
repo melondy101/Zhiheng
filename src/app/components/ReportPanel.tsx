@@ -42,8 +42,8 @@ function groupByType(sources: Source[]): Record<string, Source[]> {
   const groups: Record<string, Source[]> = {
     zhihu: [],
     web: [],
-    ai_synthesis: [],
     personal_history: [],
+    ai_synthesis: [],
   };
   for (const s of sources) {
     if (groups[s.type]) {
@@ -55,9 +55,9 @@ function groupByType(sources: Source[]): Record<string, Source[]> {
 
 const TYPE_LABELS: Record<string, string> = {
   zhihu: '知乎来源',
-  web: '外部资料',
-  ai_synthesis: 'AI 综合归纳',
-  personal_history: '个人历史报告',
+  web: '全网来源',
+  personal_history: '我的历史报告',
+  ai_synthesis: 'AI 综合分析',
 };
 
 /** #19: honest cache-time display on the cache badge. */
@@ -145,7 +145,7 @@ export default function ReportPanel({
       <h2 className="text-2xl font-bold mb-6">{report.title}</h2>
 
       {/* PRD v4.2 §3.3: title → 核心观点 (each with its own evidence) →
-          综合结论. Reports generated before `synthesis` existed degrade to an
+          知识图谱 → 分类引用。Reports generated before `synthesis` existed degrade to an
           explicit notice instead of a fabricated set of viewpoints. */}
       {report.synthesis && report.synthesis.viewpoints.length > 0 ? (
         <div className="bg-white rounded-lg border p-6 mb-4" data-testid="report-synthesis">
@@ -159,33 +159,22 @@ export default function ReportPanel({
                   观点 {index + 1}：{viewpoint.conclusion}
                 </p>
                 {viewpoint.evidence.length > 0 && (
-                  <ul
-                    className="list-disc list-inside space-y-1 text-sm text-gray-700 ml-2"
-                    data-testid="report-viewpoint-evidence"
-                  >
-                    {viewpoint.evidence.map((item, itemIndex) => (
-                      <li key={itemIndex}>
-                        {renderInlineCitations(
-                          `${item.summary} ${item.citationIds.map((id) => `[${id}]`).join('')}`
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="ml-2" data-testid="report-viewpoint-evidence">
+                    <h4 className="font-medium text-sm mb-1 text-gray-800">📖 主要内容</h4>
+                    <ul className="list-disc list-inside space-y-1 text-sm text-gray-700">
+                      {viewpoint.evidence.map((item, itemIndex) => (
+                        <li key={itemIndex}>
+                          {renderInlineCitations(
+                            `${item.summary} ${item.citationIds.map((id) => `[${id}]`).join('')}`
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </li>
             ))}
           </ol>
-          <div className="border-t pt-3">
-            <h3 className="font-semibold mb-2 text-blue-600" data-testid="report-synthesis-heading">
-              综合结论
-            </h3>
-            <p
-              className="text-sm leading-relaxed text-gray-700"
-              data-testid="report-synthesis-summary"
-            >
-              {report.synthesis.summary}
-            </p>
-          </div>
         </div>
       ) : (
         <div
@@ -193,70 +182,6 @@ export default function ReportPanel({
           data-testid="report-synthesis-legacy"
         >
           这份报告生成于「多观点」结构上线之前，未包含结构化的观点与依据；重新生成报告即可获得按观点组织的依据。
-        </div>
-      )}
-
-      {report.knowledgePoints.length > 0 && (
-        <div className="bg-white rounded-lg border p-6 mb-4">
-          <h3 className="font-semibold mb-3 text-blue-600">核心知识点</h3>
-          <ul className="list-disc list-inside space-y-1 text-sm">
-            {report.knowledgePoints.map((kp, i) => (
-              <li key={i}>{kp}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="bg-white rounded-lg border p-6 mb-4">
-        <h3 className="font-semibold mb-3">话题概述与主要内容</h3>
-        <div className="text-sm leading-relaxed">
-          {report.content.split('\n').map((line, i) => {
-            if (line.startsWith('## ')) {
-              return (
-                <h4 key={i} className="font-semibold text-base mt-4 mb-2 text-gray-800">
-                  {line.slice(3)}
-                </h4>
-              );
-            }
-            if (line.startsWith('### ')) {
-              return (
-                <h5 key={i} className="font-medium mt-4 mb-2 text-gray-900">
-                  {line.slice(4)}
-                </h5>
-              );
-            }
-            if (line === '') return <br key={i} />;
-            if (/^\d+\./.test(line.trim())) {
-              return (
-                <p key={i} className="ml-4 mb-1">
-                  {renderInlineCitations(line)}
-                </p>
-              );
-            }
-            if (line.trim().startsWith('- ')) {
-              return (
-                <p key={i} className="ml-4 mb-1">
-                  {renderInlineCitations(line.trim().slice(2))}
-                </p>
-              );
-            }
-            return (
-              <p key={i} className="mb-2">
-                {renderInlineCitations(line)}
-              </p>
-            );
-          })}
-        </div>
-      </div>
-
-      {report.viewpoints.length > 0 && (
-        <div className="bg-white rounded-lg border p-6 mb-4">
-          <h3 className="font-semibold mb-3">材料观点速览</h3>
-          <ul className="list-disc list-inside space-y-1 text-sm">
-            {report.viewpoints.map((vp, i) => (
-              <li key={i}>{vp}</li>
-            ))}
-          </ul>
         </div>
       )}
 
