@@ -145,8 +145,8 @@ export default function ReportPanel({
       <h2 className="text-2xl font-bold mb-6">{report.title}</h2>
 
       {/* PRD v4.2 §3.3: title → 核心观点 (each with its own evidence) →
-          知识图谱 → 分类引用。Reports generated before `synthesis` existed degrade to an
-          explicit notice instead of a fabricated set of viewpoints. */}
+          知识图谱 → 分类引用。When synthesis is unavailable, show an explicit
+          notice rather than a fabricated set of viewpoints. */}
       {report.synthesis && report.synthesis.viewpoints.length > 0 ? (
         <div className="bg-white rounded-lg border p-6 mb-4" data-testid="report-synthesis">
           <h3 className="font-semibold mb-4 text-blue-600" data-testid="report-viewpoints-heading">
@@ -181,7 +181,7 @@ export default function ReportPanel({
           className="bg-white rounded-lg border p-6 mb-4 text-sm text-gray-500"
           data-testid="report-synthesis-legacy"
         >
-          这份报告生成于「多观点」结构上线之前，未包含结构化的观点与依据；重新生成报告即可获得按观点组织的依据。
+          当前未能生成 AI 综合观点；材料仍保留在下方引用来源中。请在 AI 服务可用后重新生成报告。
         </div>
       )}
 

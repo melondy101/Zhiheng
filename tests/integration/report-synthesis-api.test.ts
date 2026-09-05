@@ -1,9 +1,8 @@
 // Ticket T2 (PRD v4.2 §3): the synthesis contract end to end.
 //
 // The route is exercised for real (no key in the test environment, so it
-// takes the deterministic material-based path), and the model path is
-// exercised through buildReport with an injected fake provider — including
-// the failure case, which must degrade instead of inventing viewpoints.
+// must not label material excerpts as AI viewpoints). The model path is
+// exercised through buildReport with an injected fake provider.
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { POST as reportPOST } from '../../src/app/api/report/route';
@@ -72,7 +71,7 @@ afterEach(() => {
 });
 
 describe('POST /api/report synthesis (PRD v4.2 §3)', () => {
-  it('returns a structured synthesis whose evidence is fully traceable', async () => {
+  it('does not fabricate core viewpoints when no AI synthesis is available', async () => {
     const request = new Request('http://localhost:3000/api/report', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-zhiyan-owner': TEST_OWNER },
@@ -82,16 +81,10 @@ describe('POST /api/report synthesis (PRD v4.2 §3)', () => {
     assert.strictEqual(response.status, 200);
     const body = (await response.json()) as ReportResponseBody;
 
-    assert.deepStrictEqual(synthesisViolations(body.report), []);
-
-    // A viewpoint is a claim, never a source title and never a bare excerpt.
-    const titles = new Set(body.report.references.map((s) => s.title?.trim() ?? ''));
-    for (const viewpoint of body.report.synthesis!.viewpoints) {
-      assert.ok(
-        !titles.has(viewpoint.conclusion),
-        `viewpoint must not be a source title: ${viewpoint.conclusion}`
-      );
-    }
+    assert.strictEqual(body.report.synthesis, undefined);
+    assert.deepStrictEqual(body.report.viewpoints, [
+      '当前未能生成 AI 综合观点；请在 AI 服务可用后重新生成报告。',
+    ]);
   });
 
   it('the report body no longer renders the removed standalone sections', async () => {
@@ -174,7 +167,7 @@ describe('buildReport synthesis wiring (PRD v4.2 §3)', () => {
     );
   });
 
-  it('falls back when the model throws, and still produces a valid synthesis', async () => {
+  it('omits synthesis when the model throws instead of turning excerpts into viewpoints', async () => {
     const { report } = await buildReport({
       question: 'AI 会取代程序员吗？',
       zhihuSources: [TWO_SOURCES[0]!],
@@ -184,30 +177,30 @@ describe('buildReport synthesis wiring (PRD v4.2 §3)', () => {
       }),
     });
 
-    assert.ok(report.synthesis, 'a model failure must still yield a synthesis');
-    assert.deepStrictEqual(synthesisViolations(report), []);
-    assert.strictEqual(report.synthesis!.viewpoints.length, 2);
+    assert.strictEqual(report.synthesis, undefined);
+    assert.deepStrictEqual(report.viewpoints, [
+      '当前未能生成 AI 综合观点；请在 AI 服务可用后重新生成报告。',
+    ]);
   });
 
-  it('falls back when the model declines (returns null)', async () => {
+  it('omits synthesis when the model declines (returns null)', async () => {
     const { report } = await buildReport({
       question: '测试问题',
       zhihuSources: [TWO_SOURCES[0]!],
       webSources: [],
       llmProvider: fakeLLM(async () => null),
     });
-    assert.ok(report.synthesis);
-    assert.strictEqual(report.synthesis!.viewpoints.length, 1);
+    assert.strictEqual(report.synthesis, undefined);
   });
 
-  it('one material yields exactly one viewpoint', async () => {
+  it('one material does not yield a viewpoint without AI synthesis', async () => {
     const { report } = await buildReport({
       question: '测试问题',
       zhihuSources: [TWO_SOURCES[0]!],
       webSources: [],
       llmProvider: fakeLLM(async () => null),
     });
-    assert.strictEqual(report.synthesis!.viewpoints.length, 1, 'no fabricated second viewpoint');
+    assert.strictEqual(report.synthesis, undefined);
   });
 
   it('no material yields no synthesis rather than an invented one', async () => {
@@ -236,11 +229,7 @@ describe('buildReport synthesis wiring (PRD v4.2 §3)', () => {
         ],
       })),
     });
-    // The provider returned it, but the builder validates nothing — the
-    // provider itself is responsible for validation. Here it is used as-is,
-    // which is exactly why the OpenAI provider throws instead of returning it.
-    assert.ok(report.synthesis);
-    // ...and the deterministic fallback is what a real model failure yields:
+    assert.strictEqual(report.synthesis, undefined, 'invalid model output must not be used');
     const fallback = await buildReport({
       question: 'AI 会取代程序员吗？',
       zhihuSources: [TWO_SOURCES[0]!],
@@ -249,10 +238,6 @@ describe('buildReport synthesis wiring (PRD v4.2 §3)', () => {
         throw new Error('synthesis failed validation');
       }),
     });
-    assert.notStrictEqual(
-      fallback.report.synthesis!.viewpoints[0]!.conclusion,
-      '社区讨论：AI 与工程岗位',
-      'the fallback never passes a source title off as a viewpoint'
-    );
+    assert.strictEqual(fallback.report.synthesis, undefined);
   });
 });

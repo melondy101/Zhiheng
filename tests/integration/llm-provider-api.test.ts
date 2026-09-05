@@ -32,6 +32,7 @@ const CONFIG: OpenAILLMConfig = {
   apiKey: 'test-key',
   model: 'test-model',
   timeoutMs: 5_000,
+  synthesisTimeoutMs: 5_000,
 };
 
 // #21: anonymous owner shared by the requests and the seeding.

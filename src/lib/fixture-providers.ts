@@ -58,9 +58,8 @@ export class FixtureLLMProvider implements LLMProvider {
 
   /**
    * The fixture has no model and therefore cannot synthesize viewpoints.
-   * Returning null (instead of a canned list) is what lets the report builder
-   * fall back to its deterministic, material-attributed synthesis — fixture
-   * output is never dressed up as a model synthesis.
+   * Returning null leaves the report without core viewpoints, rather than
+   * passing fixture text off as an AI-generated conclusion.
    */
   async generateSynthesis(): Promise<null> {
     return null;

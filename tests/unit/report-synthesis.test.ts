@@ -11,16 +11,15 @@ import assert from 'node:assert';
 import {
   MAX_EVIDENCE_SUMMARY_CHARS,
   MAX_SYNTHESIS_VIEWPOINTS,
-  buildFallbackSynthesis,
+  MAX_SOURCES_PER_SYNTHESIS_BATCH,
+  buildFinalSynthesisMessages,
   buildSynthesisMessages,
-  firstSentence,
   isLiftedFromMaterial,
   normalizeForComparison,
   parseSynthesisResponse,
-  toSynthesisSources,
+  partitionSynthesisSources,
   type SynthesisSource,
 } from '../../src/lib/report-synthesis';
-import type { Source } from '../../src/lib/providers';
 
 const SOURCES: SynthesisSource[] = [
   {
@@ -207,78 +206,6 @@ describe('isLiftedFromMaterial / normalizeForComparison', () => {
   });
 });
 
-describe('buildFallbackSynthesis — deterministic, material-based, honest', () => {
-  const toSources = (sources: Source[]): SynthesisSource[] => toSynthesisSources(sources);
-
-  const oneSource: Source[] = [
-    {
-      id: 'zh_1',
-      type: 'zhihu',
-      author: '张三',
-      title: 'AI 会取代程序员吗',
-      url: 'https://www.zhihu.com/q/1',
-      excerpt: '多数从业者认为短期内不会。因为需求理解与系统设计难以自动化。',
-    },
-  ];
-
-  it('produces exactly one viewpoint for one material', () => {
-    const result = buildFallbackSynthesis('测试问题', toSources(oneSource));
-    assert.ok(result);
-    assert.strictEqual(result.viewpoints.length, 1, 'a second viewpoint is never fabricated');
-  });
-
-  it('the conclusion is neither the source title nor a bare excerpt truncation', () => {
-    const result = buildFallbackSynthesis('测试问题', toSources(oneSource))!;
-    const conclusion = result.viewpoints[0]!.conclusion;
-    assert.notStrictEqual(conclusion, 'AI 会取代程序员吗', '观点不得是来源标题');
-    assert.notStrictEqual(conclusion, oneSource[0]!.excerpt, '观点不得是摘录原文');
-    assert.ok(conclusion.includes('[1]'), '观点必须标注来源');
-    assert.ok(!conclusion.endsWith('…'), '观点不得是截断的摘录');
-  });
-
-  it('the raw excerpt stays in the evidence, and the citation id is real', () => {
-    const result = buildFallbackSynthesis('测试问题', toSources(oneSource))!;
-    const evidence = result.viewpoints[0]!.evidence;
-    assert.strictEqual(evidence.length, 1);
-    assert.deepStrictEqual(evidence[0]!.citationIds, [1]);
-    assert.ok(evidence[0]!.summary.includes('多数从业者认为短期内不会'));
-  });
-
-  it('one viewpoint per material, capped, each with its own citation', () => {
-    const sources: Source[] = [1, 2, 3, 4].map((n) => ({
-      id: `s_${n}`,
-      type: 'web' as const,
-      author: null,
-      title: `材料 ${n}`,
-      url: null,
-      excerpt: `第 ${n} 条材料的论述内容。`,
-    }));
-    const result = buildFallbackSynthesis('测试问题', toSources(sources))!;
-    assert.strictEqual(result.viewpoints.length, MAX_SYNTHESIS_VIEWPOINTS);
-    const ids = result.viewpoints.flatMap((vp) => vp.evidence.flatMap((e) => e.citationIds));
-    assert.deepStrictEqual(ids, [1, 2, 3], 'evidence stays attributed to its own citation');
-  });
-
-  it('a material with no excerpt still yields an attributed, non-fabricated viewpoint', () => {
-    const sources: Source[] = [
-      { id: 's1', type: 'web', author: null, title: '无摘要材料', url: null, excerpt: null },
-    ];
-    const result = buildFallbackSynthesis('测试问题', toSources(sources))!;
-    assert.strictEqual(result.viewpoints.length, 1);
-    assert.ok(result.viewpoints[0]!.conclusion.includes('没有可引用的摘要'));
-    assert.deepStrictEqual(result.viewpoints[0]!.evidence[0]!.citationIds, [1]);
-  });
-
-  it('returns null when there is no material at all', () => {
-    assert.strictEqual(buildFallbackSynthesis('测试问题', []), null);
-  });
-
-});
-
-  it('无来源时返回 null 而非虚构综合', () => {
-    assert.strictEqual(buildFallbackSynthesis('测试问题', []), null);
-  });
-
 describe('buildSynthesisMessages', () => {
   it('asks for 1–3 core viewpoints and exhaustive direct support under each viewpoint', () => {
     const messages = buildSynthesisMessages({ question: '测试问题', sources: SOURCES });
@@ -303,10 +230,35 @@ describe('buildSynthesisMessages', () => {
   });
 });
 
-describe('firstSentence', () => {
-  it('returns the first complete sentence', () => {
-    assert.strictEqual(firstSentence('第一句。第二句。'), '第一句。');
-    assert.strictEqual(firstSentence('没有标点的整段'), '没有标点的整段');
-    assert.strictEqual(firstSentence('第一行\n第二行'), '第一行');
+describe('batched synthesis helpers', () => {
+  it('partitions material into batches of at most five without changing citation ids', () => {
+    const sources: SynthesisSource[] = Array.from({ length: 11 }, (_, index) => ({
+      citationId: index + 1,
+      title: `材料 ${index + 1}`,
+      excerpt: `材料 ${index + 1} 的摘要。`,
+      kindLabel: '外部检索材料',
+    }));
+    const batches = partitionSynthesisSources(sources);
+    assert.deepStrictEqual(batches.map((batch) => batch.length), [5, 5, 1]);
+    assert.strictEqual(MAX_SOURCES_PER_SYNTHESIS_BATCH, 5);
+    assert.deepStrictEqual(batches.flat().map((source) => source.citationId), sources.map((source) => source.citationId));
+  });
+
+  it('builds the final request from short candidate viewpoints while preserving original citations', () => {
+    const messages = buildFinalSynthesisMessages('测试问题', [
+      {
+        viewpoints: [
+          {
+            id: 'vp_1',
+            conclusion: '候选判断：自动化改变分工。',
+            evidence: [{ summary: '岗位结构会变化。', citationIds: [2] }],
+          },
+        ],
+      },
+    ]);
+    const user = messages[1]!.content;
+    assert.ok(user.includes('候选判断：自动化改变分工。'));
+    assert.ok(user.includes('[2]'));
+    assert.ok(!user.includes(SOURCES[0]!.excerpt!), 'final prompt must not resend raw materials');
   });
 });

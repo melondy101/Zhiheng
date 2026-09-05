@@ -11,9 +11,7 @@ import type {
   SourceState,
 } from './providers';
 import {
-  buildFallbackSynthesis,
   isSynthesisUsable,
-  sourceKindLabel,
   toSynthesisSources,
 } from './report-synthesis';
 
@@ -27,8 +25,8 @@ export interface ReportBuilderOptions {
   onProgress?: (progress: ReportProgress) => void;
   /**
    * Optional model used for the multiple-viewpoint synthesis (PRD v4.2 §3).
-   * When absent, or when the model fails, the deterministic material-based
-   * synthesis is used instead — never a fabricated set of viewpoints.
+   * When absent or unable to produce valid output, the report has no core
+   * viewpoints rather than presenting source excerpts as AI conclusions.
    */
   llmProvider?: LLMProvider | null;
 }
@@ -143,24 +141,19 @@ function buildKnowledgePoints(allSources: Source[]): string[] {
  * instead of truncating source excerpts — PRD v4.2 §3 forbids passing an
  * excerpt off as a viewpoint.
  */
-function buildViewpoints(synthesis: ReportSynthesis | null, allSources: Source[]): string[] {
+function buildViewpoints(synthesis: ReportSynthesis | null): string[] {
   if (synthesis && synthesis.viewpoints.length > 0) {
     return synthesis.viewpoints.map((vp, index) => `观点 ${index + 1}：${vp.conclusion}`);
   }
-  if (allSources.length === 0) {
-    return [
-      '暂无来源观点；需要先补充可追溯材料。',
-    ];
-  }
   return [
-    '当前材料未能归纳出可讨论的观点；需要先补充可追溯材料。',
+    '当前未能生成 AI 综合观点；请在 AI 服务可用后重新生成报告。',
   ];
 }
 
 /**
- * Build the structured synthesis: model first, deterministic fallback on
- * absence, failure or non-conforming output. One model attempt only — the
- * search calls already cost quota and PRD §2.2 forbids unbounded retries.
+ * Build the structured synthesis with one model attempt. If the model is
+ * unavailable, fails, or returns non-conforming output, return no synthesis:
+ * a material excerpt must never masquerade as an AI-generated viewpoint.
  */
 async function buildSynthesis(
   question: string,
@@ -168,24 +161,18 @@ async function buildSynthesis(
   llmProvider?: LLMProvider | null
 ): Promise<ReportSynthesis | null> {
   const request = { question, sources: toSynthesisSources(grouped) };
-  if (request.sources.length === 0) return null;
-  if (!llmProvider) return buildFallbackSynthesis(question, request.sources);
+  if (request.sources.length === 0 || !llmProvider?.generateSynthesis) return null;
 
   try {
-    if (!llmProvider.generateSynthesis) {
-      return buildFallbackSynthesis(question, request.sources);
-    }
     const synthesis = await llmProvider.generateSynthesis(request);
-    // A provider that returns null simply cannot synthesize — not an error.
     if (synthesis && isSynthesisUsable(synthesis, request.sources)) return synthesis;
   } catch (err) {
     console.warn(
-      '[report] LLM synthesis failed — using the material-based synthesis:',
+      '[report] LLM synthesis failed — omitting AI-generated viewpoints:',
       err instanceof Error ? err.message : String(err)
     );
-    return buildFallbackSynthesis(question, request.sources);
   }
-  return buildFallbackSynthesis(question, request.sources);
+  return null;
 }
 
 /**
@@ -261,7 +248,7 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
   const title = buildTitle(options.question);
   const knowledgePoints = buildKnowledgePoints(grouped);
   const synthesis = await buildSynthesis(options.question, grouped, options.llmProvider);
-  const viewpoints = buildViewpoints(synthesis, grouped);
+  const viewpoints = buildViewpoints(synthesis);
   const structuredViewpoints = buildStructuredViewpoints(options.question, grouped);
 
   // Stage 4: Complete

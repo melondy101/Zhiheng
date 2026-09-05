@@ -17,6 +17,7 @@ import assert from 'node:assert';
 import {
   DEFAULT_LLM_BASE_URL,
   DEFAULT_LLM_TIMEOUT_MS,
+  DEFAULT_SYNTHESIS_TIMEOUT_MS,
   EVIDENCE_EXCERPT_MAX_CHARS,
   EVIDENCE_TITLE_MAX_CHARS,
   MAX_QUESTION_CHARS,
@@ -44,6 +45,7 @@ const CONFIG: OpenAILLMConfig = {
   apiKey: 'test-key',
   model: 'test-model',
   timeoutMs: 5_000,
+  synthesisTimeoutMs: 5_000,
 };
 
 interface CapturedLLMCall {
@@ -166,6 +168,7 @@ describe('readOpenAILLMConfig', () => {
     assert.ok(config);
     assert.strictEqual(config.baseUrl, DEFAULT_LLM_BASE_URL);
     assert.strictEqual(config.timeoutMs, DEFAULT_LLM_TIMEOUT_MS);
+    assert.strictEqual(config.synthesisTimeoutMs, DEFAULT_SYNTHESIS_TIMEOUT_MS);
     assert.strictEqual(config.apiKey, 'k');
     assert.strictEqual(config.model, 'm');
   });
@@ -439,6 +442,80 @@ describe('OpenAICompatibleLLMProvider: success path', () => {
     const ok = makeProvider(() => jsonResponse(chatResponse(VALID_QUESTION)));
     await ok.provider.generateStrategyQuestion('M1_evidence', session);
     assert.strictEqual(JSON.stringify(session), snapshot);
+  });
+});
+
+describe('OpenAICompatibleLLMProvider: batched report synthesis', () => {
+  const sixSources = Array.from({ length: 6 }, (_, index) => ({
+    citationId: index + 1,
+    title: `材料 ${index + 1}`,
+    excerpt: `第 ${index + 1} 条材料提供了独立论据。`,
+    kindLabel: '外部检索材料',
+  }));
+
+  it('runs first-pass batches and then makes one final cited synthesis request', async () => {
+    const { provider, calls } = makeProvider((_url, options) => {
+      const body = JSON.parse(options.body) as { messages: Array<{ content: string }> };
+      const user = body.messages[1]!.content;
+      if (user.includes('分组候选发现')) {
+        return jsonResponse(chatResponse(JSON.stringify({
+          viewpoints: [{
+            conclusion: '自动化的影响取决于任务重组方式。',
+            evidence: [{ summary: '两个分组都指出工作内容会改变。', citationIds: [1, 6] }],
+          }],
+        })));
+      }
+      const citationId = user.includes('[6]') ? 6 : 1;
+      return jsonResponse(chatResponse(JSON.stringify({
+        viewpoints: [{
+          conclusion: `第 ${citationId} 组材料形成了可讨论判断。`,
+          evidence: [{ summary: '该组材料提供了直接论据。', citationIds: [citationId] }],
+        }],
+      })));
+    });
+
+    const synthesis = await provider.generateSynthesis({ question: '测试问题', sources: sixSources });
+    assert.ok(synthesis);
+    assert.strictEqual(calls.length, 3, 'two first-pass batches plus one final pass');
+    assert.deepStrictEqual(synthesis.viewpoints[0]!.evidence[0]!.citationIds, [1, 6]);
+    const finalUser = JSON.parse(calls[2]!.options.body).messages[1].content as string;
+    assert.ok(finalUser.includes('分组候选发现'));
+    assert.ok(!finalUser.includes(sixSources[0]!.excerpt!), 'final pass must not resend raw excerpts');
+  });
+
+  it('continues to the final pass when one first-pass batch fails', async () => {
+    const { provider, calls } = makeProvider((_url, options) => {
+      const user = (JSON.parse(options.body) as { messages: Array<{ content: string }> }).messages[1]!.content;
+      if (user.includes('分组候选发现')) {
+        return jsonResponse(chatResponse(JSON.stringify({
+          viewpoints: [{
+            conclusion: '剩余材料仍能支持一个可讨论判断。',
+            evidence: [{ summary: '成功分组提供了依据。', citationIds: [1] }],
+          }],
+        })));
+      }
+      if (user.includes('[6]')) return jsonResponse({ error: 'temporary failure' }, 500);
+      return jsonResponse(chatResponse(JSON.stringify({
+        viewpoints: [{
+          conclusion: '第一组材料形成了可讨论判断。',
+          evidence: [{ summary: '第一组提供了依据。', citationIds: [1] }],
+        }],
+      })));
+    });
+
+    const synthesis = await provider.generateSynthesis({ question: '测试问题', sources: sixSources });
+    assert.ok(synthesis);
+    assert.strictEqual(calls.length, 3, 'the successful batch is still finalized after another batch fails');
+    assert.deepStrictEqual(synthesis.viewpoints[0]!.evidence[0]!.citationIds, [1]);
+  });
+
+  it('uses an independent timeout for report synthesis', () => {
+    assert.strictEqual(
+      readOpenAILLMConfig({
+        LLM_API_KEY: 'k', LLM_MODEL: 'm', LLM_SYNTHESIS_TIMEOUT_MS: '45000',
+      })?.synthesisTimeoutMs,
+      45_000
+    );
   });
 });
 

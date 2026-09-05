@@ -4,20 +4,11 @@
 // and which is better supported / more feasible" — never by stacking
 // materials or by truncating abstracts into fake viewpoints.
 //
-// Two paths, one contract:
-//
-//   1. LLM path — an OpenAI-compatible model returns strict JSON which is
-//      validated field by field. Anything that is a source title, a lift from
-//      an excerpt, or points at a citation that does not exist is REJECTED,
-//      not relaxed.
-//   2. Deterministic fallback — used when no model is configured, the call
-//      fails, or the model output does not survive validation. It states each
-//      material's position and attributes it; it never invents a second
-//      viewpoint when only one material exists.
-//
-// Honesty red lines: the fallback is not dressed up as a model synthesis,
-// evidence always carries real citation ids, and a viewpoint with no valid
-// evidence is dropped rather than padded.
+// The model path returns strict JSON and is validated field by field. Anything
+// that is a source title, a lift from an excerpt, or points at a citation that
+// does not exist is rejected, not relaxed. If a valid AI synthesis cannot be
+// produced, the report has no core viewpoints; material text is never promoted
+// into a viewpoint by a deterministic fallback.
 
 import type {
   ReportEvidence,
@@ -29,6 +20,8 @@ import type {
 export const MAX_SYNTHESIS_VIEWPOINTS = 3;
 export const MAX_CONCLUSION_CHARS = 200;
 export const MAX_EVIDENCE_SUMMARY_CHARS = 320;
+/** Keep each first-pass model request small enough for predictable latency. */
+export const MAX_SOURCES_PER_SYNTHESIS_BATCH = 5;
 
 /** Prompt/serialization limits so one report cannot blow up the request. */
 export const SOURCE_TITLE_MAX_CHARS = 60;
@@ -96,6 +89,54 @@ export function buildSynthesisMessages(request: SynthesisRequest): Array<{
   return [
     { role: 'system', content: SYNTHESIS_SYSTEM_PROMPT },
     { role: 'user', content: user },
+  ];
+}
+
+/** Split source material without rewriting its report-wide citation ids. */
+export function partitionSynthesisSources(sources: SynthesisSource[]): SynthesisSource[][] {
+  const batches: SynthesisSource[][] = [];
+  for (let index = 0; index < sources.length; index += MAX_SOURCES_PER_SYNTHESIS_BATCH) {
+    batches.push(sources.slice(index, index + MAX_SOURCES_PER_SYNTHESIS_BATCH));
+  }
+  return batches;
+}
+
+/**
+ * Build the second-pass request from compact, cited first-pass findings.
+ * The final model sees the candidate conclusions and their original citation
+ * ids, never the complete raw material set again.
+ */
+export function buildFinalSynthesisMessages(
+  question: string,
+  candidates: ReportSynthesis[]
+): Array<{ role: 'system' | 'user'; content: string }> {
+  const candidateLines = candidates.flatMap((candidate, batchIndex) =>
+    candidate.viewpoints.map((viewpoint, viewpointIndex) => [
+      `分组 ${batchIndex + 1} / 候选 ${viewpointIndex + 1}：${viewpoint.conclusion}`,
+      ...viewpoint.evidence.map(
+        (evidence) => `依据：${evidence.summary} ${evidence.citationIds.map((id) => `[${id}]`).join('')}`
+      ),
+    ].join('\n'))
+  );
+
+  return [
+    {
+      role: 'system',
+      content:
+        '你是"知研"报告综合器。根据若干已引用的候选发现，归并、去重并产出最终核心观点。' +
+        '每个观点必须是重新组织后的可讨论判断，不能照抄候选结论。只输出 JSON，不要解释或 markdown。',
+    },
+    {
+      role: 'user',
+      content: [
+        `问题：${question}`,
+        '',
+        '分组候选发现：',
+        ...candidateLines,
+        '',
+        SYNTHESIS_CONSTRAINTS,
+      ].join('\n'),
+    },
   ];
 }
 
@@ -239,10 +280,6 @@ export function isSynthesisUsable(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic fallback — honest, attributed, never fabricating
-// ---------------------------------------------------------------------------
-
 export function sourceKindLabel(source: Source): string {
   switch (source.type) {
     case 'zhihu': return '知乎社区材料';
@@ -250,50 +287,6 @@ export function sourceKindLabel(source: Source): string {
     case 'personal_history': return '个人历史材料';
     case 'ai_synthesis': return 'AI 综合材料';
   }
-}
-
-/** The first complete sentence of a text, or the whole text when unbreakable. */
-export function firstSentence(text: string): string {
-  const match = text.match(/^[^。！？!?.；;\n]+[。！？!?]?/);
-  const sentence = (match ? match[0] : text).trim();
-  return sentence.length > 0 ? sentence : text.trim();
-}
-
-/**
- * Build the synthesis without a model: each material's own position, stated
- * as a claim and attributed to its citation. The raw excerpt stays in the
- * evidence, never in the conclusion. One material yields exactly one
- * viewpoint — a second one is never invented.
- */
-export function buildFallbackSynthesis(
-  _question: string,
-  sources: SynthesisSource[]
-): ReportSynthesis | null {
-  if (sources.length === 0) return null;
-
-  const viewpoints: ReportViewpoint[] = sources
-    .slice(0, MAX_SYNTHESIS_VIEWPOINTS)
-    .map((source, index) => {
-      const excerpt = source.excerpt?.trim();
-      const claim = excerpt
-        ? truncate(firstSentence(excerpt), 120)
-        : '该材料没有可引用的摘要，暂不能归纳其具体立场';
-      const conclusion = `材料[${source.citationId}]的立场：${claim}`;
-      return {
-        id: `vp_${index + 1}`,
-        conclusion,
-        evidence: [
-          {
-            summary: excerpt
-              ? truncate(excerpt, MAX_EVIDENCE_SUMMARY_CHARS)
-              : `${source.kindLabel}未提供可引用摘要，不能作为判断依据。`,
-            citationIds: [source.citationId],
-          },
-        ],
-      };
-    });
-
-  return { viewpoints };
 }
 
 /** Turn grouped report sources into the numbered form both paths share. */
