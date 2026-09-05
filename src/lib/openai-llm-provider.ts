@@ -29,8 +29,18 @@
 import type { LLMProvider, ReportSynthesis, Session } from './providers';
 import { STRATEGIES, type StrategyId } from './strategy-engine';
 import { buildInterrogationContext, selectRoundSources } from './interrogation-context';
-import { buildSynthesisMessages, parseSynthesisResponse } from './report-synthesis';
-import type { SynthesisRequest } from './report-synthesis';
+import { logRequest, maskSensitiveHeaders, previewBody } from './request-log';
+import {
+  buildFinalSynthesisMessages,
+  buildSynthesisMessages,
+  parseSynthesisResponse,
+  partitionSynthesisSources,
+} from './report-synthesis';
+import type { SynthesisRequest, SynthesisSource } from './report-synthesis';
+import { logStartupPath } from './startup-log';
+
+// Log environment configuration on module load (once).
+logStartupPath();
 
 // ---------------------------------------------------------------------------
 // Server-side configuration (env-only, never exposed to the browser)
@@ -38,6 +48,8 @@ import type { SynthesisRequest } from './report-synthesis';
 
 export const DEFAULT_LLM_BASE_URL = 'https://api.openai.com/v1';
 export const DEFAULT_LLM_TIMEOUT_MS = 10_000;
+/** Reports tolerate slower model responses than interactive follow-up questions. */
+export const DEFAULT_SYNTHESIS_TIMEOUT_MS = 45_000;
 
 /** Maximum characters of a validated model question (issue #20 guardrail). */
 export const MAX_QUESTION_CHARS = 500;
@@ -53,6 +65,7 @@ export interface OpenAILLMConfig {
   apiKey: string;
   model: string;
   timeoutMs: number;
+  synthesisTimeoutMs: number;
 }
 
 /**
@@ -67,10 +80,13 @@ export function readOpenAILLMConfig(
   const model = env.LLM_MODEL?.trim();
   if (!apiKey || !model) return null;
   const baseUrl = (env.LLM_BASE_URL?.trim() || DEFAULT_LLM_BASE_URL).replace(/\/+$/, '');
-  const timeoutRaw = Number(env.LLM_TIMEOUT_MS?.trim());
-  const timeoutMs =
-    Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : DEFAULT_LLM_TIMEOUT_MS;
-  return { baseUrl, apiKey, model, timeoutMs };
+  const readTimeout = (value: string | undefined, fallback: number) => {
+    const timeout = Number(value?.trim());
+    return Number.isFinite(timeout) && timeout > 0 ? timeout : fallback;
+  };
+  const timeoutMs = readTimeout(env.LLM_TIMEOUT_MS, DEFAULT_LLM_TIMEOUT_MS);
+  const synthesisTimeoutMs = readTimeout(env.LLM_SYNTHESIS_TIMEOUT_MS, DEFAULT_SYNTHESIS_TIMEOUT_MS);
+  return { baseUrl, apiKey, model, timeoutMs, synthesisTimeoutMs };
 }
 
 // ---------------------------------------------------------------------------
@@ -298,27 +314,55 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
   /**
    * Synthesize the report's multiple viewpoints (PRD v4.2 §3). Unlike the
    * question path there is no template to degrade into, so a non-conforming
-   * response throws once and the caller records the degradation and uses its
-   * own deterministic synthesis. This method never retries: report generation
-   * already costs search quota and PRD §2.2 forbids unbounded retries.
+   * For more than five materials, first-pass requests run in parallel and a
+   * compact, cited candidate set is sent to one final pass. Failed groups are
+   * discarded; a final result is accepted only when it cites original report
+   * materials. This method never retries a failed call.
    */
   async generateSynthesis(request: SynthesisRequest): Promise<ReportSynthesis | null> {
     if (request.sources.length === 0) return null;
 
-    const messages = buildSynthesisMessages(request);
+    const batches = partitionSynthesisSources(request.sources);
+    if (batches.length === 1) {
+      return this.generateSynthesisPass(buildSynthesisMessages(request), request.sources);
+    }
+
+    const settled = await Promise.allSettled(
+      batches.map((sources) =>
+        this.generateSynthesisPass(buildSynthesisMessages({ question: request.question, sources }), sources)
+      )
+    );
+    const candidates = settled.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : []
+    );
+    if (candidates.length === 0) {
+      throw new Error('LLM synthesis failed for every material batch');
+    }
+
+    return this.generateSynthesisPass(
+      buildFinalSynthesisMessages(request.question, candidates),
+      request.sources
+    );
+  }
+
+  private async generateSynthesisPass(
+    messages: Array<{ role: 'system' | 'user'; content: string }>,
+    validationSources: SynthesisSource[]
+  ): Promise<ReportSynthesis> {
     const body = await this.postChatCompletion(
       JSON.stringify({
         model: this.config.model,
         messages,
         temperature: 0.3,
         max_tokens: 2048,
-      })
+      }),
+      this.config.synthesisTimeoutMs
     );
     const content = extractChoiceContent(body);
     if (content === null) {
       throw new Error('LLM API returned an unexpected response shape');
     }
-    const synthesis = parseSynthesisResponse(content, request.sources);
+    const synthesis = parseSynthesisResponse(content, validationSources);
     if (!synthesis) {
       throw new Error(
         'LLM synthesis failed validation (unparseable, or every viewpoint was a source title, an excerpt lift, or unbacked by a real citation)'
@@ -331,35 +375,131 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
    * POST {baseUrl}/chat/completions with both an abort signal (cancels a real
    * fetch) and a hard timeout race (a transport that ignores the signal still
    * cannot stall the caller). Non-200 status or unparseable JSON throws.
+   *
+   * Every call emits a [req:llm_chat] log line (start / success / failure)
+   * so operators see model, message structure, latency, and the first bytes
+   * of the response — never the API key.
    */
-  private async postChatCompletion(requestBody: string): Promise<unknown> {
+  private async postChatCompletion(
+    requestBody: string,
+    timeoutMs = this.config.timeoutMs
+  ): Promise<unknown> {
     const url = `${this.config.baseUrl}/chat/completions`;
+    const headers = {
+      Authorization: `Bearer ${this.config.apiKey}`,
+      'Content-Type': 'application/json',
+    };
+    const startedAt = Date.now();
+
+    // Pull model + message shape from the request body for the start log.
+    // We parse defensively — a malformed requestBody should not break logging.
+    let model = this.config.model;
+    let messageRoles: string[] = [];
+    try {
+      const parsed = JSON.parse(requestBody) as { model?: string; messages?: Array<{ role: string }> };
+      if (typeof parsed.model === 'string') model = parsed.model;
+      if (Array.isArray(parsed.messages)) messageRoles = parsed.messages.map((m) => m.role);
+    } catch {
+      // ignore — logging should never throw
+    }
+
+    logRequest({
+      stage: 'llm_chat',
+      phase: 'start',
+      url,
+      method: 'POST',
+      headers: maskSensitiveHeaders(headers),
+      bodyPreview: `model=${model}, messages=[${messageRoles.join(', ')}], body=${previewBody(requestBody)}`,
+      durationMs: 0,
+    });
+
     const controller = new AbortController();
-    const abortTimer = setTimeout(() => controller.abort(), this.config.timeoutMs);
+    const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(
-        () => reject(new Error(`LLM API timeout after ${this.config.timeoutMs}ms`)),
-        this.config.timeoutMs
+        () => reject(new Error(`LLM API timeout after ${timeoutMs}ms`)),
+        timeoutMs
       );
     });
     try {
       const response = await Promise.race([
         this.transport(url, {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.config.apiKey}`,
-            'Content-Type': 'application/json',
-          },
+          headers,
           body: requestBody,
           signal: controller.signal,
         }),
         timeoutPromise,
       ]);
+      const durationMs = Date.now() - startedAt;
+      const contentType = response.headers.get('content-type');
+      const bodyText = await response.text();
+      const responsePreview = previewBody(bodyText);
       if (response.status !== 200) {
+        logRequest({
+          stage: 'llm_chat',
+          phase: 'failure',
+          url,
+          method: 'POST',
+          headers: maskSensitiveHeaders(headers),
+          bodyPreview: `model=${model}`,
+          status: response.status,
+          contentType,
+          durationMs,
+          error: `LLM API HTTP ${response.status}`,
+          responsePreview,
+        });
         throw new Error(`LLM API HTTP ${response.status}`);
       }
-      return await response.json();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch (err) {
+        logRequest({
+          stage: 'llm_chat',
+          phase: 'failure',
+          url,
+          method: 'POST',
+          headers: maskSensitiveHeaders(headers),
+          bodyPreview: `model=${model}`,
+          status: response.status,
+          contentType,
+          durationMs,
+          error: `LLM API returned non-JSON body: ${err instanceof Error ? err.message : String(err)}`,
+          responsePreview,
+        });
+        throw new Error('LLM API returned non-JSON body');
+      }
+      const content = extractChoiceContent(parsed);
+      logRequest({
+        stage: 'llm_chat',
+        phase: 'success',
+        url,
+        method: 'POST',
+        headers: maskSensitiveHeaders(headers),
+        bodyPreview: `model=${model}`,
+        status: response.status,
+        contentType,
+        durationMs,
+        responsePreview: content ? `content=${previewBody(content)}` : responsePreview,
+      });
+      return parsed;
+    } catch (err) {
+      const knownLLMError = err instanceof Error && err.message.startsWith('LLM ');
+      if (!knownLLMError) {
+        logRequest({
+          stage: 'llm_chat',
+          phase: 'failure',
+          url,
+          method: 'POST',
+          headers: maskSensitiveHeaders(headers),
+          bodyPreview: `model=${model}`,
+          durationMs: Date.now() - startedAt,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      throw err;
     } finally {
       clearTimeout(abortTimer);
       if (timeoutId !== undefined) clearTimeout(timeoutId);

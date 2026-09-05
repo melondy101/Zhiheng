@@ -106,6 +106,13 @@ export async function POST(request: Request) {
     historyProvider.search(question, parsedHistorySessions, excludedHistoryIds as string[]),
   ]);
 
+  // Log the actual retrieval results for debugging
+  console.log('[report] Retrieval results:', {
+    zhihu: { count: zhihuResult.sources.length, source: zhihuResult.source, stale: zhihuResult.stale, updatedAt: zhihuResult.updatedAt },
+    web: { count: webResult.sources.length, source: webResult.source, stale: webResult.stale, updatedAt: webResult.updatedAt },
+    history: { count: historyResult.sources.length },
+    question,
+  });
   const zhihuSourceState: SourceState = zhihuResult.source;
   const webSourceState: SourceState = webResult.source;
 
@@ -124,6 +131,10 @@ export async function POST(request: Request) {
   // LLM_API_KEY the server-providers module hands over the fixture, which
   // declines to synthesize — the report then states each material's own
   // position instead of inventing viewpoints.
+  console.log('[report] Building report with llmProvider:', {
+    hasLLM: !!llmProvider.generateSynthesis,
+    llmProviderType: llmProvider.constructor.name,
+  });
   const { report, progress } = await buildReport({
     question,
     zhihuSources: zhihuResult.sources,
@@ -196,6 +207,14 @@ export async function POST(request: Request) {
     webSourceState: p.webSourceState ?? webSourceState,
   }));
 
+  console.log('[report] Final report summary:', {
+    title: report.title,
+    knowledgePointsCount: report.knowledgePoints.length,
+    viewpointsCount: report.viewpoints.length,
+    referencesCount: report.references.length,
+    hasSynthesis: !!report.synthesis,
+    sourceState,
+  });
   return NextResponse.json({
     sessionId: session.id,
     report,

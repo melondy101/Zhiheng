@@ -28,6 +28,11 @@ import type { Source, SourceState } from './providers';
 import { getDemoSources } from './demo-sources';
 import type { HotlistItem } from './hotlist-providers';
 import type { HotlistSnapshot, HotlistSnapshotStore } from './db/hotlist-snapshot-store';
+import { logStartupPath } from './startup-log';
+import { logRequest, maskSensitiveHeaders, nowMs, previewBody, redactQuery } from './request-log';
+
+// Log environment configuration on module load (once).
+logStartupPath();
 
 export const DEFAULT_ZHIHU_API_BASE_URL = 'https://developer.zhihu.com';
 export const RETRIEVAL_TTL_MS = 86_400_000; // 24 hours
@@ -281,9 +286,13 @@ async function retrieveWithDegradation<T>(call: DegradedCall<T>): Promise<Degrad
         return { value: live, source: 'live', updatedAt: call.now() };
       }
       // Unusable live payload — treated like any other external failure.
-    } catch {
-      // Timeout / network error / HTTP 401/403/429/451/5xx / invalid body —
-      // degrade to the next level, never throw.
+    } catch (err) {
+      // #19 honest degradation: surface the real failure so we never silently
+      // claim 'live' succeeded. Operators need to see 401/timeout/parse errors.
+      console.warn(
+        `[zhihu-retrieval] live ${call.kind} failed — degrading:`,
+        err instanceof Error ? err.message : String(err)
+      );
     }
   }
 
@@ -324,9 +333,32 @@ function buildHeaders(config: ZhihuApiConfig, now: () => number): Record<string,
  * GET with both an abort signal (cancels a real fetch) and a hard timeout
  * race (a transport that ignores the signal still cannot stall the caller).
  * Non-200 status or unparseable JSON throws — the degradation core catches it.
+ *
+ * Every call emits a [req:zhihu_search|global_search|zhihu_hotlist] log line
+ * (start / success / failure) so operators can see exactly which URL the
+ * upstream returned on, with status + first body bytes — never the secret.
  */
-async function getJson(o: LiveCallOptions, path: string, query: string | null): Promise<unknown> {
+async function getJson(
+  o: LiveCallOptions,
+  path: string,
+  query: string | null,
+  stage: 'zhihu_hotlist' | 'zhihu_search' | 'global_search' = 'zhihu_search'
+): Promise<unknown> {
   const url = query === null ? `${o.config.baseUrl}${path}` : `${o.config.baseUrl}${path}?${query}`;
+  const safeQuery = redactQuery(query);
+  const headers = maskSensitiveHeaders(buildHeaders(o.config, o.now));
+  const startedAt = nowMs();
+
+  logRequest({
+    stage,
+    phase: 'start',
+    url,
+    method: 'GET',
+    query: safeQuery,
+    headers,
+    durationMs: 0,
+  });
+
   const controller = new AbortController();
   const abortTimer = setTimeout(() => controller.abort(), o.timeoutMs);
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -342,10 +374,73 @@ async function getJson(o: LiveCallOptions, path: string, query: string | null): 
       }),
       timeoutPromise,
     ]);
+    const durationMs = nowMs() - startedAt;
+    const contentType = response.headers.get('content-type');
+    // Always read at least a short slice of the body so we can log the
+    // {"Code":30001,"Message":"rate limit exceeded"} payload that drives
+    // demo degradation — the symptom operators need to see.
+    const bodyText = await response.text();
+    const responsePreview = previewBody(bodyText);
     if (response.status !== 200) {
+      logRequest({
+        stage,
+        phase: 'failure',
+        url,
+        method: 'GET',
+        query: safeQuery,
+        headers,
+        durationMs,
+        status: response.status,
+        contentType,
+        error: `Zhihu API HTTP ${response.status}`,
+        responsePreview,
+      });
       throw new Error(`Zhihu API HTTP ${response.status}`);
     }
-    return await response.json();
+    logRequest({
+      stage,
+      phase: 'success',
+      url,
+      method: 'GET',
+      query: safeQuery,
+      headers,
+      durationMs,
+      status: response.status,
+      contentType,
+      responsePreview,
+    });
+    try {
+      return JSON.parse(bodyText);
+    } catch (err) {
+      logRequest({
+        stage,
+        phase: 'failure',
+        url,
+        method: 'GET',
+        query: safeQuery,
+        headers,
+        durationMs,
+        status: response.status,
+        contentType,
+        error: `Zhihu API returned non-JSON body: ${err instanceof Error ? err.message : String(err)}`,
+        responsePreview,
+      });
+      throw new Error('Zhihu API returned non-JSON body');
+    }
+  } catch (err) {
+    if (!(err instanceof Error && err.message.startsWith('Zhihu API '))) {
+      logRequest({
+        stage,
+        phase: 'failure',
+        url,
+        method: 'GET',
+        query: safeQuery,
+        headers,
+        durationMs: nowMs() - startedAt,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    throw err;
   } finally {
     clearTimeout(abortTimer);
     if (timeoutId !== undefined) clearTimeout(timeoutId);
@@ -415,7 +510,8 @@ export class LiveSearchProvider {
         const body = await getJson(
           { config, transport: this.transport, timeoutMs: this.timeoutMs, now: this.now },
           SEARCH_ENDPOINTS[this.kind],
-          `Query=${encodeURIComponent(question.trim())}&Count=${this.count}`
+          `Query=${encodeURIComponent(question.trim())}&Count=${this.count}`,
+          this.kind
         );
         const items = extractItems(body);
         if (items === null) throw new Error('Zhihu API returned an unexpected response shape');
@@ -511,9 +607,13 @@ export class LiveHotlistProvider {
     try {
       const items = await this.fetchLiveItems();
       return { items, source: 'live', updatedAt: this.now() };
-    } catch {
-      // Timeout / network / HTTP 4xx-5xx / invalid body / unconfigured —
-      // honest degradation to demo, no cache label.
+    } catch (err) {
+      // #19 honest degradation: surface the real failure so we never silently
+      // claim 'live' succeeded. Operators need to see 401/timeout/parse errors.
+      console.warn(
+        `[zhihu-retrieval] live hotlist failed — degrading to demo:`,
+        err instanceof Error ? err.message : String(err)
+      );
     }
     return {
       items: DEMO_HOTLIST_ITEMS.map((item) => ({ ...item })),
@@ -529,7 +629,8 @@ export class LiveHotlistProvider {
     const body = await getJson(
       { config, transport: this.transport, timeoutMs: this.timeoutMs, now: this.now },
       HOTLIST_ENDPOINT,
-      null
+      null,
+      'zhihu_hotlist'
     );
     const items = extractItems(body);
     if (items === null) throw new Error('Zhihu API returned an unexpected response shape');
