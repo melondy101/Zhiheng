@@ -160,6 +160,18 @@ export interface Session {
   updatedAt: number;
   /** Session IDs to exclude from history search results */
   excludedHistoryIds?: string[];
+  /** #Q-01 / #D-03: Session mode ('quick' | 'deep' | 'fun' | 'story'). */
+  mode?: import('./mode-config').SessionMode;
+  /** #Q-01 / #Q-02: Interrogation phase ('orientation' | 'transitionChoice' | 'interrogation' | 'completed'). */
+  phase?: import('./mode-config').SessionPhase;
+  /** #Q-02: Quick target for targeted orientation ('clarify_position' | 'weigh_decision' | 'refine_expression'). */
+  target?: import('./mode-config').QuickTargetId | null;
+  /** #Q-01: Number of orientation dialogue rounds completed. */
+  orientationRounds?: number;
+  /** #Q-02: Selected transition choice. */
+  transitionChoice?: import('./mode-config').TransitionActionId | null;
+  /** #D-03: Recorded cognitive trajectory events. */
+  cognitiveTrajectory?: import('./cognitive-trajectory').CognitiveTrajectoryEvent[];
   /**
    * Server-owned interrogation state (#15). The orchestration API is the only
    * writer; the client mirrors it into local storage as the refresh/reload
@@ -220,10 +232,21 @@ export interface InterrogationState {
    * strategy question.
    */
   lastIntent?: 'question' | 'response';
+  mode?: import('./mode-config').SessionMode;
+  phase?: import('./mode-config').SessionPhase;
+  target?: import('./mode-config').QuickTargetId | null;
+  orientationRounds?: number;
+  transitionChoice?: import('./mode-config').TransitionActionId | null;
 }
 
-/** Actions accepted by the interrogation orchestration API (#15, #17). */
-export type InterrogateAction = 'start' | 'answer' | 'continue' | 'complete';
+/** Actions accepted by the interrogation orchestration API (#15, #17, #Q-02). */
+export type InterrogateAction =
+  | 'start'
+  | 'answer'
+  | 'continue'
+  | 'complete'
+  | 'transition'
+  | 'set_target';
 
 /** Uncertain-answer hint returned by the orchestration API (#10 semantics). */
 export interface InterrogateHint {
@@ -287,6 +310,18 @@ export interface InterrogateResponseBody {
    * round). The UI renders 继续聊 / 生成总结 when this is true.
    */
   suggestSummary?: boolean;
+  /** #Q-01 / #D-03: Current active session mode. */
+  mode?: import('./mode-config').SessionMode;
+  /** #Q-01 / #Q-02: Current interrogation phase. */
+  phase?: import('./mode-config').SessionPhase;
+  /** #Q-02: Quick target for targeted orientation. */
+  target?: import('./mode-config').QuickTargetId | null;
+  /** #Q-01: Orientation rounds completed. */
+  orientationRounds?: number;
+  /** #Q-02: Available transition action cards if in transitionChoice phase. */
+  transitionActions?: import('./mode-config').TransitionAction[];
+  /** #D-03: Cognitive trajectory events. */
+  cognitiveTrajectory?: import('./cognitive-trajectory').CognitiveTrajectoryEvent[];
 }
 
 export interface ResultCard {

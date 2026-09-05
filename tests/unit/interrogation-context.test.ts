@@ -251,8 +251,12 @@ describe('FixtureLLMProvider context-driven questions (#16)', () => {
     const expectedPhrases: Record<StrategyId, string> = {
       M1_evidence: '具体的数据或例子',
       M2_premise: '隐含的前提',
+      M3_anchoring: '最初吸引你的事实',
       M4_steelman: '对立观点重新论证',
+      M5_system2: '系统二激活',
       M6_reversal: '相反的立场辩护',
+      M7_metacognition: '元认知',
+      M8_contradiction: '冲突',
       M5_restate: '重新表述你当前的观点',
     };
     for (const strategy of STRATEGY_SEQUENCE) {

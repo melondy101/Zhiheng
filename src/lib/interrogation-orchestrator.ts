@@ -38,12 +38,33 @@ import {
   type GentleState,
   type UserIntent,
 } from './gentle-interrogation';
+import {
+  type QuickTargetId,
+  type SessionMode,
+  type SessionPhase,
+  type TransitionActionId,
+  TRANSITION_ACTIONS,
+  getModeConfig,
+} from './mode-config';
+import { extractCognitiveTrajectory } from './cognitive-trajectory';
 
 export interface HandleInterrogateInput {
   sessionId: string;
   action: InterrogateAction;
   answer?: string;
   viewpoint?: Viewpoint;
+  /**
+   * #Q-01 / #D-03: Session mode ('quick' | 'deep' | 'fun' | 'story').
+   */
+  mode?: SessionMode;
+  /**
+   * #Q-02: User selected quick target.
+   */
+  target?: QuickTargetId;
+  /**
+   * #Q-02: Selected transition action card.
+   */
+  transitionChoice?: TransitionActionId;
   /**
    * #26/T3: the optimistic user message id sent by the client before the
    * API call. When present and matching a `pending` message, the server
@@ -113,6 +134,11 @@ function toResponseBody(
   gentle: { aiReply?: string | null; followUp?: string | null; directiveRound?: number; suggestSummary?: boolean } = {}
 ): InterrogateResponseBody {
   const state = interrogationStateOf(session);
+  const trajectory = session.cognitiveTrajectory ?? extractCognitiveTrajectory(session);
+  const phase = session.phase ?? state.phase ?? 'interrogation';
+  const mode = session.mode ?? state.mode ?? 'quick';
+  const target = session.target ?? state.target ?? null;
+
   return {
     round: state.round,
     strategy: state.strategy,
@@ -129,12 +155,25 @@ function toResponseBody(
     // answer — never an automatic completion.
     decisionPending: state.pendingDecision === true,
     completed: session.completed,
-    session,
+    session: {
+      ...session,
+      mode,
+      phase,
+      target,
+      cognitiveTrajectory: trajectory,
+    },
     // #5: gentle interrogation fields
     aiReply: gentle.aiReply ?? null,
     followUp: gentle.followUp ?? null,
     directiveRound: gentle.directiveRound ?? completedDirectiveRounds(session),
     suggestSummary: gentle.suggestSummary ?? false,
+    // #Q-01 / #Q-02 / #D-03
+    mode,
+    phase,
+    target,
+    orientationRounds: session.orientationRounds ?? 0,
+    transitionActions: phase === 'transitionChoice' ? TRANSITION_ACTIONS : undefined,
+    cognitiveTrajectory: trajectory,
   };
 }
 
@@ -251,11 +290,73 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     ) {
       return { ok: true, body: toResponseBody(session, null, false) };
     }
+    const mode = input.mode ?? session.mode ?? 'quick';
+    const target = input.target ?? session.target ?? null;
     const selected: Viewpoint = { ...viewpoint, selectedAt: Date.now() };
-    const prepared: Session = { ...session, selectedViewpoint: selected };
+    const prepared: Session = {
+      ...session,
+      selectedViewpoint: selected,
+      mode,
+      target,
+      phase: session.phase ?? 'interrogation',
+    };
+    prepared.cognitiveTrajectory = extractCognitiveTrajectory(prepared);
     const planned = await planNextRound(prepared, generateQuestion, state.uncertainStreak);
     await storage.saveSession(planned);
     return { ok: true, body: toResponseBody(planned, null, false) };
+  }
+
+  if (action === 'set_target') {
+    const target = input.target ?? null;
+    const updated: Session = {
+      ...session,
+      target,
+      updatedAt: Date.now(),
+    };
+    await storage.saveSession(updated);
+    return { ok: true, body: toResponseBody(updated, null, false) };
+  }
+
+  if (action === 'transition') {
+    const choice = input.transitionChoice;
+    let target = session.target;
+    let phase: SessionPhase = 'interrogation';
+
+    if (choice === 'continue_orientation') {
+      phase = 'orientation';
+      const orientationRounds = (session.orientationRounds ?? 0) + 1;
+      const updated: Session = {
+        ...session,
+        phase,
+        orientationRounds,
+        transitionChoice: choice,
+        updatedAt: Date.now(),
+      };
+      await storage.saveSession(updated);
+      return { ok: true, body: toResponseBody(updated, null, false) };
+    } else if (choice === 'inspect_evidence') {
+      target = 'clarify_position';
+    } else if (choice === 'inspect_counterargument') {
+      target = 'weigh_decision';
+    }
+
+    const updated: Session = {
+      ...session,
+      phase: 'interrogation',
+      target,
+      transitionChoice: choice ?? null,
+      updatedAt: Date.now(),
+    };
+
+    // If no round was planned yet, plan round 1 now
+    if (state.round === 0 || !state.assistantQuestion) {
+      const planned = await planNextRound(updated, generateQuestion, state.uncertainStreak);
+      await storage.saveSession(planned);
+      return { ok: true, body: toResponseBody(planned, null, false) };
+    }
+
+    await storage.saveSession(updated);
+    return { ok: true, body: toResponseBody(updated, null, false) };
   }
 
   if (action === 'continue') {
@@ -335,6 +436,7 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     ...currentSession,
     messages: [...currentSession.messages, makeMessage(answer, streak > 0)],
   };
+  withAnswer.cognitiveTrajectory = extractCognitiveTrajectory(withAnswer);
 
   // #5: classify user intent and generate gentle response
   const userIntent: UserIntent = classifyIntent(answer);

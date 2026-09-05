@@ -5,7 +5,7 @@ import type { Session, ReportProgress, SourceState } from '@/lib/providers';
 import { createZhihuSearchProvider, createGlobalSearchProvider } from '@/lib/zhihu-retrieval';
 import { HistorySearchProvider, type HistorySessionSnapshot } from '@/lib/history-search';
 import { buildReport } from '@/lib/report-builder';
-import { buildGraph } from '@/lib/knowledge-graph';
+import { safeBuildGraph } from '@/lib/knowledge-graph';
 import { llmProvider } from '@/lib/server-providers';
 
 export const runtime = 'nodejs';
@@ -150,7 +150,7 @@ export async function POST(request: Request) {
   // source provenance even for graphs restored from a stored session.
   let knowledgeGraph = null;
   try {
-    const raw = buildGraph(report, report.references);
+    const raw = safeBuildGraph(report, report.references);
     knowledgeGraph = { ...raw, sourceState };
   } catch {
     // Graph failure must not break the report

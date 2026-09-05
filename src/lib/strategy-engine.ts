@@ -13,7 +13,16 @@ import {
   type InterrogationContext,
 } from './interrogation-context';
 
-export type StrategyId = 'M1_evidence' | 'M2_premise' | 'M4_steelman' | 'M6_reversal' | 'M5_restate';
+export type StrategyId =
+  | 'M1_evidence'
+  | 'M2_premise'
+  | 'M3_anchoring'
+  | 'M4_steelman'
+  | 'M5_system2'
+  | 'M6_reversal'
+  | 'M7_metacognition'
+  | 'M8_contradiction'
+  | 'M5_restate';
 
 export interface Strategy {
   id: StrategyId;
@@ -31,9 +40,9 @@ export interface Strategy {
 }
 
 /**
- * Interrogative question templates per strategy (#16). Every template quotes
- * a claim fragment from the user's input and is phrased as a question —
- * never a verdict, never an answer on the user's behalf.
+ * Interrogative question templates per strategy (#16, #D-01, #D-02). Every
+ * template quotes a claim fragment from the user's input and is phrased as
+ * a question — never a verdict, never an answer on the user's behalf.
  */
 export interface StrategyQuestionTemplate {
   /** Question when no claim fragment is available. */
@@ -52,15 +61,35 @@ export const STRATEGY_QUESTION_TEMPLATES: Record<StrategyId, StrategyQuestionTem
     withClaim: (claim) =>
       `你提到"${claim}"。这一说法背后是否有一个隐含的前提？如果该前提不成立，你的结论会改变吗？`,
   },
+  M3_anchoring: {
+    plain: '我们最初接触的第一印象或初始数据，是否影响了你对这个问题的判断？如果换一个起始基准，结论是否会有所不同？',
+    withClaim: (claim) =>
+      `你提到"${claim}"。我们最初接触的第一印象或基准数据，是否在无形中锚定了判断？如果换一个参照起点，结论是否不同？`,
+  },
   M4_steelman: {
     plain: '请尝试用最强的一种对立观点重新论证。哪种反驳最难回应？',
     withClaim: (claim) =>
       `针对你的说法"${claim}"，请尝试用最强的一种对立观点重新论证。哪种反驳最难回应？`,
   },
+  M5_system2: {
+    plain: '如果跳出第一直觉，从全局约束、长远连锁影响或多变量权衡的角度，你会如何更严密地审视这一结论？',
+    withClaim: (claim) =>
+      `结合你指出的"${claim}"，如果跳出第一直觉，从全局约束、长远连锁影响或多变量权衡的角度，你会如何更严密地审视这一结论？`,
+  },
   M6_reversal: {
     plain: '如果你必须为相反的立场辩护，你最有力的论据是什么？',
     withClaim: (claim) =>
       `围绕你提到的"${claim}"，如果你必须为相反的立场辩护，你最有力的论据是什么？`,
+  },
+  M7_metacognition: {
+    plain: '回溯一下，你是通过哪些关键信息源、个人经验或思考节点逐步形成这一判断的？如果其中某个支撑点动摇，你的信心会发生什么变化？',
+    withClaim: (claim) =>
+      `针对你提出的"${claim}"，回溯一下，你是通过哪些关键信息源或思考节点形成这一判断的？如果其中某个支撑点动摇，你的信心会发生什么变化？`,
+  },
+  M8_contradiction: {
+    plain: '对比讨论中出现的不同维度判断，似乎存在一些潜在的张力或不兼容处。你觉得这两者之间应当如何协调？',
+    withClaim: (claim) =>
+      `对比讨论中先前的阐述与你提到的"${claim}"，似乎存在一些潜在的张力或不兼容处。你觉得这两者之间应当如何协调？`,
   },
   M5_restate: {
     plain: '基于以上讨论，你能用一两句话重新表述你当前的观点吗？',
@@ -99,7 +128,7 @@ const strategyHistory = (session: Session): StrategyId[] => {
   return ((session as unknown as { _strategyHistory?: StrategyId[] })._strategyHistory) ?? [];
 };
 
-/** Pure: pick the next strategy based on round number and history. */
+/** Pure: pick the next strategy based on round number, mode, target, and history. */
 export function pickNextStrategy(session: Session, directiveRound?: number): StrategyId {
   // #5: when a directiveRound is provided (gentle interrogation), use it
   // instead of the message-based round count so strategy selection follows
@@ -107,8 +136,8 @@ export function pickNextStrategy(session: Session, directiveRound?: number): Str
   const round = directiveRound !== undefined ? directiveRound + 1 : roundCount(session) + 1;
   const history = strategyHistory(session);
 
-  // Round-by-round planned sequence
-  const planned: StrategyId[] = [
+  // #Q-02 / #D-02: Mode and target aware planned sequence
+  let planned: StrategyId[] = [
     'M1_evidence', // 1. evidence
     'M2_premise',  // 2. premise
     'M4_steelman', // 3. steel-man
@@ -116,12 +145,44 @@ export function pickNextStrategy(session: Session, directiveRound?: number): Str
     'M5_restate',  // 5. restate
   ];
 
+  if (session.mode === 'deep') {
+    planned = [
+      'M1_evidence',
+      'M2_premise',
+      'M3_anchoring',
+      'M4_steelman',
+      'M5_system2',
+      'M6_reversal',
+      'M7_metacognition',
+      'M8_contradiction',
+    ];
+  } else if (session.target === 'clarify_position') {
+    planned = ['M1_evidence', 'M2_premise', 'M4_steelman', 'M6_reversal', 'M5_system2'];
+  } else if (session.target === 'weigh_decision') {
+    planned = ['M4_steelman', 'M6_reversal', 'M1_evidence', 'M2_premise', 'M5_system2'];
+  } else if (session.target === 'refine_expression') {
+    planned = ['M5_system2', 'M3_anchoring', 'M2_premise', 'M4_steelman', 'M1_evidence'];
+  }
+
   if (round <= planned.length) {
     return planned[round - 1]!;
   }
 
-  // After round 5: rotate strategies, avoiding immediate repeats
-  const fallbackOrder: StrategyId[] = ['M1_evidence', 'M2_premise', 'M4_steelman', 'M6_reversal'];
+  // After planned sequence: rotate strategies, avoiding immediate repeats
+  const fallbackOrder: StrategyId[] =
+    session.mode === 'deep'
+      ? [
+          'M1_evidence',
+          'M2_premise',
+          'M3_anchoring',
+          'M4_steelman',
+          'M5_system2',
+          'M6_reversal',
+          'M7_metacognition',
+          'M8_contradiction',
+        ]
+      : ['M1_evidence', 'M2_premise', 'M4_steelman', 'M6_reversal', 'M5_system2'];
+
   const last = history[history.length - 1];
   for (const s of fallbackOrder) {
     if (s !== last) return s;
@@ -144,6 +205,13 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M2_premise'),
   },
+  M3_anchoring: {
+    id: 'M3_anchoring',
+    name: '锚定揭露',
+    description: '反思初始参考基准与先入为主',
+    isApplicable: () => true,
+    fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M3_anchoring'),
+  },
   M4_steelman: {
     id: 'M4_steelman',
     name: '钢铁人反驳',
@@ -151,12 +219,33 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M4_steelman'),
   },
+  M5_system2: {
+    id: 'M5_system2',
+    name: '系统二激活',
+    description: '跳出直觉，长远约束与多变量权衡',
+    isApplicable: () => true,
+    fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M5_system2'),
+  },
   M6_reversal: {
     id: 'M6_reversal',
     name: '立场反转',
     description: '从对立立场重新论证',
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M6_reversal'),
+  },
+  M7_metacognition: {
+    id: 'M7_metacognition',
+    name: '元认知溯源',
+    description: '追溯观点形成的信息源与思考节点',
+    isApplicable: () => true,
+    fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M7_metacognition'),
+  },
+  M8_contradiction: {
+    id: 'M8_contradiction',
+    name: '内部矛盾核验',
+    description: '对照前后潜在张力与不一致',
+    isApplicable: () => true,
+    fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M8_contradiction'),
   },
   M5_restate: {
     id: 'M5_restate',

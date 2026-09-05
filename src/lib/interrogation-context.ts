@@ -150,11 +150,22 @@ export function buildNarrowedQuestion(
   session: Session,
   currentQuestion: string | null
 ): string {
-  // contextClaimFragment only reads lastAnswer/stance; the strategy id is
-  // required by buildInterrogationContext but unused for claim selection.
-  const focus =
-    (currentQuestion ? extractClaimFragment(currentQuestion) : null) ??
-    contextClaimFragment(buildInterrogationContext(session, 'M1_evidence'));
+  // Strip any degradation disclosure prefix (e.g. 【策略模板降级】...) before extracting claim
+  const clean = currentQuestion
+    ? currentQuestion.replace(/^【[^】]+】[^。！？!?；;\n]*[。！？!?；;\n]*/, '').trim()
+    : null;
+  let focus: string | null = null;
+  if (clean) {
+    const quoted = clean.match(/["“]([^"”]+)["”]/);
+    if (quoted && quoted[1]) {
+      focus = quoted[1].trim();
+    } else {
+      focus = extractClaimFragment(clean);
+    }
+  }
+  if (!focus) {
+    focus = contextClaimFragment(buildInterrogationContext(session, 'M1_evidence'));
+  }
   return focus
     ? `让我们把问题缩小一些：先聚焦"${focus}"——你能否举一个具体的小例子或熟悉的场景来说明？`
     : '让我们把问题缩小一些：你能否举一个具体的小例子或熟悉的场景来说明？';

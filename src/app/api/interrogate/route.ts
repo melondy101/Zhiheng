@@ -16,10 +16,18 @@ import { getServerStorage, StorageUnavailableError } from '@/lib/server-storage'
 import { readOwnerId } from '@/lib/owner-id';
 import { handleInterrogate } from '@/lib/interrogation-orchestrator';
 import type { InterrogateAction, Session, Viewpoint } from '@/lib/providers';
+import type { QuickTargetId, SessionMode, TransitionActionId } from '@/lib/mode-config';
 
 export const runtime = 'nodejs';
 
-const ACTIONS: InterrogateAction[] = ['start', 'answer', 'continue', 'complete'];
+const ACTIONS: InterrogateAction[] = [
+  'start',
+  'answer',
+  'continue',
+  'complete',
+  'transition',
+  'set_target',
+];
 
 function isInterrogateAction(value: unknown): value is InterrogateAction {
   return typeof value === 'string' && ACTIONS.includes(value as InterrogateAction);
@@ -51,6 +59,9 @@ export async function POST(request: Request) {
     viewpoint?: unknown;
     session?: unknown;
     optimisticId?: unknown;
+    mode?: unknown;
+    target?: unknown;
+    transitionChoice?: unknown;
   };
 
   if (typeof body.sessionId !== 'string' || body.sessionId.length === 0) {
@@ -58,7 +69,7 @@ export async function POST(request: Request) {
   }
   if (!isInterrogateAction(body.action)) {
     return NextResponse.json(
-      { error: 'Invalid action, expected start | answer | continue | complete' },
+      { error: 'Invalid action, expected start | answer | continue | complete | transition | set_target' },
       { status: 400 }
     );
   }
@@ -75,6 +86,12 @@ export async function POST(request: Request) {
       viewpoint: (body.viewpoint ?? undefined) as Viewpoint | undefined,
       sessionSnapshot: (body.session ?? null) as Session | null,
       optimisticId: typeof body.optimisticId === 'string' ? body.optimisticId : null,
+      mode: typeof body.mode === 'string' ? (body.mode as SessionMode) : undefined,
+      target: typeof body.target === 'string' ? (body.target as QuickTargetId) : undefined,
+      transitionChoice:
+        typeof body.transitionChoice === 'string'
+          ? (body.transitionChoice as TransitionActionId)
+          : undefined,
       storage: scope.sessions,
       generateQuestion: (strategy, session) =>
         llmProvider.generateStrategyQuestion(strategy, session),

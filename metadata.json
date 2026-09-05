@@ -1,0 +1,6 @@
+{
+  "name": "知研 - AI思辨陪练",
+  "description": "AI 问人，让观点经得起追问",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

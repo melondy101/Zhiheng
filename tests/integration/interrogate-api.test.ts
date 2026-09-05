@@ -4,9 +4,10 @@
 // x-zhiyan-owner header and seeding goes through the same owner scope), so
 // every assertion below covers orchestration + persistence exactly as the
 // Next.js route runs it.
-import { describe, it, before } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import { POST } from '../../src/app/api/interrogate/route';
+import { llmProvider, FixtureLLMProvider } from '../../src/lib/server-providers';
 import { getServerStorage, type OwnerStorageScope } from '../../src/lib/server-storage';
 import { STRATEGIES } from '../../src/lib/strategy-engine';
 import type {
@@ -29,18 +30,30 @@ const ANSWER_ROUND = (round: number) => `第 ${round} 轮的实质性回答，�
 // must satisfy the server-side owner id validation.
 const TEST_OWNER = 'test-owner-interrogate';
 let scope: OwnerStorageScope;
+let origGenerateQuestion: typeof llmProvider.generateStrategyQuestion;
 
 before(async () => {
   const manager = await getServerStorage();
   scope = manager.forOwner(TEST_OWNER);
+  origGenerateQuestion = llmProvider.generateStrategyQuestion.bind(llmProvider);
+  const fixture = new FixtureLLMProvider();
+  llmProvider.generateStrategyQuestion = (strategy, session) =>
+    fixture.generateStrategyQuestion(strategy, session);
 });
 
+after(() => {
+  if (origGenerateQuestion) {
+    llmProvider.generateStrategyQuestion = origGenerateQuestion;
+  }
+});
+
+const RUN_ID = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 let sessionCounter = 0;
 
 function seedSession(overrides: Partial<Session> = {}): Session {
   sessionCounter += 1;
   const session: Session = {
-    id: `s_test_${sessionCounter}`,
+    id: `s_test_${RUN_ID}_${sessionCounter}`,
     question: '测试问题：这个观点的依据是什么？',
     initialOpinion: '我的初始看法',
     report: null,

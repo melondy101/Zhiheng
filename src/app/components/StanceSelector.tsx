@@ -88,6 +88,25 @@ export default function StanceSelector({
           使用
         </button>
       </div>
+
+      <div className="mt-8 pt-6 border-t border-gray-100">
+        <div className="bg-blue-50/60 rounded-xl p-5 border border-blue-100/80 text-xs text-gray-600 leading-relaxed space-y-2.5">
+          <p className="font-semibold text-blue-900 text-sm flex items-center gap-1.5">
+            <span>💡</span> 为什么要选择切入观点？
+          </p>
+          <p className="text-gray-700">
+            知研思辨引擎将围绕你选择的切入点展开温和的多角度推演，协助你：
+          </p>
+          <ul className="list-disc list-inside space-y-1.5 text-gray-600 pl-1">
+            <li>厘清结论背后的关键前提与假设</li>
+            <li>检验支撑论据的有效性与适用边界</li>
+            <li>发现不同视角的反思与洞见，形成更周密的个人判断</li>
+          </ul>
+          <p className="text-gray-500 pt-1">
+            思辨过程循序渐进，每次只聚焦一个清晰的思考维度。你随时可以在思辨过程中补充或修正你的看法。
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

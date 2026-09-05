@@ -24,10 +24,13 @@ interface ReportResponseBody {
 }
 
 let savedSecret: string | undefined;
+let savedDatabaseUrl: string | undefined;
 
 beforeEach(() => {
   savedSecret = process.env.ZHIHU_ACCESS_SECRET;
   delete process.env.ZHIHU_ACCESS_SECRET;
+  savedDatabaseUrl = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
 });
 
 afterEach(() => {
@@ -35,6 +38,11 @@ afterEach(() => {
     delete process.env.ZHIHU_ACCESS_SECRET;
   } else {
     process.env.ZHIHU_ACCESS_SECRET = savedSecret;
+  }
+  if (savedDatabaseUrl === undefined) {
+    delete process.env.DATABASE_URL;
+  } else {
+    process.env.DATABASE_URL = savedDatabaseUrl;
   }
 });
 

@@ -186,7 +186,17 @@ export default function ReportPanel({
       )}
 
       {/* Knowledge Graph */}
-      <KnowledgeGraphView graph={knowledgeGraph ?? null} />
+      <KnowledgeGraphView
+        graph={knowledgeGraph ?? null}
+        onCitationClick={(citationId) => {
+          const el = document.getElementById(`source-citation-${citationId}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.classList.add('ring-2', 'ring-purple-500');
+            setTimeout(() => el.classList.remove('ring-2', 'ring-purple-500'), 2000);
+          }
+        }}
+      />
 
       {/* References section */}
       {report.references.length > 0 && (
@@ -213,7 +223,8 @@ export default function ReportPanel({
                       return (
                         <div
                           key={src.id}
-                          className={`border rounded-md p-3 text-sm bg-gray-50 ${isExcluded ? 'opacity-50' : ''}`}
+                          id={`source-citation-${globalIndex}`}
+                          className={`border rounded-md p-3 text-sm bg-gray-50 transition-all ${isExcluded ? 'opacity-50' : ''}`}
                         >
                           <div className="flex items-start gap-2">
                             <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0 mt-0.5">
@@ -277,7 +288,8 @@ export default function ReportPanel({
                     return (
                       <div
                         key={src.id}
-                        className="border rounded-md p-3 text-sm bg-gray-50"
+                        id={`source-citation-${globalIndex}`}
+                        className="border rounded-md p-3 text-sm bg-gray-50 transition-all"
                       >
                         <div className="flex items-start gap-2">
                           <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0 mt-0.5">

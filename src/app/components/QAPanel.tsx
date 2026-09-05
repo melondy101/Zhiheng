@@ -62,8 +62,12 @@ interface QAPanelProps {
 const STRATEGY_LABELS: Record<StrategyId, string> = {
   M1_evidence: '证据追问',
   M2_premise: '前提追问',
+  M3_anchoring: '锚定揭露',
   M4_steelman: '钢铁人反驳',
+  M5_system2: '系统二激活',
   M6_reversal: '立场反转',
+  M7_metacognition: '元认知追问',
+  M8_contradiction: '立场崩塌检测',
   M5_restate: '观点重述',
 };
 
@@ -163,21 +167,24 @@ export default function QAPanel({
     }
   }, [messages.length]);
 
+  const lastAssistantIndex = messages.map((m) => m.role).lastIndexOf('assistant');
+
   return (
-    <div className="w-[450px] flex flex-col bg-white" data-testid="qa-panel">
-      <div className="px-4 py-2 border-b flex items-center justify-between bg-gray-50">
-        <span className="text-xs text-gray-600">
+    <div className="flex-1 min-w-0 flex flex-col bg-white h-full" data-testid="qa-panel">
+      <div className="px-5 py-3 border-b flex items-center justify-between bg-gray-50/70">
+        <span className="text-xs text-gray-600 font-medium">
           第 {currentRound || messages.filter(isRoundAnswer).length + 1} 轮
           {currentStrategy && (
-            <span className="ml-2 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+            <span className="ml-2 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-normal">
               {STRATEGY_LABELS[currentStrategy]}
             </span>
           )}
         </span>
         {onExit && (
           <button
+            type="button"
             onClick={onExit}
-            className="text-xs text-red-500 hover:text-red-700"
+            className="text-xs px-2.5 py-1 rounded border border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-300 hover:bg-white transition-colors font-medium shadow-xs"
           >
             结束本次思辨
           </button>
@@ -188,61 +195,14 @@ export default function QAPanel({
           round 1 question quotes the selected stance and carries the report
           sources, so it must be visible while messages is still empty. */}
       {(messages.length > 0 || currentQuestion) && (
-        <div className="flex-1 overflow-y-auto p-6">
-          {messages.length > 0 && (
-            <div className="space-y-4 mb-4">
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`p-4 rounded-lg ${
-                    msg.role === 'user'
-                      ? 'bg-blue-600 text-white ml-8'
-                      : 'bg-gray-100 mr-8'
-                  } ${msg.status === 'pending' ? 'opacity-60' : ''} ${
-                    msg.status === 'failed' ? 'border-2 border-red-400' : ''
-                  }`}
-                >
-                  <p className="text-sm mb-1">{msg.text}</p>
-                  {msg.status === 'pending' && (
-                    <p className="text-xs text-blue-200 mt-1">发送中...</p>
-                  )}
-                  {msg.status === 'failed' && onRetryMessage && (
-                    <button
-                      onClick={() => onRetryMessage(msg.id)}
-                      className="text-xs text-red-300 hover:text-red-100 underline mt-1"
-                    >
-                      点击重试
-                    </button>
-                  )}
-                </div>
-              ))}
-              {/* Inline feedback cue inside the message list, also visible when
-                  no messages have been sent yet (no-messages window). */}
-              {feedbackCueState && (
-                <SessionFeedbackCue
-                  state={feedbackCueState}
-                  className="inline-flex text-left"
-                />
-              )}
-              <div ref={scrollTargetRef} />
-            </div>
-          )}
-
-          {/* #5: AI direct answer — shown as a distinct assistant message when
-              the user asked a question. */}
-          {aiReply && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4 mr-8">
-              <p className="text-xs text-green-600 mb-1 font-medium">AI 回答</p>
-              <p className="text-sm text-gray-800">{aiReply}</p>
-            </div>
-          )}
-
-          {(followUp || currentQuestion) && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-              <p className="text-sm font-medium mb-2">
-                {followUp && !suggestSummary ? '追问:' : '当前问题:'}
+        <div className="flex-1 overflow-y-auto p-6" ref={messagesEndRef}>
+          {/* Initial question before any user answers have been sent */}
+          {messages.length === 0 && currentQuestion && (
+            <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-4 mb-4">
+              <p className="text-xs text-blue-700 font-semibold mb-1">知研引导思考</p>
+              <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
+                {currentQuestion}
               </p>
-              <p className="text-sm">{followUp || currentQuestion}</p>
               <SourcesSection sources={sources} />
               {usedFallback && (
                 <p className="text-xs text-orange-600 mt-2">⚠️ AI 服务异常，已使用策略模板</p>
@@ -250,18 +210,63 @@ export default function QAPanel({
             </div>
           )}
 
-          {/* #5: AI direct answer for user questions */}
-          {aiReply && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-              <p className="text-sm font-medium mb-1 text-blue-700">AI 回答</p>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{aiReply}</p>
-            </div>
-          )}
+          {/* Message history */}
+          {messages.length > 0 && (
+            <div className="space-y-4 mb-4">
+              {messages.map((msg, idx) => {
+                const isLastAssistant =
+                  msg.role === 'assistant' && idx === lastAssistantIndex;
+                return (
+                  <div
+                    key={msg.id}
+                    className={`p-4 rounded-xl ${
+                      msg.role === 'user'
+                        ? 'bg-blue-600 text-white ml-8 rounded-br-xs'
+                        : 'bg-gray-100 mr-8 text-gray-800 rounded-bl-xs'
+                    } ${msg.status === 'pending' ? 'opacity-60' : ''} ${
+                      msg.status === 'failed' ? 'border-2 border-red-400' : ''
+                    }`}
+                  >
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                    {msg.status === 'pending' && (
+                      <p className="text-xs text-blue-200 mt-1">发送中...</p>
+                    )}
+                    {msg.status === 'failed' && onRetryMessage && (
+                      <button
+                        type="button"
+                        onClick={() => onRetryMessage(msg.id)}
+                        className="text-xs text-red-300 hover:text-red-100 underline mt-1"
+                      >
+                        点击重试
+                      </button>
+                    )}
+                    {isLastAssistant && (
+                      <div className="mt-2 pt-2 border-t border-gray-200/60">
+                        <SourcesSection sources={sources} />
+                        {usedFallback && (
+                          <p className="text-xs text-orange-600 mt-2">
+                            ⚠️ AI 服务异常，已使用策略模板
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
 
-          {/* #5: follow-up question or gentle encouragement */}
-          {followUp && !suggestSummary && (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
-              <p className="text-sm text-gray-700">{followUp}</p>
+              {/* If there were only user messages and no assistant message yet, keep sources mounted */}
+              {lastAssistantIndex === -1 && (
+                <SourcesSection sources={sources} />
+              )}
+
+              {/* Inline feedback cue inside the message list */}
+              {feedbackCueState && (
+                <SessionFeedbackCue
+                  state={feedbackCueState}
+                  className="inline-flex text-left"
+                />
+              )}
+              <div ref={scrollTargetRef} />
             </div>
           )}
 
@@ -391,8 +396,8 @@ export default function QAPanel({
         <SessionFeedbackCue state={feedbackCueState} className="m-3" />
       )}
 
-      {!isCheckpoint && !pendingDecision && !suggestSummary && (
-        <form onSubmit={onSubmit} className="p-4 border-t">
+      {!isCheckpoint && !pendingDecision && (
+        <form onSubmit={onSubmit} className="p-4 border-t bg-white">
           <div className="flex gap-2">
             <input
               type="text"
@@ -400,12 +405,12 @@ export default function QAPanel({
               onChange={(e) => onAnswerChange(e.target.value)}
               placeholder={formLoading ? '正在发送...' : '输入你的回答...'}
               disabled={formLoading}
-              className="flex-1 p-2 border rounded-lg text-sm disabled:bg-gray-100 disabled:text-gray-400"
+              className="flex-1 p-2.5 border rounded-lg text-sm disabled:bg-gray-100 disabled:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <button
               type="submit"
               disabled={!answer.trim() || formLoading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium transition-colors"
             >
               {formLoading ? '发送中...' : '发送'}
             </button>

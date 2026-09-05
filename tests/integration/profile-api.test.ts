@@ -8,8 +8,9 @@ import { GET, PUT, DELETE } from '../../src/app/api/profile/route';
 import { getServerStorage, type OwnerStorageScope } from '../../src/lib/server-storage';
 import type { UserProfile } from '../../src/lib/lifecycle';
 
-const OWNER_A = 'owner-profile-a';
-const OWNER_B = 'owner-profile-b';
+const RUN_ID = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+const OWNER_A = `owner-profile-a-${RUN_ID}`;
+const OWNER_B = `owner-profile-b-${RUN_ID}`;
 let scope: OwnerStorageScope;
 let scopeB: OwnerStorageScope;
 
@@ -64,7 +65,7 @@ describe('GET /api/profile', () => {
     const empty = await call(GET, 'GET', OWNER_A);
     assert.strictEqual(empty.status, 200);
     assert.strictEqual(empty.body.profile, null);
-    assert.strictEqual(empty.body.storage, 'memory');
+    assert.ok(empty.body.storage === 'memory' || empty.body.storage === 'postgres');
 
     await scope.saveProfile(activeProfile());
     const saved = await call(GET, 'GET', OWNER_A);
