@@ -2,11 +2,14 @@
 
 import { useEffect, useRef } from 'react';
 
-import type { CitedSource, Message } from '@/lib/providers';
+import type { CitedSource, Message, Session } from '@/lib/providers';
 import { isRoundAnswer } from '@/lib/providers';
 import type { FeedbackCueState } from './SessionFeedbackCue';
 import type { StrategyId } from '@/lib/strategy-engine';
+import { TRANSITION_ACTIONS, type TransitionActionId } from '@/lib/mode-config';
 import SessionFeedbackCue from './SessionFeedbackCue';
+import StoryView from './StoryView';
+import CognitiveTrajectoryView from './CognitiveTrajectoryView';
 
 interface QAPanelProps {
   messages: Message[];
@@ -57,6 +60,13 @@ interface QAPanelProps {
   directiveRound?: number;
   /** #26/T5: true when the summary gate should be shown (after every 3rd directive round). */
   suggestSummary?: boolean;
+  /** Session object for mode, phase, character, storyRun (#M1) */
+  session?: Session | null;
+  onTransitionChoice?: (choice: TransitionActionId) => void;
+  onStoryChoice?: (choiceId: string, optionId: string) => void;
+  onStoryEndEarly?: () => void;
+  onStoryComplete?: () => void;
+  onStoryBridge?: () => void;
 }
 
 const STRATEGY_LABELS: Record<StrategyId, string> = {
@@ -157,6 +167,12 @@ export default function QAPanel({
   followUp,
   directiveRound = 0,
   suggestSummary = false,
+  session = null,
+  onTransitionChoice,
+  onStoryChoice,
+  onStoryEndEarly,
+  onStoryComplete,
+  onStoryBridge,
 }: QAPanelProps) {
   const scrollTargetRef = useRef<HTMLDivElement | null>(null);
 
@@ -167,16 +183,39 @@ export default function QAPanel({
     }
   }, [messages.length]);
 
+  // GalGame Interactive Story Mode (#G-05)
+  if (session?.mode === 'story' && session?.storyRun) {
+    return (
+      <StoryView
+        storyRun={session.storyRun}
+        sources={sources}
+        onChoice={onStoryChoice ?? (() => {})}
+        onComplete={onStoryComplete ?? (() => {})}
+        onEndEarly={onStoryEndEarly ?? (() => {})}
+        onBridge={onStoryBridge ?? (() => {})}
+      />
+    );
+  }
+
   const lastAssistantIndex = messages.map((m) => m.role).lastIndexOf('assistant');
 
   return (
     <div className="flex-1 min-w-0 flex flex-col bg-white h-full" data-testid="qa-panel">
       <div className="px-5 py-3 border-b flex items-center justify-between bg-gray-50/70">
-        <span className="text-xs text-gray-600 font-medium">
+        <span className="text-xs text-gray-600 font-medium flex items-center">
           第 {currentRound || messages.filter(isRoundAnswer).length + 1} 轮
           {currentStrategy && (
             <span className="ml-2 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-normal">
               {STRATEGY_LABELS[currentStrategy]}
+            </span>
+          )}
+          {session?.character && (
+            <span className="ml-2 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-normal">
+              {session.character === 'relaxed_friend'
+                ? '辩友：轻松朋友'
+                : session.character === 'ancient_scholar'
+                ? '辩友：古风辩友'
+                : '辩友：二次元搭档'}
             </span>
           )}
         </span>
@@ -191,11 +230,95 @@ export default function QAPanel({
         )}
       </div>
 
+      {/* Cognitive Trajectory compact view in deep mode (#D-03) */}
+      {session?.cognitiveTrajectory && session.cognitiveTrajectory.length > 0 && (
+        <div className="px-5 py-2.5 bg-indigo-50/40 border-b border-indigo-100/60">
+          <CognitiveTrajectoryView events={session.cognitiveTrajectory} compact />
+        </div>
+      )}
+
+      {/* Orientation phase guidance banner (#Q-01, #Q-02) */}
+      {session?.phase === 'orientation' && (
+        <div className="px-5 py-2.5 bg-blue-50/70 border-b border-blue-100 flex flex-wrap items-center justify-between gap-2 text-xs text-blue-900">
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-blue-700">🎯 定向引导阶段</span>
+            <span className="text-gray-400">·</span>
+            <span className="text-gray-600">
+              {session.target === 'clarify_position'
+                ? '目标：厘清核心立场与事实依据'
+                : session.target === 'weigh_decision'
+                ? '目标：权衡决策代价与对立观点'
+                : session.target === 'refine_expression'
+                ? '目标：打磨论据与表达自洽性'
+                : '目标：梳理报告核心脉络'}
+            </span>
+          </div>
+          {onTransitionChoice && (
+            <button
+              type="button"
+              onClick={() => onTransitionChoice('challenge_claim')}
+              className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium cursor-pointer flex items-center gap-1"
+            >
+              <span>直接开启深度挑战</span>
+              <span>&rarr;</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* The question area also renders before the first answer (#16): the
           round 1 question quotes the selected stance and carries the report
           sources, so it must be visible while messages is still empty. */}
-      {(messages.length > 0 || currentQuestion) && (
+      {(messages.length > 0 || currentQuestion || session?.phase === 'transitionChoice' || formLoading) && (
         <div className="flex-1 overflow-y-auto p-6" ref={messagesEndRef}>
+          {/* Initial question pending / in flight */}
+          {messages.length === 0 && !currentQuestion && formLoading && session?.phase !== 'transitionChoice' && (
+            <div className="bg-blue-50/60 border border-blue-100/80 rounded-xl p-4 mb-4">
+              <p className="text-xs text-blue-700 font-semibold mb-1">知研正在构思第 1 轮引导问题...</p>
+              <div className="animate-pulse space-y-2 mt-2">
+                <div className="h-3.5 bg-blue-200/60 rounded w-3/4"></div>
+                <div className="h-3.5 bg-blue-200/40 rounded w-1/2"></div>
+              </div>
+            </div>
+          )}
+          {/* Transition Choice Card (#Q-02) */}
+          {session?.phase === 'transitionChoice' && (
+            <div
+              data-testid="transition-choice-card"
+              className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5 mb-5 space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-blue-900">报告梳理已就绪，请选择下一步行动</h4>
+                <span className="text-[10px] text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded font-medium">
+                  定向过渡
+                </span>
+              </div>
+              <p className="text-xs text-gray-600">
+                你已完成初步梳理。知研推荐直接开启深度逻辑挑战；也可以先检验关键证据或最强反方。
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                {TRANSITION_ACTIONS.map((act) => (
+                  <button
+                    key={act.id}
+                    type="button"
+                    onClick={() => onTransitionChoice?.(act.id)}
+                    className="p-3 bg-white border border-blue-100 hover:border-blue-400 hover:shadow-xs rounded-lg text-left transition-all group"
+                  >
+                    <div className="text-xs font-semibold text-gray-900 group-hover:text-blue-700 flex items-center justify-between">
+                      {act.label}
+                      {act.recommended && (
+                        <span className="text-[9px] bg-blue-600 text-white px-1.5 py-0.5 rounded">
+                          推荐
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-gray-500 mt-1">{act.description}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Initial question before any user answers have been sent */}
           {messages.length === 0 && currentQuestion && (
             <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-4 mb-4">

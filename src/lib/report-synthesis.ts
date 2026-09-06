@@ -227,22 +227,35 @@ export function parseSynthesisResponse(
   content: string,
   sources: SynthesisSource[]
 ): ReportSynthesis | null {
-  const trimmed = content.trim();
-  // Models love markdown fences; strip them before parsing, never after.
-  const withoutFence = trimmed
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '')
-    .trim();
+  if (!content || typeof content !== 'string') return null;
+
+  let cleaned = content.trim();
+  // Strip markdown code fences if present
+  const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (codeBlockMatch) {
+    cleaned = codeBlockMatch[1].trim();
+  } else {
+    // If no code fence, locate the JSON object boundaries
+    const vpStart = cleaned.indexOf('{"viewpoints"');
+    const altStart = vpStart !== -1 ? vpStart : cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (altStart !== -1 && end !== -1 && end > altStart) {
+      cleaned = cleaned.slice(altStart, end + 1);
+    }
+  }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(withoutFence);
+    parsed = JSON.parse(cleaned);
   } catch {
     return null;
   }
   if (typeof parsed !== 'object' || parsed === null) return null;
   const record = parsed as Record<string, unknown>;
-  if (Object.keys(record).some((key) => key !== 'viewpoints')) return null;
+  // Disallow forbidden standalone summary or extra fields outside viewpoints (and optional reasoning/thought fields)
+  if (Object.keys(record).some((key) => key !== 'viewpoints' && key !== 'thought' && key !== 'reasoning')) {
+    return null;
+  }
 
   if (!Array.isArray(record.viewpoints)) return null;
   const viewpoints: ReportViewpoint[] = [];

@@ -206,29 +206,65 @@ async function buildSynthesis(
 }
 
 /**
- * Generate three structurally distinct viewpoint suggestions (ticket #8).
+ * Generate structurally distinct viewpoint suggestions (ticket #8, enriched for concrete domain relevance).
  * These are NOT synonyms — they cover different positions, premises, or practical angles.
+ * When an AI synthesis is available, its validated conclusions become the structured viewpoints.
+ * Otherwise, topic-specific perspectives derived from retrieved materials and questions are provided.
  * Each Viewpoint is marked with source='ai_authored' until the user selects one.
  */
 export function buildStructuredViewpoints(
   question: string,
-  allSources: Source[]
+  allSources: Source[],
+  synthesis?: ReportSynthesis | null
 ): import('./providers').Viewpoint[] {
+  // 1. If we have structured synthesis viewpoints, use their concrete conclusions
+  if (synthesis && synthesis.viewpoints.length > 0) {
+    const fromSynth = synthesis.viewpoints.slice(0, 3).map((vp, index) => ({
+      id: `vp_synth_${index + 1}`,
+      text: vp.conclusion,
+      source: 'ai_authored' as const,
+    }));
+    if (fromSynth.length >= 3) {
+      return fromSynth;
+    }
+  }
+
+  // 2. Build rich, topic-specific concrete perspectives based on question and retrieved sources
   const q = question.trim();
+  const meaningfulSources = allSources.filter(
+    (s) => (s.title && s.title.trim().length > 4 && !s.title.includes('无标题')) || (s.excerpt && s.excerpt.trim().length > 10)
+  );
+
+  const t1 = meaningfulSources[0]?.title?.trim() || meaningfulSources[0]?.excerpt?.trim().slice(0, 35);
+  const t2 = meaningfulSources[1]?.title?.trim() || meaningfulSources[1]?.excerpt?.trim().slice(0, 35);
+  const t3 = meaningfulSources[2]?.title?.trim() || meaningfulSources[2]?.excerpt?.trim().slice(0, 35);
+
+  const vp1Text = t1
+    ? `核心论断：关于"${q.slice(0, 24)}"，重点在于 ${t1}`
+    : `积极推进：关于"${q.slice(0, 24)}"，应顺应核心发展趋势，通过积极创新与实践落地解决问题。`;
+
+  const vp2Text = t2
+    ? `审慎制约：围绕"${q.slice(0, 24)}"，必须高度关注 ${t2}`
+    : `审慎质疑：关于"${q.slice(0, 24)}"，目前面临关键成本、伦理或现实约束，不宜盲目乐观。`;
+
+  const vp3Text = t3
+    ? `结构反思：针对"${q.slice(0, 24)}"，关键维度体现于 ${t3}`
+    : `情境分化：关于"${q.slice(0, 24)}"，结论不能一概而论，成败高度取决于具体应用场景与前提边界。`;
+
   return [
     {
-      id: 'vp_progress',
-      text: `渐进视角：关于"${q.slice(0, 20)}${q.length > 20 ? '…' : ''}"，应优先考虑逐步演进和风险可控的路径。`,
+      id: 'vp_positive',
+      text: vp1Text,
       source: 'ai_authored',
     },
     {
-      id: 'vp_reform',
-      text: `变革视角：现状难以解决该问题，必须从结构上重新思考"${q.slice(0, 16)}${q.length > 16 ? '…' : ''}"的前提与边界。`,
+      id: 'vp_cautious',
+      text: vp2Text,
       source: 'ai_authored',
     },
     {
-      id: 'vp_evidence',
-      text: `证据视角：在形成结论前，需要先收集更多具体数据和实例来验证关键假设，而非依赖直觉。`,
+      id: 'vp_conditional',
+      text: vp3Text,
       source: 'ai_authored',
     },
   ];
@@ -266,8 +302,8 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
   // Stage 3: Synthesizing
   const p3 = progress('synthesizing', '正在整理观点与争议');
 
-  // Merge and deduplicate all sources
-  const allSources = mergeSources(options.zhihuSources, options.webSources, historySources);
+  // Merge and deduplicate all sources (constrained to first 8 for report generation)
+  const allSources = mergeSources(options.zhihuSources, options.webSources, historySources).slice(0, 8);
 
   // Group and number references
   const grouped = groupReferences(allSources);
@@ -279,7 +315,7 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
   const knowledgePoints = buildKnowledgePoints(grouped);
   const synthesis = await buildSynthesis(options.question, grouped, options.llmProvider);
   const viewpoints = buildViewpoints(synthesis);
-  const structuredViewpoints = buildStructuredViewpoints(options.question, grouped);
+  const structuredViewpoints = buildStructuredViewpoints(options.question, grouped, synthesis);
 
   // Stage 4: Complete
   const p4 = progress('complete', '报告生成完成');

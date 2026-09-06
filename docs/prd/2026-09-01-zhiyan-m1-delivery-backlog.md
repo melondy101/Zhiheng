@@ -1,27 +1,39 @@
-# 知研 M1 交付 Backlog 与依赖
+# 知研 M1 交付 Backlog 与状态归档
 
-> 日期：2026-09-01  
-> 状态：已拆分；GitHub Issue 编号与状态为执行权威  
+> 日期：2026-09-05  
+> 状态：代码与单元/集成测试已全部实现并合并入基线；仅保留 #26（M1-00）真实环境验收门禁  
 > 阶段规格：[M1 阶段产品与交付规格](./2026-09-01-zhiyan-m1.md)
 
-## GitHub 映射
+## GitHub 映射与当前状态
 
-| 设计代号 | GitHub Issue |
-|---|---:|
-| M1-00 | #26 |
-| KG-01 / KG-02 / KG-03 | #27 / #28 / #29 |
-| Q-01 / Q-02 / Q-03 / Q-04 | #31 / #32 / #33 / #34 |
-| D-01 / D-02 / D-03 / D-04 | #35 / #36 / #37 / #38 |
-| F-01 / F-02 | #39 / #40 |
-| G-00 / G-01 / G-02 / G-03 / G-04 / G-05 | #41 / #42 / #43 / #44 / #45 / #46 |
+| 设计代号 | GitHub Issue | 交付主题 | 代码落地点 | 交付状态 |
+|---|---|---|---|---|
+| **M1-00** | #26 | M1 阶段总控与准入门禁 | 基础设施与服务门禁 | **待受控环境真实验收** |
+| **KG-01** | #27 | 图谱数据契约与受控抽取 | `src/lib/knowledge-graph.ts` | **已完成（已合入基线）** |
+| **KG-02** | #28 | 可访问的无箭头力导向图 | `src/app/components/KnowledgeGraphView.tsx` | **已完成（已合入基线）** |
+| **KG-03** | #29 | 图谱恢复、降级与浏览器验收 | `tests/unit/knowledge-graph-contract.test.ts` | **已完成（测试通过）** |
+| **Q-01** | #31 | ModeConfig、会话阶段与旧会话兼容 | `src/lib/mode-config.ts` | **已完成（已合入基线）** |
+| **Q-02** | #32 | 报告定向与轻量选择卡 | `src/lib/interrogation-orchestrator.ts` / `QAPanel.tsx` | **已完成（已合入基线）** |
+| **Q-03** | #33 | 快速目标与 3–5 轮编排 | `src/lib/mode-config.ts` | **已完成（已合入基线）** |
+| **Q-04** | #34 | 快速诘问全链路门禁 | `tests/unit/interrogation-orchestrator-m1.test.ts` | **已完成（测试通过）** |
+| **D-01** | #35 | M3/M5 策略与模板降级 | `src/lib/strategy-engine.ts` | **已完成（已合入基线）** |
+| **D-02** | #36 | M7/M8 策略与高风险护栏 | `src/lib/strategy-engine.ts` | **已完成（已合入基线）** |
+| **D-03** | #37 | 深度 ModeConfig 与认知轨迹 | `src/lib/cognitive-trajectory.ts` / `CognitiveTrajectoryView.tsx` | **已完成（已合入基线）** |
+| **D-04** | #38 | 深度诘问独立验收 | `tests/unit/cognitive-trajectory.test.ts` | **已完成（测试通过）** |
+| **F-01** | #39 | 角色配置、选择与持久化锁定 | `src/lib/character.ts` | **已完成（已合入基线）** |
+| **F-02** | #40 | 趣味表现层与独立验收 | `src/lib/character.ts` / `SessionFeedbackCue.tsx` | **已完成（测试通过）** |
+| **G-00** | #41 | 互动叙事研究与规则库 | `src/lib/story-run.ts` | **已完成（规范已落地）** |
+| **G-01** | #42 | StoryRun 契约与剧情骨架持久化 | `src/lib/story-run.ts` | **已完成（已合入基线）** |
+| **G-02** | #43 | 受控剧情生成与模板降级 | `src/lib/story-run.ts` | **已完成（已合入基线）** |
+| **G-03** | #44 | 剧情阅读与关键决策卡 UI | `src/app/components/StoryView.tsx` | **已完成（已合入基线）** |
+| **G-04** | #45 | 剧情生命周期与诘问桥接 | `src/lib/story-run.ts` / `src/app/page.tsx` | **已完成（已合入基线）** |
+| **G-05** | #46 | GalGame 端到端验收 | `tests/unit/story-run.test.ts` | **已完成（测试通过）** |
 
-`#30` 是已关闭的 MVP 架构修复票，非本 M1 backlog 子票；它已解除 #23 的服务端/浏览器边界阻塞，不构成 M1 的待办依赖。
+`#30`、`#47`、`#48`、`#50` 均为已合入的架构修复与刘看山素材票，已进入主干基线。
 
-## 0. 执行前置条件
+## 0. 执行结论与归档说明
 
-所有 M1 票均被以下条件阻塞：#23 与 #30 的实现修复已处于基线，真实 Zhihu、LLM、Neon 与 Vercel 环境验收仍须有明确结论，且现有质量门禁必须全绿。P2 刘看山 #47/#48 不阻塞 M1。除非总控 Epic 解锁，不得实现或合并 M1 生产代码。
-
-每张票遵循：一个独立 worktree、GitHub Issue 为编号/范围/状态权威、独立测试证据与 handoff。若涉及 Neon、Vercel、外部供应商或表结构，先遵守架构文档的外部平台与数据库变更门禁。
+#27 ~ #46 涉及的代码实现、组件交付与单元/集成测试已全部在现有 codebase 中完成，不需要重复开发。当前阶段唯一需保留跟踪的是 **#26（M1-00）**，即真实环境验收门禁（Zhihu、LLM、Neon 生产凭据接入后的连通性与端到端闭环确认）。
 
 ## 1. 依赖总览
 

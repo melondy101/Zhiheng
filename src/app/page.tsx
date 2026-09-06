@@ -20,6 +20,9 @@ import { toHistorySessionSnapshots } from '@/lib/history-search';
 import { ownerHeaders } from '@/lib/owner-id';
 import { pickRecoverySession, storageNoticeFor } from '@/lib/session-recovery';
 import { shouldSuggestSummary } from '@/lib/gentle-interrogation';
+import type { QuickTargetId, SessionMode, TransitionActionId } from '@/lib/mode-config';
+import type { CharacterId } from '@/lib/character';
+import type { StoryWorldId } from '@/lib/story-run';
 import HomePage from './components/HomePage';
 import ReportPanel from './components/ReportPanel';
 import StanceSelector from './components/StanceSelector';
@@ -167,7 +170,18 @@ async function pushProfileToServer(profile: import('@/lib/lifecycle').UserProfil
  */
 async function postInterrogate(
   sess: Session,
-  payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint }
+  payload: {
+    action: InterrogateAction;
+    answer?: string;
+    viewpoint?: Viewpoint;
+    mode?: SessionMode;
+    target?: QuickTargetId;
+    transitionChoice?: TransitionActionId;
+    character?: CharacterId;
+    world?: StoryWorldId;
+    choiceId?: string;
+    optionId?: string;
+  }
 ): Promise<InterrogateCallResult> {
   try {
     const res = await fetch('/api/interrogate', {
@@ -331,6 +345,8 @@ export default function Home() {
   const [resultCard, setResultCard] = useState<ResultCard | null>(null);
   const [answer, setAnswer] = useState('');
   const [loading, setLoading] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [recentSessions, setRecentSessions] = useState<Session[]>([]);
   // #21: honest server-storage status line for the session view.
   const [storageNotice, setStorageNotice] = useState<string | null>(null);
   const [hotlist, setHotlist] = useState<{ items: { id: string; title: string; url: string | null }[]; source: 'live' | 'cache' | 'demo'; updatedAt: number; stale?: boolean } | null>(null);
@@ -449,13 +465,21 @@ export default function Home() {
 
   const runInterrogate = async (
     sess: Session,
-    payload: { action: InterrogateAction; answer?: string; viewpoint?: Viewpoint; optimisticId?: string | null }
+    payload: {
+      action: InterrogateAction;
+      answer?: string;
+      viewpoint?: Viewpoint;
+      optimisticId?: string | null;
+      mode?: SessionMode;
+      target?: QuickTargetId;
+      character?: CharacterId;
+      world?: StoryWorldId;
+      transitionChoice?: TransitionActionId;
+      choiceId?: string;
+      optionId?: string;
+    }
   ) => {
-    // Answer submission has its own inline pending state. Replacing the page
-    // with the global loading view here unmounts the conversation and looks
-    // like a full-page reload on every message.
-    const usesFullPageLoading = payload.action !== 'answer';
-    if (usesFullPageLoading) setLoading(true);
+    setFormLoading(true);
     try {
       const res = await postInterrogate(sess, payload);
       if (res.ok) {
@@ -488,7 +512,7 @@ export default function Home() {
         setOptimisticMessageId(null);
       }
     } finally {
-      if (usesFullPageLoading) setLoading(false);
+      setFormLoading(false);
     }
   };
 
@@ -642,8 +666,19 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  useEffect(() => {
+    storageProvider.listSessions().then((list) => {
+      setRecentSessions(list.slice(0, 5));
+    }).catch(() => {});
+  }, [page]);
+
+  const handleResumeSession = (sessionId: string) => {
+    window.location.href = `?session=${sessionId}`;
+  };
+
   const handleStart = async (question: string, initialOpinion: string | null) => {
     setLoading(true);
+    setStartError(null);
     try {
       // Call the server API which runs parallel search providers + report builder
       const res = await fetch('/api/report', {
@@ -707,22 +742,60 @@ export default function Home() {
       window.history.pushState({}, '', `?session=${sessionId}`);
     } catch (err) {
       console.error('Failed to generate report:', err);
+      setStartError(err instanceof Error ? err.message : '生成报告失败，请稍后重试');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleViewpointSelect = async (viewpoint: Viewpoint) => {
+  const handleViewpointSelect = async (
+    viewpoint: Viewpoint,
+    mode?: SessionMode,
+    target?: QuickTargetId,
+    character?: CharacterId,
+    world?: StoryWorldId
+  ) => {
     if (!session) return;
     setSelectedViewpoint(viewpoint);
-    await runInterrogate(session, { action: 'start', viewpoint });
+    await runInterrogate(session, { action: 'start', viewpoint, mode, target, character, world });
   };
 
-  const handleCustomViewpoint = async (text: string) => {
+  const handleCustomViewpoint = async (
+    text: string,
+    mode?: SessionMode,
+    target?: QuickTargetId,
+    character?: CharacterId,
+    world?: StoryWorldId
+  ) => {
     if (!session) return;
     const customViewpoint: Viewpoint = { id: 'custom', text, source: 'user_authored' };
     setSelectedViewpoint(customViewpoint);
-    await runInterrogate(session, { action: 'start', viewpoint: customViewpoint });
+    await runInterrogate(session, { action: 'start', viewpoint: customViewpoint, mode, target, character, world });
+  };
+
+  const handleTransitionChoice = async (choice: TransitionActionId) => {
+    if (!session) return;
+    await runInterrogate(session, { action: 'transition', transitionChoice: choice });
+  };
+
+  const handleStoryChoice = async (choiceId: string, optionId: string) => {
+    if (!session) return;
+    await runInterrogate(session, { action: 'story_choice', choiceId, optionId });
+  };
+
+  const handleStoryEndEarly = async () => {
+    if (!session) return;
+    await runInterrogate(session, { action: 'story_end_early' });
+  };
+
+  const handleStoryComplete = async () => {
+    if (!session) return;
+    await runInterrogate(session, { action: 'story_complete' });
+  };
+
+  const handleStoryBridge = async () => {
+    if (!session) return;
+    await runInterrogate(session, { action: 'story_bridge' });
   };
 
   const handleSendAnswer = async (e: React.FormEvent) => {
@@ -808,7 +881,7 @@ export default function Home() {
   // #48: the cue is derived ONLY from existing state — no parallel business
   // state is introduced (see src/lib/feedback-cue-state.ts).
   const feedbackCueState = deriveFeedbackCueState({
-    loading: loading || formLoading,
+    loading,
     hasSelectedViewpoint: selectedViewpoint !== null,
     completed,
     currentStrategy,
@@ -829,7 +902,17 @@ export default function Home() {
   }
 
   if (page === 'home') {
-    return <HomePage onStart={handleStart} hotlist={hotlist} hotlistLoading={hotlistLoading} />;
+    return (
+      <HomePage
+        onStart={handleStart}
+        hotlist={hotlist}
+        hotlistLoading={hotlistLoading}
+        loading={loading}
+        errorMessage={startError}
+        recentSessions={recentSessions}
+        onResumeSession={handleResumeSession}
+      />
+    );
   }
 
   // #19: honest cache disclosure — show when the cached channel data was
@@ -922,6 +1005,12 @@ export default function Home() {
               followUp={followUp}
               directiveRound={directiveRound}
               suggestSummary={suggestSummary}
+              session={session}
+              onTransitionChoice={handleTransitionChoice}
+              onStoryChoice={handleStoryChoice}
+              onStoryEndEarly={handleStoryEndEarly}
+              onStoryComplete={handleStoryComplete}
+              onStoryBridge={handleStoryBridge}
             />
           )}
 

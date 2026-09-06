@@ -25,6 +25,8 @@ export interface Message {
    * advance the interrogation round.
    */
   uncertain?: boolean;
+  strategy?: import('./strategy-engine').StrategyId;
+  round?: number;
 }
 
 /**
@@ -172,6 +174,10 @@ export interface Session {
   transitionChoice?: import('./mode-config').TransitionActionId | null;
   /** #D-03: Recorded cognitive trajectory events. */
   cognitiveTrajectory?: import('./cognitive-trajectory').CognitiveTrajectoryEvent[];
+  /** #F-01: Selected character for fun mode ('relaxed_friend' | 'ancient_scholar' | 'anime_partner'). */
+  character?: import('./character').CharacterId | null;
+  /** #G-01: Active StoryRun for GalGame interactive story mode. */
+  storyRun?: import('./story-run').StoryRun | null;
   /**
    * Server-owned interrogation state (#15). The orchestration API is the only
    * writer; the client mirrors it into local storage as the refresh/reload
@@ -237,6 +243,8 @@ export interface InterrogationState {
   target?: import('./mode-config').QuickTargetId | null;
   orientationRounds?: number;
   transitionChoice?: import('./mode-config').TransitionActionId | null;
+  character?: import('./character').CharacterId | null;
+  storyRun?: import('./story-run').StoryRun | null;
 }
 
 /** Actions accepted by the interrogation orchestration API (#15, #17, #Q-02). */
@@ -246,7 +254,11 @@ export type InterrogateAction =
   | 'continue'
   | 'complete'
   | 'transition'
-  | 'set_target';
+  | 'set_target'
+  | 'story_choice'
+  | 'story_end_early'
+  | 'story_complete'
+  | 'story_bridge';
 
 /** Uncertain-answer hint returned by the orchestration API (#10 semantics). */
 export interface InterrogateHint {
@@ -322,6 +334,10 @@ export interface InterrogateResponseBody {
   transitionActions?: import('./mode-config').TransitionAction[];
   /** #D-03: Cognitive trajectory events. */
   cognitiveTrajectory?: import('./cognitive-trajectory').CognitiveTrajectoryEvent[];
+  /** #F-01: Character in fun mode. */
+  character?: import('./character').CharacterId | null;
+  /** #G-01: StoryRun in story mode. */
+  storyRun?: import('./story-run').StoryRun | null;
 }
 
 export interface ResultCard {
@@ -374,6 +390,14 @@ export interface LLMProvider {
     sources: import('./report-synthesis').SynthesisSource[];
     historySources?: import('./report-synthesis').SynthesisSource[];
   }): Promise<ReportSynthesis | null>;
+  /**
+   * Produce a structured knowledge graph (entities and logical relations) for a finished report.
+   * Optional: returns null to fall back to the deterministic graph builder.
+   */
+  generateKnowledgeGraph?(args: {
+    report: Report;
+    sources: Source[];
+  }): Promise<import('./knowledge-graph').KnowledgeGraph | null>;
 }
 
 export interface StorageProvider {

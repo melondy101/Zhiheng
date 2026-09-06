@@ -17,6 +17,8 @@ import { readOwnerId } from '@/lib/owner-id';
 import { handleInterrogate } from '@/lib/interrogation-orchestrator';
 import type { InterrogateAction, Session, Viewpoint } from '@/lib/providers';
 import type { QuickTargetId, SessionMode, TransitionActionId } from '@/lib/mode-config';
+import type { CharacterId } from '@/lib/character';
+import type { StoryWorldId } from '@/lib/story-run';
 
 export const runtime = 'nodejs';
 
@@ -27,6 +29,10 @@ const ACTIONS: InterrogateAction[] = [
   'complete',
   'transition',
   'set_target',
+  'story_choice',
+  'story_end_early',
+  'story_complete',
+  'story_bridge',
 ];
 
 function isInterrogateAction(value: unknown): value is InterrogateAction {
@@ -62,6 +68,10 @@ export async function POST(request: Request) {
     mode?: unknown;
     target?: unknown;
     transitionChoice?: unknown;
+    character?: unknown;
+    world?: unknown;
+    choiceId?: unknown;
+    optionId?: unknown;
   };
 
   if (typeof body.sessionId !== 'string' || body.sessionId.length === 0) {
@@ -69,7 +79,7 @@ export async function POST(request: Request) {
   }
   if (!isInterrogateAction(body.action)) {
     return NextResponse.json(
-      { error: 'Invalid action, expected start | answer | continue | complete | transition | set_target' },
+      { error: 'Invalid action' },
       { status: 400 }
     );
   }
@@ -92,6 +102,10 @@ export async function POST(request: Request) {
         typeof body.transitionChoice === 'string'
           ? (body.transitionChoice as TransitionActionId)
           : undefined,
+      character: typeof body.character === 'string' ? (body.character as CharacterId) : undefined,
+      world: typeof body.world === 'string' ? (body.world as StoryWorldId) : undefined,
+      choiceId: typeof body.choiceId === 'string' ? body.choiceId : undefined,
+      optionId: typeof body.optionId === 'string' ? body.optionId : undefined,
       storage: scope.sessions,
       generateQuestion: (strategy, session) =>
         llmProvider.generateStrategyQuestion(strategy, session),

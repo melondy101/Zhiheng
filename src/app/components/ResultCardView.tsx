@@ -2,9 +2,11 @@
 
 import { buildDetailedResultCard, type DetailedResultCard } from '@/lib/result-card-builder';
 import type { Session } from '@/lib/providers';
+import CognitiveTrajectoryView from './CognitiveTrajectoryView';
 
 interface ResultCardViewProps {
   card: DetailedResultCard;
+  session?: Session;
   onNewSession: () => void;
 }
 
@@ -35,13 +37,45 @@ export function ResultCardViewFromSession({ session, onNewSession }: {
   onNewSession: () => void;
 }) {
   const card = buildDetailedResultCard(session);
-  return <ResultCardView card={card} onNewSession={onNewSession} />;
+  return <ResultCardView card={card} session={session} onNewSession={onNewSession} />;
 }
 
-export default function ResultCardView({ card, onNewSession }: ResultCardViewProps) {
+export default function ResultCardView({ card, session, onNewSession }: ResultCardViewProps) {
+  const trajectory = session?.cognitiveTrajectory;
+  const storyRun = session?.storyRun;
+
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <h3 className="text-xl font-bold text-blue-600 mb-4">思辨成果卡</h3>
+    <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <h3 className="text-xl font-bold text-blue-600 mb-2">思辨成果卡</h3>
+
+      {/* Cognitive Trajectory (#D-03) */}
+      {trajectory && trajectory.length > 0 && (
+        <section className="mb-4">
+          <CognitiveTrajectoryView events={trajectory} />
+        </section>
+      )}
+
+      {/* GalGame Story Outcome (#G-05) */}
+      {storyRun && (
+        <section className="mb-4 bg-purple-50/70 border border-purple-200 rounded-xl p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-bold text-purple-900">推演剧本结局反思</h4>
+            <span className="text-[10px] text-purple-700 bg-purple-100 px-2 py-0.5 rounded">
+              Act {storyRun.currentActIndex + 1}
+            </span>
+          </div>
+          {storyRun.outcomeNarrative && (
+            <p className="text-xs text-gray-800 leading-relaxed font-serif">
+              {storyRun.outcomeNarrative}
+            </p>
+          )}
+          {storyRun.reflectionSummary && (
+            <p className="text-xs text-purple-900 bg-white/80 p-3 rounded border border-purple-100 leading-relaxed">
+              {storyRun.reflectionSummary}
+            </p>
+          )}
+        </section>
+      )}
 
       {card.initialExpression && (
         <section className="mb-4">

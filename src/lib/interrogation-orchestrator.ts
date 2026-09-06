@@ -47,6 +47,15 @@ import {
   getModeConfig,
 } from './mode-config';
 import { extractCognitiveTrajectory } from './cognitive-trajectory';
+import { type CharacterId, formatCharacterQuestion, buildCharacterOpeningMessage } from './character';
+import {
+  type StoryWorldId,
+  generateStoryRun,
+  makeStoryChoice,
+  completeStory,
+  endStoryEarly,
+  bridgeStoryToInterrogation,
+} from './story-run';
 
 export interface HandleInterrogateInput {
   sessionId: string;
@@ -65,6 +74,14 @@ export interface HandleInterrogateInput {
    * #Q-02: Selected transition action card.
    */
   transitionChoice?: TransitionActionId;
+  /** #F-01: Character for fun mode. */
+  character?: CharacterId;
+  /** #G-01: World for story mode. */
+  world?: StoryWorldId;
+  /** #G-03: Story choice ID. */
+  choiceId?: string;
+  /** #G-03: Selected option ID. */
+  optionId?: string;
   /**
    * #26/T3: the optimistic user message id sent by the client before the
    * API call. When present and matching a `pending` message, the server
@@ -174,6 +191,8 @@ function toResponseBody(
     orientationRounds: session.orientationRounds ?? 0,
     transitionActions: phase === 'transitionChoice' ? TRANSITION_ACTIONS : undefined,
     cognitiveTrajectory: trajectory,
+    character: session.character ?? null,
+    storyRun: session.storyRun ?? null,
   };
 }
 
@@ -196,20 +215,41 @@ async function planNextRound(
   generateQuestion: HandleInterrogateInput['generateQuestion'],
   uncertainStreak: number
 ): Promise<Session> {
+  const isFirstRound = answeredRounds(session) === 0;
   const strategy = pickNextStrategy(session);
-  const fb = await withFallback(strategy, session, () => generateQuestion(strategy, session));
-  recordStrategy(session, strategy);
+  let questionText: string;
+  let usedFallback = false;
+
+  // Round 1 in Fun mode uses character opening greeting + orientation question
+  if (isFirstRound && session.mode === 'fun' && session.character && session.selectedViewpoint) {
+    questionText = buildCharacterOpeningMessage(
+      session.character,
+      session.selectedViewpoint.text,
+      session.target
+    );
+    recordStrategy(session, strategy);
+  } else {
+    const fb = await withFallback(strategy, session, () => generateQuestion(strategy, session));
+    recordStrategy(session, strategy);
+    questionText = fb.question;
+    usedFallback = fb.usedFallback;
+
+    if (session.mode === 'fun' && session.character) {
+      questionText = formatCharacterQuestion(session.character, questionText);
+    }
+  }
+
   const next: InterrogationState = {
     round: answeredRounds(session) + 1,
     strategy,
-    assistantQuestion: fb.question,
-    usedFallback: fb.usedFallback,
+    assistantQuestion: questionText,
+    usedFallback,
     pendingCheckpoint: false,
     uncertainStreak,
   };
   return {
     ...session,
-    messages: [...session.messages, makeAssistantMessage(fb.question)],
+    messages: [...session.messages, makeAssistantMessage(questionText)],
     interrogation: next,
     updatedAt: Date.now(),
   };
@@ -291,17 +331,95 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
       return { ok: true, body: toResponseBody(session, null, false) };
     }
     const mode = input.mode ?? session.mode ?? 'quick';
-    const target = input.target ?? session.target ?? null;
+    const target = input.target ?? session.target ?? (mode === 'quick' ? 'clarify_position' : null);
+    const character = mode === 'fun' ? (session.character ?? input.character ?? 'relaxed_friend') : (session.character ?? null);
     const selected: Viewpoint = { ...viewpoint, selectedAt: Date.now() };
+    const phase: SessionPhase = mode === 'quick' ? 'orientation' : (session.phase ?? 'interrogation');
     const prepared: Session = {
       ...session,
       selectedViewpoint: selected,
       mode,
       target,
-      phase: session.phase ?? 'interrogation',
+      character,
+      phase,
+      orientationRounds: 0,
     };
+    if (mode === 'story' && !prepared.storyRun) {
+      const world = input.world ?? 'future_city';
+      prepared.storyRun = generateStoryRun(
+        session.id,
+        session.report ?? {
+          question: session.question,
+          title: session.question,
+          knowledgePoints: [],
+          content: '',
+          viewpoints: [],
+          references: [],
+          citations: {},
+        },
+        prepared.selectedViewpoint,
+        world
+      );
+    }
     prepared.cognitiveTrajectory = extractCognitiveTrajectory(prepared);
+    if (mode === 'story') {
+      await storage.saveSession(prepared);
+      return { ok: true, body: toResponseBody(prepared, null, false) };
+    }
     const planned = await planNextRound(prepared, generateQuestion, state.uncertainStreak);
+    await storage.saveSession(planned);
+    return { ok: true, body: toResponseBody(planned, null, false) };
+  }
+
+  if (action === 'story_choice') {
+    if (!session.storyRun || !input.choiceId || !input.optionId) {
+      return { ok: false, status: 400, error: 'Missing storyRun, choiceId, or optionId' };
+    }
+    const updatedStory = makeStoryChoice(session.storyRun, input.choiceId, input.optionId);
+    const updated: Session = {
+      ...session,
+      storyRun: updatedStory,
+      updatedAt: Date.now(),
+    };
+    await storage.saveSession(updated);
+    return { ok: true, body: toResponseBody(updated, null, false) };
+  }
+
+  if (action === 'story_complete') {
+    if (!session.storyRun) {
+      return { ok: false, status: 400, error: 'No active storyRun' };
+    }
+    const updatedStory = completeStory(session.storyRun);
+    const card = buildSimpleResultCard(session);
+    const updated: Session = {
+      ...session,
+      completed: true,
+      resultCard: card,
+      storyRun: updatedStory,
+      updatedAt: Date.now(),
+    };
+    await storage.saveSession(updated);
+    return { ok: true, body: toResponseBody(updated, null, false) };
+  }
+
+  if (action === 'story_end_early') {
+    if (!session.storyRun) {
+      return { ok: false, status: 400, error: 'No active storyRun' };
+    }
+    const updatedStory = endStoryEarly(session.storyRun);
+    const updated: Session = {
+      ...session,
+      storyRun: updatedStory,
+      updatedAt: Date.now(),
+    };
+    await storage.saveSession(updated);
+    return { ok: true, body: toResponseBody(updated, null, false) };
+  }
+
+  if (action === 'story_bridge') {
+    const bridged = bridgeStoryToInterrogation(session);
+    bridged.cognitiveTrajectory = extractCognitiveTrajectory(bridged);
+    const planned = await planNextRound(bridged, generateQuestion, 0);
     await storage.saveSession(planned);
     return { ok: true, body: toResponseBody(planned, null, false) };
   }
@@ -321,6 +439,7 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     const choice = input.transitionChoice;
     let target = session.target;
     let phase: SessionPhase = 'interrogation';
+    let mode: SessionMode = session.mode ?? 'quick';
 
     if (choice === 'continue_orientation') {
       phase = 'orientation';
@@ -334,6 +453,9 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
       };
       await storage.saveSession(updated);
       return { ok: true, body: toResponseBody(updated, null, false) };
+    } else if (choice === 'start_challenge') {
+      mode = 'deep';
+      phase = 'interrogation';
     } else if (choice === 'inspect_evidence') {
       target = 'clarify_position';
     } else if (choice === 'inspect_counterargument') {
@@ -342,7 +464,8 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
 
     const updated: Session = {
       ...session,
-      phase: 'interrogation',
+      phase,
+      mode,
       target,
       transitionChoice: choice ?? null,
       updatedAt: Date.now(),
@@ -521,6 +644,39 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
 
   const hint: InterrogateHint | null = null;
 
+  // #Q-01 / #Q-02: In quick mode, completing the orientation questions (or target=understand_report)
+  // transitions to the transitionChoice phase so the user can review and select next steps.
+  if (withAnswer.mode === 'quick') {
+    const orientationRounds = (currentSession.orientationRounds ?? 0) + 1;
+    if (withAnswer.target === 'understand_report' || orientationRounds >= 3) {
+      const transitioned: Session = {
+        ...withAnswer,
+        phase: 'transitionChoice',
+        orientationRounds,
+        messages: [
+          ...withAnswer.messages,
+          makeAssistantMessage('已为您梳理完本篇研报的关键脉络与核心争议。接下来，您想如何继续？'),
+        ],
+        interrogation: {
+          round: state.round + 1,
+          strategy: null,
+          assistantQuestion: null,
+          usedFallback: false,
+          pendingCheckpoint: false,
+          uncertainStreak: 0,
+        },
+        updatedAt: Date.now(),
+      };
+      await storage.saveSession(transitioned);
+      return {
+        ok: true,
+        body: toResponseBody(transitioned, null, false, {
+          directiveRound: nextDirectiveRound,
+        }),
+      };
+    }
+  }
+
   // #26/R3: PRD v4.2 §5.3 removed the v4.1 fixed 5/8/11 round checkpoints.
   // The only legitimate gate is the three-round summary gate, surfaced as
   // `suggestSummary` after every 3rd directive round. Substantive answers
@@ -541,8 +697,11 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
   // the round counter semantics.
   const gentleMessages: Message[] = [];
   const directAnswer = gentle.aiReply;
-  const nextAssistantQuestion =
+  let nextAssistantQuestion =
     gentle.intent === 'question' ? gentle.followUp : fb.question;
+  if (withAnswer.mode === 'fun' && withAnswer.character && nextAssistantQuestion) {
+    nextAssistantQuestion = formatCharacterQuestion(withAnswer.character, nextAssistantQuestion);
+  }
   const combined = [directAnswer, nextAssistantQuestion].filter(Boolean).join('\n\n');
   if (combined) {
     gentleMessages.push(makeAssistantMessage(combined));

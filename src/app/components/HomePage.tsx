@@ -22,6 +22,10 @@ interface HomePageProps {
   onStart: (question: string, initialOpinion: string | null) => void;
   hotlist?: HotlistResult | null;
   hotlistLoading?: boolean;
+  loading?: boolean;
+  errorMessage?: string | null;
+  recentSessions?: Array<{ id: string; question: string; updatedAt: number }>;
+  onResumeSession?: (sessionId: string) => void;
 }
 
 function formatTime(ts: number): string {
@@ -46,7 +50,15 @@ export function sourceLabel(source: 'live' | 'cache' | 'demo', ts: number, stale
   }
 }
 
-export default function HomePage({ onStart, hotlist, hotlistLoading }: HomePageProps) {
+export default function HomePage({
+  onStart,
+  hotlist,
+  hotlistLoading,
+  loading = false,
+  errorMessage,
+  recentSessions,
+  onResumeSession,
+}: HomePageProps) {
   const [question, setQuestion] = useState('');
   const [initialOpinion, setInitialOpinion] = useState('');
 
@@ -61,7 +73,7 @@ export default function HomePage({ onStart, hotlist, hotlistLoading }: HomePageP
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!question.trim()) return;
+    if (!question.trim() || loading) return;
     onStart(question.trim(), initialOpinion.trim() || null);
   };
 
@@ -80,6 +92,11 @@ export default function HomePage({ onStart, hotlist, hotlistLoading }: HomePageP
         {/* Primary action: Question input */}
         <div className="bg-white rounded-xl shadow-xs border p-8">
           <h2 className="text-xl font-semibold mb-6">开始思考</h2>
+          {errorMessage && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg">
+              {errorMessage}
+            </div>
+          )}
           <form onSubmit={handleSubmit}>
             <div className="mb-4">
               <label htmlFor="question" className="block text-sm font-medium mb-2">
@@ -92,6 +109,7 @@ export default function HomePage({ onStart, hotlist, hotlistLoading }: HomePageP
                 placeholder="例如：AI是否会取代人类创造力？"
                 className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                 rows={3}
+                disabled={loading}
               />
             </div>
 
@@ -105,18 +123,48 @@ export default function HomePage({ onStart, hotlist, hotlistLoading }: HomePageP
                 placeholder="你目前的看法是什么？"
                 className="w-full p-3 border rounded-lg mt-2 focus:ring-2 focus:ring-blue-500 text-sm"
                 rows={2}
+                disabled={loading}
               />
             </details>
 
             <button
               type="submit"
-              disabled={!question.trim()}
-              className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              disabled={!question.trim() || loading}
+              className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
             >
-              开始思考
+              {loading ? (
+                <>
+                  <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>检索分析中...</span>
+                </>
+              ) : (
+                '开始思考'
+              )}
             </button>
           </form>
         </div>
+
+        {/* Recent sessions if available */}
+        {recentSessions && recentSessions.length > 0 && (
+          <div className="bg-white rounded-xl shadow-xs border p-6">
+            <h2 className="text-base font-semibold text-gray-800 mb-3">最近会话</h2>
+            <div className="space-y-2">
+              {recentSessions.map((sess) => (
+                <button
+                  key={sess.id}
+                  type="button"
+                  onClick={() => onResumeSession?.(sess.id)}
+                  className="w-full text-left p-3 rounded-lg hover:bg-gray-50 border border-gray-100 flex items-center justify-between text-sm transition-colors"
+                >
+                  <span className="font-medium text-gray-800 truncate pr-4">{sess.question}</span>
+                  <span className="text-xs text-gray-400 shrink-0 font-mono" suppressHydrationWarning>
+                    {formatTime(sess.updatedAt)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Hotlist section as inspiration */}
         {hotlistLoading && (
@@ -132,7 +180,7 @@ export default function HomePage({ onStart, hotlist, hotlistLoading }: HomePageP
                 <h2 className="text-base font-semibold text-gray-800">知乎热榜</h2>
                 <span className="text-xs text-gray-400">（点击直接填入思考问题）</span>
               </div>
-              <span className="text-xs text-gray-500" data-testid="hotlist-source-state">
+              <span className="text-xs text-gray-500" data-testid="hotlist-source-state" suppressHydrationWarning>
                 {sourceLabel(hotlist.source, hotlist.updatedAt, hotlist.stale)}
               </span>
             </div>

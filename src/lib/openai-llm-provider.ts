@@ -26,10 +26,16 @@
 // Secrets are read from the server environment only. No NEXT_PUBLIC_ variable
 // is used anywhere in this module, so nothing here can reach the browser.
 
-import type { LLMProvider, ReportSynthesis, Session } from './providers';
+import type { LLMProvider, ReportSynthesis, Session, Report, Source } from './providers';
+import type { KnowledgeGraph } from './knowledge-graph';
+import {
+  buildGraphExtractionMessages,
+  parseGraphExtractionResponse,
+} from './knowledge-graph-llm';
 import { STRATEGIES, type StrategyId } from './strategy-engine';
 import { buildInterrogationContext, selectRoundSources } from './interrogation-context';
 import { logRequest, maskSensitiveHeaders, previewBody } from './request-log';
+import { getCharacter, getCharacterPromptGuidance } from './character';
 import {
   buildFinalSynthesisMessages,
   buildSynthesisMessages,
@@ -143,11 +149,21 @@ export function buildStrategyQuestionMessages(
   const context = buildInterrogationContext(session, strategy);
   const strategyInfo = STRATEGIES[strategy];
 
-  const system = [
+  const systemParts = [
     SYSTEM_PREAMBLE,
     `当前追问策略：${strategyInfo.name}（${strategyInfo.description}）。`,
-    SAFETY_CONSTRAINTS,
-  ].join('\n');
+  ];
+
+  if (session.mode === 'fun' && session.character) {
+    systemParts.push(getCharacterPromptGuidance(session.character));
+  } else if (session.phase === 'orientation') {
+    systemParts.push(
+      '【阶段说明：当前处于定向引导阶段】请以温和启发、引导思考为主，帮助用户梳理核心关切与事实支撑，避免生硬或压迫性的诘问。'
+    );
+  }
+
+  systemParts.push(SAFETY_CONSTRAINTS);
+  const system = systemParts.join('\n');
 
   const evidenceLines = selectRoundSources(session).map(({ index, source }) => {
     const title = truncate(source.title ?? '', EVIDENCE_TITLE_MAX_CHARS) || '（无标题）';
@@ -249,7 +265,8 @@ export function isValidQuestionText(content: string): boolean {
 
 /**
  * Extract `choices[0].message.content` from an untrusted response body,
- * field-by-field. Anything missing or non-string is null (no coercion).
+ * field-by-field. Handles models (e.g. DeepSeek reasoner/flash) that return
+ * non-empty reasoning_content when content is empty.
  */
 export function extractChoiceContent(body: unknown): string | null {
   if (typeof body !== 'object' || body === null) return null;
@@ -261,6 +278,13 @@ export function extractChoiceContent(body: unknown): string | null {
   const message = (first as Record<string, unknown>).message;
   if (typeof message !== 'object' || message === null) return null;
   const content = (message as Record<string, unknown>).content;
+  if (typeof content === 'string' && content.trim().length > 0) {
+    return content;
+  }
+  const reasoningContent = (message as Record<string, unknown>).reasoning_content;
+  if (typeof reasoningContent === 'string' && reasoningContent.trim().length > 0) {
+    return reasoningContent;
+  }
   return typeof content === 'string' ? content : null;
 }
 
@@ -354,7 +378,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         model: this.config.model,
         messages,
         temperature: 0.3,
-        max_tokens: 2048,
+        max_tokens: 4096,
       }),
       this.config.synthesisTimeoutMs
     );
@@ -369,6 +393,40 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
       );
     }
     return synthesis;
+  }
+
+  /**
+   * Extract semantic knowledge graph (entities and logical relations) for a report via LLM.
+   */
+  async generateKnowledgeGraph(args: {
+    report: Report;
+    sources: Source[];
+  }): Promise<KnowledgeGraph | null> {
+    const { report, sources } = args;
+    if (!report.question) return null;
+
+    const messages = buildGraphExtractionMessages(report, sources);
+    const body = await this.postChatCompletion(
+      JSON.stringify({
+        model: this.config.model,
+        messages,
+        temperature: 0.3,
+        max_tokens: 4096,
+      }),
+      this.config.synthesisTimeoutMs
+    );
+
+    const content = extractChoiceContent(body);
+    if (content === null) {
+      throw new Error('LLM API returned an unexpected response shape for knowledge graph extraction');
+    }
+
+    const graph = parseGraphExtractionResponse(content, report);
+    if (!graph) {
+      throw new Error('LLM knowledge graph extraction failed validation');
+    }
+
+    return graph;
   }
 
   /**

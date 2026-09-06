@@ -23,12 +23,19 @@ Single-context layout. See `docs/agents/domain.md`.
 - 完成票的 handoff 必须写到 `.scratch/agent-runs/ticket-NN/HANDOFF.md`；控制证据写到 `.scratch/agent-runs/control/HANDOFF.md`
 - 凭据绝不在 commit、handoff、控制台输出任何位置以明文出现；只报告布尔（CONFIGURED / EMPTY_OR_MISSING）
 
-## 当前阶段状态（截至 2026-09-02）
+## 当前阶段状态（截至 2026-09-05）
 
-- 已有实现证据：`#19 #20 #21 #22`（历史内部编号）、GitHub #23（移除历史材料并再生成，integration `81771a1`，已关闭）、GitHub #30（服务端/浏览器存储边界修复，已关闭）、GitHub #47（刘看山反馈组件/资源/无障碍降级，integration `52c904a`）、GitHub #48（状态机接入 + 浏览器 Golden Path，integration `fd9da7b`）与 GitHub #50（官方刘看山透明 GIF 替换原 SVG 占位，integration `f35a711`，已关闭）。#47 / #48 已合入但未授权关闭。
-- M1 总控为 **GitHub #26**；在真实 Zhihu、LLM、Neon 与 Vercel 验收有明确通过或受控阻塞结论，且现有质量门禁全绿前，不得开始或合并 M1 生产代码。
-- 上次同步：2026-09-02（#50 已合入 integration 并关闭；P2 刘看山素材替换完成）
-- 详细控制证据：`.scratch/agent-runs/control/HANDOFF.md`
+- 已归档并合入主干：
+  - 历史基线与架构修复：#19 #20 #21 #22、GitHub #23（移除历史材料并再生成，已关闭）、GitHub #30（服务端/浏览器存储边界修复，已关闭）。
+  - 刘看山组件与素材：GitHub #47（刘看山反馈组件/资源/无障碍降级）、GitHub #48（状态机接入 + 浏览器 Golden Path）、GitHub #50（官方刘看山透明 GIF 替换原 SVG 占位，已关闭）。
+  - M1 核心模块（#27 ~ #46 全部归档并合入）：
+    - 知识图谱（#27 / #28 / #29 KG-01~03）：数据契约抽取、力导向图 UI、降级恢复与单测。
+    - 快速诘问（#31 / #32 / #33 / #34 Q-01~04）：ModeConfig、定向阶段、轻量选择卡、3-5轮编排与全链路测试。
+    - 深度诘问（#35 / #36 / #37 / #38 D-01~04）：M1~M8 八策略、认知轨迹追溯、非审判护栏与独立单测。
+    - 趣味模式（#39 / #40 F-01~02）：三角色配置锁定、表现层与刘看山映射。
+    - GalGame（#41 ~ #46 G-00~05）：三幕剧骨架、受控剧情生成、决策卡 UI、桥接与端到端测试。
+- 当前唯一活跃门禁：M1 总控 **GitHub #26 (M1-00)**；待真实 Zhihu、LLM、Neon 与 Vercel 生产环境配置就绪后执行最终联调验收。
+- 详细控制与归档记录：`.scratch/agent-runs/control/HANDOFF.md`
 
 ## 质量门禁（不可绕过）
 

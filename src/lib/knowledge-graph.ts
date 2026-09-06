@@ -288,3 +288,29 @@ export function safeBuildGraph(report: Report, sources: Source[]): KnowledgeGrap
     return buildFallbackGraph(report, err instanceof Error ? err.message : String(err));
   }
 }
+
+/**
+ * Asynchronous graph builder that attempts LLM extraction first, falling back to
+ * deterministic extraction on any failure or missing LLM.
+ */
+export async function safeBuildGraphAsync(
+  report: Report,
+  sources: Source[],
+  llmProvider?: import('./providers').LLMProvider | null
+): Promise<KnowledgeGraph> {
+  if (llmProvider && typeof llmProvider.generateKnowledgeGraph === 'function') {
+    try {
+      const llmGraph = await llmProvider.generateKnowledgeGraph({ report, sources });
+      if (llmGraph) {
+        const check = validateGraph(llmGraph, report);
+        if (check.valid) {
+          return llmGraph;
+        }
+      }
+    } catch {
+      // Degrade to deterministic graph extraction below
+    }
+  }
+
+  return safeBuildGraph(report, sources);
+}

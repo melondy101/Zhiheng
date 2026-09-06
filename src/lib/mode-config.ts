@@ -10,10 +10,11 @@ export type SessionMode = 'quick' | 'deep' | 'fun' | 'story';
 
 export type SessionPhase = 'orientation' | 'transitionChoice' | 'interrogation' | 'completed';
 
-export type QuickTargetId = 'clarify_position' | 'weigh_decision' | 'refine_expression';
+export type QuickTargetId = 'understand_report' | 'clarify_position' | 'weigh_decision' | 'refine_expression';
 
 export type TransitionActionId =
   | 'challenge_claim'
+  | 'start_challenge'
   | 'inspect_evidence'
   | 'inspect_counterargument'
   | 'continue_orientation';
@@ -21,6 +22,7 @@ export type TransitionActionId =
 export interface TransitionAction {
   id: TransitionActionId;
   title: string;
+  label?: string;
   description: string;
   recommended?: boolean;
 }
@@ -54,22 +56,26 @@ export const TRANSITION_ACTIONS: TransitionAction[] = [
   {
     id: 'challenge_claim',
     title: '开始挑战当前判断',
+    label: '开始挑战当前判断',
     description: '进入正式诘问，深入检验观点的逻辑自洽与隐含漏洞。',
     recommended: true,
   },
   {
     id: 'inspect_evidence',
     title: '先检查判断依据',
+    label: '先检查判断依据',
     description: '查看报告核心证据链与事实引用，检验论据支撑力度。',
   },
   {
     id: 'inspect_counterargument',
     title: '先理解最强反方',
+    label: '先理解最强反方',
     description: '剖析对立立场的核心质疑与反例，评估反驳难度。',
   },
   {
     id: 'continue_orientation',
     title: '继续梳理报告',
+    label: '继续梳理报告',
     description: '继续围绕报告进行轻量梳理，澄清背景与核心概念。',
   },
 ];

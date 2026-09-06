@@ -6,9 +6,14 @@ import {
   validateGraph,
   buildFallbackGraph,
   safeBuildGraph,
+  safeBuildGraphAsync,
   type KnowledgeGraph,
   type GraphNodeType,
 } from '../../src/lib/knowledge-graph';
+import {
+  buildGraphExtractionMessages,
+  parseGraphExtractionResponse,
+} from '../../src/lib/knowledge-graph-llm';
 
 describe('Knowledge Graph Contract (KG-01, KG-02, KG-03)', () => {
   const makeSource = (
@@ -241,6 +246,189 @@ describe('Knowledge Graph Contract (KG-01, KG-02, KG-03)', () => {
       assert.deepStrictEqual(restored.knowledgeGraph, originalGraph);
       assert.strictEqual(restored.knowledgeGraph?.nodes.length, originalGraph.nodes.length);
       assert.strictEqual(restored.reportSourceState?.zhihu, 'live');
+    });
+  });
+
+  describe('KG-04: LLM Structured Knowledge Graph Extraction', () => {
+    it('buildGraphExtractionMessages constructs structured system and user prompts', () => {
+      const sources = [
+        makeSource('s1', 'zhihu', '自适应学习系统演进', '实证表明个性化教学显著提升学习效率'),
+        makeSource('s2', 'web', 'AI in Education Risks', 'Discussion on cognitive outsourcing and privacy'),
+      ];
+      const report = makeReport(sources, 'AI是否会重塑教育形态？');
+      const messages = buildGraphExtractionMessages(report, sources);
+
+      assert.strictEqual(messages.length, 2);
+      assert.strictEqual(messages[0].role, 'system');
+      assert.strictEqual(messages[1].role, 'user');
+      assert.ok(messages[0].content.includes('知识图谱结构化抽取引擎'));
+      assert.ok(messages[0].content.includes('谓词受控'));
+      assert.ok(messages[1].content.includes('AI是否会重塑教育形态？'));
+      assert.ok(messages[1].content.includes('自适应学习系统演进'));
+    });
+
+    it('parseGraphExtractionResponse parses and validates high quality LLM response', () => {
+      const sources = [
+        makeSource('s1', 'zhihu', '自适应学习系统演进', '实证表明个性化教学提升效果'),
+        makeSource('s2', 'web', '教育伦理与隐私风险', '算法偏见与认知惰性分析'),
+      ];
+      const report = makeReport(sources, 'AI是否会重塑教育形态？');
+
+      const mockLLMJson = JSON.stringify({
+        nodes: [
+          {
+            id: 'n0',
+            label: 'AI重塑教育形态',
+            type: 'topic',
+            description: '核心讨论议题',
+            sourceCitations: [],
+          },
+          {
+            id: 'n1',
+            label: '自适应学习系统',
+            type: 'concept',
+            description: '根据学生动态调整进度的AI算法',
+            sourceCitations: [1],
+          },
+          {
+            id: 'n2',
+            label: '个性化教学效果',
+            type: 'claim',
+            description: '提升知识掌握与自主性',
+            sourceCitations: [1],
+          },
+          {
+            id: 'n3',
+            label: '认知外包风险',
+            type: 'claim',
+            description: '长期依赖可能导致思维惰性',
+            sourceCitations: [2],
+          },
+          {
+            id: 'n4',
+            label: '清华大学教育团队',
+            type: 'actor',
+            description: '实证研究发布机构',
+            sourceCitations: [1],
+          },
+        ],
+        edges: [
+          {
+            id: 'e1',
+            from: 'n1',
+            to: 'n2',
+            predicate: '支持',
+            label: '显著赋能',
+            type: 'supported',
+            citationId: 1,
+            description: '自适应算法直接支持个性化教学',
+          },
+          {
+            id: 'e2',
+            from: 'n2',
+            to: 'n3',
+            predicate: '对比',
+            label: '伴生风险',
+            type: 'inferred',
+            description: '教学效能与认知外包形成对立张力',
+          },
+          {
+            id: 'e3',
+            from: 'n0',
+            to: 'n1',
+            predicate: '依赖',
+            label: '核心支柱',
+            type: 'inferred',
+            description: '教育重塑的核心技术支柱',
+          },
+          {
+            id: 'e4',
+            from: 'n4',
+            to: 'n1',
+            predicate: '主张',
+            label: '研发推进',
+            type: 'supported',
+            citationId: 1,
+            description: '团队主张推进自适应学习实践',
+          },
+        ],
+      });
+
+      const graph = parseGraphExtractionResponse(mockLLMJson, report);
+      assert.ok(graph !== null, 'Graph parsing should succeed');
+      assert.strictEqual(graph.isFallback, false);
+      assert.strictEqual(graph.nodes.length, 5);
+      assert.strictEqual(graph.nodes[0].id, 'n0');
+      assert.strictEqual(graph.nodes[0].type, 'topic');
+
+      const supported = graph.edges.filter((e) => e.type === 'supported');
+      assert.strictEqual(supported.length, 2);
+      assert.strictEqual(supported[0].citationId, 1);
+    });
+
+    it('parseGraphExtractionResponse handles markdown fences and downgrades non-existent citations', () => {
+      const sources = [makeSource('s1', 'zhihu', '材料1', '内容1')];
+      const report = makeReport(sources, '测试议题');
+
+      const fencedLLMOutput = `\`\`\`json
+{
+  "nodes": [
+    { "id": "n0", "label": "测试议题", "type": "topic", "description": "核心议题" },
+    { "id": "n1", "label": "概念A", "type": "concept", "description": "描述A", "sourceCitations": [1, 999] },
+    { "id": "n2", "label": "概念B", "type": "concept", "description": "描述B" }
+  ],
+  "edges": [
+    { "id": "e1", "from": "n0", "to": "n1", "predicate": "支持", "label": "支持", "type": "supported", "citationId": 1 },
+    { "id": "e2", "from": "n1", "to": "n2", "predicate": "影响", "label": "影响", "type": "supported", "citationId": 999 }
+  ]
+}
+\`\`\``;
+
+      const graph = parseGraphExtractionResponse(fencedLLMOutput, report);
+      assert.ok(graph !== null);
+      // Citation 999 should be sanitized out of node sourceCitations
+      const n1 = graph.nodes.find((n) => n.id === 'n1');
+      assert.deepStrictEqual(n1?.sourceCitations, [1]);
+
+      // Edge e2 had non-existent citation 999, so it should be downgraded to inferred
+      const e2 = graph.edges.find((e) => e.id === 'e2');
+      assert.strictEqual(e2?.type, 'inferred');
+      assert.strictEqual(e2?.citationId, undefined);
+    });
+
+    it('safeBuildGraphAsync uses LLM graph when provider succeeds and degrades cleanly on failure', async () => {
+      const sources = [makeSource('s1', 'zhihu', '材料1', '内容1')];
+      const report = makeReport(sources, '测试议题');
+
+      const mockSuccessLLM = {
+        generateStrategyQuestion: async () => '问题？',
+        generateKnowledgeGraph: async () => ({
+          nodes: [
+            { id: 'n0', label: '测试议题', type: 'topic' as const, description: '议题' },
+            { id: 'n1', label: 'LLM提取实体', type: 'concept' as const, description: '实体' },
+          ],
+          edges: [
+            { id: 'e1', from: 'n0', to: 'n1', predicate: '支持' as const, label: '支持', type: 'inferred' as const, description: '关联' },
+          ],
+          isFallback: false,
+        }),
+      };
+
+      const g1 = await safeBuildGraphAsync(report, sources, mockSuccessLLM);
+      assert.strictEqual(g1.isFallback, false);
+      assert.strictEqual(g1.nodes[1].label, 'LLM提取实体');
+
+      // When LLM throws, degrades to deterministic safeBuildGraph
+      const mockThrowingLLM = {
+        generateStrategyQuestion: async () => '问题？',
+        generateKnowledgeGraph: async () => {
+          throw new Error('LLM timeout');
+        },
+      };
+
+      const g2 = await safeBuildGraphAsync(report, sources, mockThrowingLLM);
+      assert.ok(g2);
+      assert.strictEqual(g2.nodes[0].id, 'n0');
     });
   });
 });
