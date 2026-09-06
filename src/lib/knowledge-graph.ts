@@ -65,21 +65,76 @@ export interface KnowledgeGraph {
 const TARGET_NODE_COUNT = 8; // within 6-10 range
 const TARGET_EDGE_COUNT = 10;
 
-/** Extract candidate entity labels from a source's title. */
-function extractEntities(source: Source): string[] {
-  const text = [source.title ?? '', source.excerpt ?? ''].join(' ');
-  // Match Chinese/English noun-like words, 2-12 chars
-  const matches = text.match(/[一-龥]{2,8}|[A-Z][a-z]+(?:[A-Z][a-z]+)*/g) ?? [];
-  return [...new Set(matches)].slice(0, 3);
+const STOP_WORDS = new Set([
+  '已无法避免',
+  '能做的只有',
+  '这是否意味着',
+  '为什么',
+  '越来越',
+  '还有救吗',
+  '全记录',
+  '怎么办',
+  '发生了什么',
+  '知乎',
+  '大事',
+  '昨日全球大事',
+  '探讨',
+  '总结',
+  '分析',
+  '最新',
+  '每日',
+  '昨日',
+  '做空',
+  '测试问题',
+  '测试作者',
+  '内容',
+  '文章',
+  '阅读',
+  '点击',
+  '分享',
+  '讨论',
+  '观点',
+  '说明',
+]);
+
+const GRAMMAR_PARTICLES_PREFIX = /^(已|能|将|要|会|在|从|到|把|被|让|使|这|那|哪|什么|怎么|怎样|如何|为|给|对|于|是|有|做|与|和|及|为什么|如何看待|这是否意味着|到底什么是)+/;
+const GRAMMAR_PARTICLES_SUFFIX = /(的|了|着|过|和|与|及|在|从|到|把|被|让|使|这|那|哪|什么|怎么|怎样|如何|为|给|对|于|是|有|等|吗|呢|吧|啊|呀)+$/;
+
+/** Clean an entity string by stripping punctuation, question prefixes, and grammatical particles. */
+function cleanEntityLabel(raw: string): string {
+  let text = raw.trim();
+  // Strip common platform suffixes
+  text = text.replace(/\s*[-_|]\s*(知乎|CSDN.*|博客|百度.*|微信公众平台|掘金|简书|头条|新闻|快讯)$/i, '');
+  // Strip question frames
+  text = text.replace(/^(为什么|如何看待|这是否意味着|到底什么是|如何实现|怎么做|浅谈|探讨|浅析|论)\s*/i, '');
+  // Strip punctuation and special chars
+  text = text.replace(/[?？!！:：,，。;；"“”'‘’()[\]【】`~<>《》]/g, ' ').trim();
+  // Remove leading and trailing particles
+  text = text.replace(GRAMMAR_PARTICLES_PREFIX, '').replace(GRAMMAR_PARTICLES_SUFFIX, '').trim();
+  return text;
 }
 
-/** Stable string hash for deterministic ids. */
-function hash(str: string): number {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+/** Extract candidate entity labels from a source. */
+function extractEntities(source: Source): string[] {
+  const title = source.title ?? '';
+  const excerpt = source.excerpt ?? '';
+  const candidates: string[] = [];
+
+  // Extract author if organization or research team
+  if (source.author && source.author.length >= 2 && source.author.length <= 16 && !STOP_WORDS.has(source.author)) {
+    candidates.push(source.author);
   }
-  return Math.abs(h);
+
+  // Split title and excerpt by clauses
+  const chunks = `${title} ${excerpt}`.split(/[:：\-_|/，,、\s。；;\t\n]+/);
+  for (const chunk of chunks) {
+    const cleaned = cleanEntityLabel(chunk);
+    if (cleaned.length >= 2 && cleaned.length <= 16 && !STOP_WORDS.has(cleaned)) {
+      candidates.push(cleaned);
+    }
+  }
+
+  return [...new Set(candidates)].slice(0, 4);
 }
 
 /**
@@ -88,87 +143,169 @@ function hash(str: string): number {
  * It does not fabricate facts: every 'supported' edge points to a real citation.
  */
 export function buildGraph(report: Report, sources: Source[]): KnowledgeGraph {
-  // Pick entities from the first 6-8 sources deterministically
-  const entitySet = new Map<string, { count: number; firstSource: number }>();
-  sources.forEach((src, idx) => {
-    const entities = extractEntities(src);
-    entities.forEach((e) => {
-      const cur = entitySet.get(e) ?? { count: 0, firstSource: idx };
-      entitySet.set(e, { count: cur.count + 1, firstSource: cur.firstSource });
-    });
-  });
-
-  // Sort by mention count, take top N
-  const sortedEntities = [...entitySet.entries()]
-    .sort((a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0]))
-    .slice(0, TARGET_NODE_COUNT);
-
-  const nodes: GraphNode[] = sortedEntities.map(([label], i) => {
-    const firstSourceIdx = sortedEntities[i][1].firstSource;
-    const citationId = sources[firstSourceIdx]
-      ? Object.keys(report.citations).map(Number).find(k => report.citations[k] === sources[firstSourceIdx])
-      : undefined;
-    const isActor = /(?:机构|大学|团队|作者|公司|政府|联盟|学者|协会|组织|方)$/.test(label) ||
-      (sources[firstSourceIdx]?.author && label.includes(sources[firstSourceIdx]?.author ?? ''));
-    return {
-      id: `n${i + 1}`,
-      label,
-      type: (isActor ? 'actor' : 'concept') as GraphNodeType,
-      description: `Entity from ${sources[firstSourceIdx]?.type ?? 'sources'}: ${label}`,
-      ...(citationId ? { sourceCitations: [citationId] } : {}),
-    };
-  });
-
-  // Add the question itself as a central node
+  const nodes: GraphNode[] = [];
   const centralId = 'n0';
-  nodes.unshift({
+
+  // 1. Central Topic Node
+  nodes.push({
     id: centralId,
     label: report.question.slice(0, 24) + (report.question.length > 24 ? '…' : ''),
     type: 'topic' as GraphNodeType,
     description: `核心议题: ${report.question}`,
   });
 
-  // Build edges
-  const edges: GraphEdge[] = [];
-  let edgeIdx = 0;
+  const nodeLabelSet = new Set<string>([report.question]);
 
-  // 1. supported edges: central → each entity, with citation
-  for (let i = 1; i < nodes.length && edgeIdx < TARGET_EDGE_COUNT; i++) {
-    const node = nodes[i];
-    const citation = node.sourceCitations?.[0];
-    if (citation) {
-      edges.push({
-        id: `e${++edgeIdx}`,
-        from: centralId,
-        to: node.id,
-        subject: centralId,
-        predicate: '支持',
-        object: node.id,
-        label: '相关',
-        type: 'supported',
-        citationId: citation,
-        description: `报告论述与实体 [${node.label}] 相关，由文献 [${citation}] 引用支持`,
-      });
+  const addNode = (
+    label: string,
+    type: GraphNodeType,
+    description: string,
+    citationId?: number
+  ): boolean => {
+    const cleaned = cleanEntityLabel(label);
+    if (!cleaned || cleaned.length < 2 || nodeLabelSet.has(cleaned) || STOP_WORDS.has(cleaned)) {
+      return false;
+    }
+    nodeLabelSet.add(cleaned);
+    const id = `n${nodes.length}`;
+    nodes.push({
+      id,
+      label: cleaned.slice(0, 20),
+      type,
+      description,
+      ...(citationId ? { sourceCitations: [citationId] } : {}),
+    });
+    return true;
+  };
+
+  // 2. Add concepts from report.knowledgePoints (High quality)
+  if (Array.isArray(report.knowledgePoints)) {
+    for (const kp of report.knowledgePoints) {
+      if (nodes.length >= TARGET_NODE_COUNT) break;
+      addNode(kp, 'concept', `研报关键知识点: ${kp}`);
     }
   }
 
-  // 2. inferred edges: between sibling entities (no citation)
-  for (let i = 1; i < nodes.length - 1 && edgeIdx < TARGET_EDGE_COUNT; i++) {
+  // 3. Add claims from report.viewpoints
+  if (Array.isArray(report.viewpoints)) {
+    for (let i = 0; i < report.viewpoints.length; i++) {
+      if (nodes.length >= TARGET_NODE_COUNT) break;
+      const vp = report.viewpoints[i];
+      const clauses = vp.split(/[，,。；;]/).filter((c) => c.trim().length >= 4);
+      const claimText = clauses[0] ? clauses[0].trim() : vp;
+      addNode(claimText, 'claim', `核心论述观点: ${claimText}`);
+    }
+  }
+
+  // 4. Add actors and entities from sources with citation linkage
+  sources.forEach((src, idx) => {
+    if (nodes.length >= TARGET_NODE_COUNT) return;
+    const cid =
+      Object.keys(report.citations || {})
+        .map(Number)
+        .find((k) => report.citations[k] === src) ?? (idx + 1);
+
+    const isActor =
+      /(?:机构|大学|团队|作者|公司|政府|联盟|学者|协会|组织|委员会|实验室|所|局)$/.test(src.author ?? '') ||
+      /(?:机构|大学|团队|作者|公司|政府|联盟|学者|协会|组织|委员会|实验室|所|局)$/.test(src.title ?? '');
+
+    const entities = extractEntities(src);
+    for (const ent of entities) {
+      if (nodes.length >= TARGET_NODE_COUNT) break;
+      const entIsActor =
+        isActor || /(?:机构|大学|团队|作者|公司|政府|联盟|学者|协会|组织|委员会|实验室|所|局)$/.test(ent);
+      addNode(
+        ent,
+        entIsActor ? 'actor' : 'concept',
+        `来自文献 [${cid}] 的${entIsActor ? '关键主体' : '关键概念'}: ${ent}`,
+        cid
+      );
+    }
+  });
+
+  // Ensure between 6 and 10 nodes if sources were sparse
+  let padIdx = 1;
+  while (nodes.length < 6) {
+    const padLabel = `关联要素${padIdx}`;
+    addNode(padLabel, 'concept', `研报相关概念要素 ${padIdx}`);
+    padIdx++;
+  }
+
+  // 5. Build Structured Logical Edges
+  const edges: GraphEdge[] = [];
+  let edgeIdx = 0;
+
+  // A. Topic -> Concept/Claim links
+  for (let i = 1; i < nodes.length && edgeIdx < TARGET_EDGE_COUNT; i++) {
+    const node = nodes[i];
+    const citation = node.sourceCitations?.[0];
+    const isSupported = typeof citation === 'number';
+
+    let predicate: ControlledPredicate = '相关';
+    let label = '相关机制';
+    let desc = `核心议题涉及 [${node.label}]`;
+
+    if (node.type === 'claim') {
+      predicate = '主张';
+      label = '核心观点';
+      desc = `核心议题包含主要论点 [${node.label}]`;
+    } else if (node.type === 'actor') {
+      predicate = '主张';
+      label = '行动主体';
+      desc = `主体 [${node.label}] 对核心议题提出相关主张`;
+    } else if (i % 3 === 1) {
+      predicate = '依赖';
+      label = '核心前提';
+      desc = `核心议题论证依赖关键概念 [${node.label}]`;
+    }
+
     edges.push({
       id: `e${++edgeIdx}`,
-      from: nodes[i].id,
-      to: nodes[i + 1].id,
-      subject: nodes[i].id,
-      predicate: i % 2 === 0 ? '对比' : '影响',
-      object: nodes[i + 1].id,
-      label: '相关',
-      type: 'inferred',
-      description: `概念 [${nodes[i].label}] 与 [${nodes[i + 1].label}] 存在推断关联`,
+      from: centralId,
+      to: node.id,
+      subject: centralId,
+      predicate,
+      object: node.id,
+      label,
+      type: isSupported ? 'supported' : 'inferred',
+      ...(isSupported ? { citationId: citation } : {}),
+      description: isSupported ? `${desc}，由文献 [${citation}] 引用支持` : desc,
     });
   }
 
-  // 3. user_claimed edge: connect central to a node labelled with the initial opinion
-  if (edgeIdx < TARGET_EDGE_COUNT && report.viewpoints.length > 0) {
+  // B. Cross-node semantic relationships (between concepts, claims, actors)
+  for (let i = 1; i < nodes.length - 1 && edgeIdx < TARGET_EDGE_COUNT; i++) {
+    const fromNode = nodes[i];
+    const toNode = nodes[i + 1];
+    let predicate: ControlledPredicate = '影响';
+    let label = '相互影响';
+
+    if (fromNode.type === 'actor') {
+      predicate = '主张';
+      label = '主体主张';
+    } else if (fromNode.type === 'claim' && toNode.type === 'claim') {
+      predicate = '对比';
+      label = '观点对照';
+    } else if (i % 2 === 0) {
+      predicate = '导致';
+      label = '因果关联';
+    }
+
+    edges.push({
+      id: `e${++edgeIdx}`,
+      from: fromNode.id,
+      to: toNode.id,
+      subject: fromNode.id,
+      predicate,
+      object: toNode.id,
+      label,
+      type: 'inferred',
+      description: `[${fromNode.label}] 与 [${toNode.label}] 存在 ${predicate} 关联`,
+    });
+  }
+
+  // C. User claimed edge if viewpoints exist
+  if (edgeIdx < TARGET_EDGE_COUNT && report.viewpoints && report.viewpoints.length > 0) {
     const target = nodes[Math.min(2, nodes.length - 1)];
     edges.push({
       id: `e${++edgeIdx}`,

@@ -38,24 +38,40 @@ export const VALID_EDGE_TYPES: GraphEdgeType[] = [
   'user_claimed',
 ];
 
-export const GRAPH_EXTRACTION_SYSTEM_PROMPT = `你是「知研」知识图谱结构化抽取引擎。请阅读用户提供的核心议题、研报要点与编号材料，提取议题的核心概念、主要论点、关键主体，并构建它们之间的逻辑思辨关系网络。
+export const GRAPH_EXTRACTION_SYSTEM_PROMPT = `你是「知研」知识图谱结构化抽取引擎。请阅读用户提供的核心议题、研报核心观点、知识点与编号材料，提取议题的核心概念、主要论据、关键主体，并构建它们之间的逻辑思辨关系网络。
 
-【输出要求】
+【抽取质量要求】
+1. 实体词必须是完整、具有独立研报语义的名词短语、专业机制或论断，严禁提取断句碎词或残缺短语（严禁提取如“已无法避免”、“能做的只有”、“为什么”、“这是否意味着”、“做空”、“越来越”等截断片段）。
+2. 节点类型（type）：
+   - 'topic': 核心讨论议题（固定且唯一，id 为 'n0'）。
+   - 'concept': 核心专业概念、机制或客观指标（如“1.5℃温控阈值”、“超额升温机制 (Overshoot)”、“碳中和减排路径”）。
+   - 'claim': 核心观点、主要论断或立场判断（如“短时超温存在滞后恢复窗口”、“变暖失控风险显著上升”）。
+   - 'actor': 关键机构、团队、学术组织或行动主体（如“联合国气候组织 (UNFCCC)”、“IPCC专家组”）。
+3. 谓词受控：关系谓词（predicate）必须严格受控，仅限使用以下 8 个思辨谓词之一：
+   '支持' | '反驳' | '导致' | '依赖' | '影响' | '对比' | '主张' | '相关'
+4. 关系语义连结：
+   - 严禁将中心议题生硬地全部连为“支持”。
+   - 机制/概念之间：使用 '导致'、'影响'、'依赖'、'对比'。
+   - 主体与观点/概念：主体 --(主张/支持)--> 观点。
+   - 论据与论点：文献证据 --(支持/反驳)--> 观点。
+5. 真实引用约束：所有 type 为 'supported' 的边和节点的 sourceCitations 只能填写所给参考材料中真实存在的编号 [1, 2, ...]，严禁捏造编号。对于没有直接文献出处的推断关联，type 标为 'inferred' 且不填 citationId。
+
+【输出格式】
 必须直接输出符合如下规范的合法 JSON 对象，严禁包含任何前缀、解释说明或 markdown 代码块标记：
 {
   "nodes": [
     {
       "id": "n0",
-      "label": "简短核心议题(2-15字)",
+      "label": "核心议题简述(2-15字)",
       "type": "topic",
       "description": "议题概述",
       "sourceCitations": []
     },
     {
       "id": "n1",
-      "label": "关键概念或论断(2-12字，严禁提取无意义碎词)",
+      "label": "专业概念或论断(2-15字)",
       "type": "concept",
-      "description": "该概念或论断在讨论中的具体含义",
+      "description": "该概念在议题讨论中的具体内涵",
       "sourceCitations": [1]
     }
   ],
@@ -64,25 +80,14 @@ export const GRAPH_EXTRACTION_SYSTEM_PROMPT = `你是「知研」知识图谱结
       "id": "e1",
       "from": "n0",
       "to": "n1",
-      "predicate": "支持",
-      "label": "核心支撑",
+      "predicate": "相关",
+      "label": "涉及概念",
       "type": "supported",
       "citationId": 1,
-      "description": "该关系的逻辑解释"
+      "description": "核心议题涉及该关键概念，由文献[1]支撑"
     }
   ]
-}
-
-【抽取规则】
-1. 节点数量：提取 6 至 10 个节点（必须包含一个 id 为 'n0'、type 为 'topic' 的中心议题节点）。
-2. 节点类型（type）：
-   - 'topic': 核心讨论议题（固定为 n0）。
-   - 'concept': 核心专业概念或机制（如“自适应学习系统”、“算法偏见”）。
-   - 'claim': 核心论据或立场判断（如“个性化教学成效显著”、“认知外包削弱独立思考”）。
-   - 'actor': 关键机构、团队或行动主体（如“清华大学团队”、“OpenAI”）。
-3. 边数量：提取 8 至 14 条具有实质逻辑连结的边。
-4. 谓词受控：predicate 只能是 '支持' | '反驳' | '导致' | '依赖' | '影响' | '对比' | '主张' | '相关' 之一。
-5. 真实引用约束：所有 type 为 'supported' 的边和节点的 sourceCitations 只能填写所给材料中真实存在的编号，严禁捏造编号。对于没有直接文献出处的推论，type 标为 'inferred' 且不填 citationId。`;
+}`;
 
 export function buildGraphExtractionUserPrompt(report: Report, sources: Source[]): string {
   const viewpointsText =
@@ -143,10 +148,25 @@ export function parseGraphExtractionResponse(
   if (!content || typeof content !== 'string') return null;
 
   let cleaned = content.trim();
-  // Strip markdown code fences if model returned ```json ... ```
-  if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  // Strip <think>...</think> tags emitted by reasoning models
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  // Extract from markdown code fences if present
+  const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (codeBlockMatch) {
+    cleaned = codeBlockMatch[1].trim();
+  } else {
+    // Locate the outermost JSON object boundaries
+    const nodesStart = cleaned.indexOf('{"nodes"');
+    const altStart = nodesStart !== -1 ? nodesStart : cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (altStart !== -1 && end !== -1 && end > altStart) {
+      cleaned = cleaned.slice(altStart, end + 1);
+    }
   }
+
+  // Sanitize trailing commas in JSON arrays/objects
+  cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
 
   let parsed: unknown;
   try {
