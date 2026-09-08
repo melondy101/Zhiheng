@@ -986,6 +986,7 @@ export default function Home() {
               isCheckpoint={isCheckpoint}
               pendingDecision={pendingDecision}
               usedFallback={usedFallback}
+              fallbackReason={session?.interrogation?.fallbackReason}
               hintMessage={hintMessage}
               hintOptions={hintOptions}
               sources={currentSources}

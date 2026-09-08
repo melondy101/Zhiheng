@@ -221,6 +221,8 @@ export interface InterrogationState {
   strategy: import('./strategy-engine').StrategyId | null;
   assistantQuestion: string | null;
   usedFallback: boolean;
+  /** Why the last question used a template; absent for old sessions and non-fallbacks. */
+  fallbackReason?: import('./llm-fallback').LLMFailureReason;
   pendingCheckpoint: boolean;
   uncertainStreak: number;
   /**
@@ -279,6 +281,7 @@ export interface InterrogateResponseBody {
   /** True while the checkpoint decision (继续/结束) is pending. */
   checkpoint: boolean;
   usedFallback: boolean;
+  fallbackReason?: import('./llm-fallback').LLMFailureReason;
   uncertainStreak: number;
   hint: InterrogateHint | null;
   /**

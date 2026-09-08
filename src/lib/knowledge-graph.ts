@@ -101,7 +101,7 @@ const GRAMMAR_PARTICLES_PREFIX = /^(已|能|将|要|会|在|从|到|把|被|让|
 const GRAMMAR_PARTICLES_SUFFIX = /(的|了|着|过|和|与|及|在|从|到|把|被|让|使|这|那|哪|什么|怎么|怎样|如何|为|给|对|于|是|有|等|吗|呢|吧|啊|呀)+$/;
 
 /** Clean an entity string by stripping punctuation, question prefixes, and grammatical particles. */
-function cleanEntityLabel(raw: string): string {
+export function cleanEntityLabel(raw: string): string {
   let text = raw.trim();
   // Strip common platform suffixes
   text = text.replace(/\s*[-_|]\s*(知乎|CSDN.*|博客|百度.*|微信公众平台|掘金|简书|头条|新闻|快讯)$/i, '');
@@ -111,6 +111,16 @@ function cleanEntityLabel(raw: string): string {
   text = text.replace(/[?？!！:：,，。;；"“”'‘’()[\]【】`~<>《》]/g, ' ').trim();
   // Remove leading and trailing particles
   text = text.replace(GRAMMAR_PARTICLES_PREFIX, '').replace(GRAMMAR_PARTICLES_SUFFIX, '').trim();
+  return text;
+}
+
+/** Shared admission gate for deterministic, LLM, and fallback graph labels. */
+export function sanitizeGraphLabel(raw: string): string | null {
+  const text = cleanEntityLabel(raw);
+  if (text.length < 2 || text.length > 20 || STOP_WORDS.has(text)) return null;
+  // Colloquial lead-ins and personal nicknames are not graph concepts.
+  if (/^(写在最前边|家人们|真的|我觉得|说实话|一文读懂|速看|必读|盘点)/.test(text)) return null;
+  if (/(学院|学长|老师|博士|同学|哥|姐|酱|君)$/.test(text) && text.length <= 8) return null;
   return text;
 }
 
@@ -128,8 +138,8 @@ function extractEntities(source: Source): string[] {
   // Split title and excerpt by clauses
   const chunks = `${title} ${excerpt}`.split(/[:：\-_|/，,、\s。；;\t\n]+/);
   for (const chunk of chunks) {
-    const cleaned = cleanEntityLabel(chunk);
-    if (cleaned.length >= 2 && cleaned.length <= 16 && !STOP_WORDS.has(cleaned)) {
+    const cleaned = sanitizeGraphLabel(chunk);
+    if (cleaned && cleaned.length <= 16) {
       candidates.push(cleaned);
     }
   }
@@ -162,8 +172,8 @@ export function buildGraph(report: Report, sources: Source[]): KnowledgeGraph {
     description: string,
     citationId?: number
   ): boolean => {
-    const cleaned = cleanEntityLabel(label);
-    if (!cleaned || cleaned.length < 2 || nodeLabelSet.has(cleaned) || STOP_WORDS.has(cleaned)) {
+    const cleaned = sanitizeGraphLabel(label);
+    if (!cleaned || nodeLabelSet.has(cleaned)) {
       return false;
     }
     nodeLabelSet.add(cleaned);
@@ -378,7 +388,10 @@ export function buildFallbackGraph(report: Report, reason: string): KnowledgeGra
     ...(report.knowledgePoints || []).map((kp) => ({ label: kp.slice(0, 16), type: 'concept' as const })),
   ].slice(0, 5);
 
-  candidates.forEach((cand, idx) => {
+  candidates.flatMap((cand) => {
+    const label = sanitizeGraphLabel(cand.label);
+    return label ? [{ ...cand, label }] : [];
+  }).forEach((cand, idx) => {
     nodes.push({
       id: `n${idx + 1}`,
       label: cand.label,

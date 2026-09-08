@@ -461,7 +461,7 @@ describe('OpenAICompatibleLLMProvider: batched report synthesis', () => {
         return jsonResponse(chatResponse(JSON.stringify({
           viewpoints: [{
             conclusion: '自动化的影响取决于任务重组方式。',
-            evidence: [{ summary: '两个分组都指出工作内容会改变。', citationIds: [1, 6] }],
+            evidence: [{ summary: '第 1 条和第 6 条材料都提供了独立论据。', citationIds: [1, 6] }],
           }],
         })));
       }
@@ -490,7 +490,7 @@ describe('OpenAICompatibleLLMProvider: batched report synthesis', () => {
         return jsonResponse(chatResponse(JSON.stringify({
           viewpoints: [{
             conclusion: '剩余材料仍能支持一个可讨论判断。',
-            evidence: [{ summary: '成功分组提供了依据。', citationIds: [1] }],
+            evidence: [{ summary: '第 1 条材料提供了独立论据。', citationIds: [1] }],
           }],
         })));
       }

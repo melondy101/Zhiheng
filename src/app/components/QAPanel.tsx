@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import type { LLMFailureReason } from '@/lib/llm-fallback';
 
 import type { CitedSource, Message, Session } from '@/lib/providers';
 import { isRoundAnswer } from '@/lib/providers';
@@ -10,6 +11,14 @@ import { TRANSITION_ACTIONS, type TransitionActionId } from '@/lib/mode-config';
 import SessionFeedbackCue from './SessionFeedbackCue';
 import StoryView from './StoryView';
 import CognitiveTrajectoryView from './CognitiveTrajectoryView';
+
+function fallbackMessage(reason?: LLMFailureReason): string {
+  if (reason === 'timeout') return 'AI 响应较慢，已使用策略模板';
+  if (reason === 'network') return 'AI 连接失败，已使用策略模板';
+  if (reason === 'http') return 'AI 服务暂时拒绝请求，已使用策略模板';
+  if (reason === 'invalid_response' || reason === 'invalid_synthesis') return 'AI 返回内容未通过校验，已使用策略模板';
+  return 'AI 服务异常，已使用策略模板';
+}
 
 interface QAPanelProps {
   messages: Message[];
@@ -25,6 +34,7 @@ interface QAPanelProps {
    */
   pendingDecision?: boolean;
   usedFallback?: boolean;
+  fallbackReason?: LLMFailureReason;
   hintMessage?: string | null;
   hintOptions?: string[] | null;
   /**
@@ -148,6 +158,7 @@ export default function QAPanel({
   isCheckpoint = false,
   pendingDecision = false,
   usedFallback = false,
+  fallbackReason,
   hintMessage,
   hintOptions,
   sources,
@@ -329,7 +340,7 @@ export default function QAPanel({
               </p>
               <SourcesSection sources={sources} />
               {usedFallback && (
-                <p className="text-xs text-orange-600 mt-2">⚠️ AI 服务异常，已使用策略模板</p>
+                <p className="text-xs text-orange-600 mt-2">⚠️ {fallbackMessage(fallbackReason)}</p>
               )}
             </div>
           )}
@@ -369,7 +380,7 @@ export default function QAPanel({
                         <SourcesSection sources={sources} />
                         {usedFallback && (
                           <p className="text-xs text-orange-600 mt-2">
-                            ⚠️ AI 服务异常，已使用策略模板
+                            ⚠️ {fallbackMessage(fallbackReason)}
                           </p>
                         )}
                       </div>

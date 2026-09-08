@@ -105,7 +105,7 @@ describe('parseSynthesisResponse — strict validation', () => {
       viewpoints: [
         {
           conclusion: '工程实践中的隐性知识是自动化的主要障碍。',
-          evidence: [{ summary: '依据。', citationIds: [1, 1, 99, -3, '2'] }],
+          evidence: [{ summary: '需求理解难以自动化。', citationIds: [1, 1, 99, -3, '2'] }],
         },
       ],
     });
@@ -180,10 +180,15 @@ describe('parseSynthesisResponse — strict validation', () => {
     assert.strictEqual(parseSynthesisResponse(response, SOURCES), null);
   });
 
+  it('rejects an evidence summary unrelated to its cited material', () => {
+    const response = JSON.stringify({ viewpoints: [{ conclusion: '软件岗位变化取决于任务分工。', evidence: [{ summary: '白菜减肥具有长期效果。', citationIds: [1] }] }] });
+    assert.strictEqual(parseSynthesisResponse(response, SOURCES), null);
+  });
+
   it('never returns more than the capped number of viewpoints', () => {
     const viewpoints = Array.from({ length: 8 }, (_, i) => ({
       conclusion: `第 ${i + 1} 个彼此不同的明确判断。`,
-      evidence: [{ summary: '依据。', citationIds: [1] }],
+      evidence: [{ summary: '需求理解难以自动化。', citationIds: [1] }],
     }));
     const result = parseSynthesisResponse(
       JSON.stringify({ viewpoints }),

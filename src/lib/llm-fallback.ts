@@ -11,13 +11,32 @@ export interface FallbackEvent {
   strategy: StrategyId;
   attempts: number;
   error?: string;
+  reason?: LLMFailureReason;
   timestamp: number;
+}
+
+/** Stable, user-safe classification for a failed LLM attempt. */
+export type LLMFailureReason = 'timeout' | 'network' | 'http' | 'invalid_response' | 'invalid_synthesis' | 'unknown';
+
+export class LLMRequestError extends Error {
+  constructor(public readonly reason: LLMFailureReason, message: string) {
+    super(message);
+    this.name = 'LLMRequestError';
+  }
+}
+
+export function classifyLLMFailure(error: unknown): LLMFailureReason {
+  if (error instanceof LLMRequestError) return error.reason;
+  if (error instanceof DOMException && error.name === 'AbortError') return 'timeout';
+  if (error instanceof TypeError) return 'network';
+  return 'unknown';
 }
 
 export interface FallbackResult {
   question: string;
   usedFallback: boolean;
   events: FallbackEvent[];
+  failureReason?: LLMFailureReason;
 }
 
 const UNCERTAIN_PATTERNS = [
@@ -133,6 +152,7 @@ export async function withFallback(
       strategy,
       attempts: 1,
       error: err instanceof Error ? err.message : String(err),
+      reason: classifyLLMFailure(err),
       timestamp: Date.now(),
     });
   }
@@ -151,11 +171,12 @@ export async function withFallback(
       strategy,
       attempts: 2,
       error: err instanceof Error ? err.message : String(err),
+      reason: classifyLLMFailure(err),
       timestamp: Date.now(),
     });
   }
 
   // Fallback to strategy template
   const fallback = STRATEGIES[strategy].fallbackTemplate(session);
-  return { question: fallback, usedFallback: true, events };
+  return { question: fallback, usedFallback: true, events, failureReason: events.at(-1)?.reason };
 }

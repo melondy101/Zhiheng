@@ -12,7 +12,7 @@ import type {
   GraphNodeType,
   KnowledgeGraph,
 } from './knowledge-graph';
-import { validateGraph } from './knowledge-graph';
+import { sanitizeGraphLabel, validateGraph } from './knowledge-graph';
 
 export const VALID_PREDICATES: ControlledPredicate[] = [
   '支持',
@@ -194,7 +194,8 @@ export function parseGraphExtractionResponse(
 
     const rawId = typeof nodeObj.id === 'string' && nodeObj.id.trim() ? nodeObj.id.trim() : `n${idx}`;
     const rawLabel = typeof nodeObj.label === 'string' ? nodeObj.label.trim() : '';
-    if (!rawLabel) continue;
+    const cleanedLabel = rawId === 'n0' ? rawLabel.slice(0, 24) : sanitizeGraphLabel(rawLabel);
+    if (!cleanedLabel) continue;
 
     let rawType = typeof nodeObj.type === 'string' ? (nodeObj.type.toLowerCase() as GraphNodeType) : 'concept';
     if (!VALID_NODE_TYPES.includes(rawType)) {
@@ -209,7 +210,7 @@ export function parseGraphExtractionResponse(
     const description =
       typeof nodeObj.description === 'string' && nodeObj.description.trim()
         ? nodeObj.description.trim()
-        : `${rawLabel} 相关论述`;
+        : `${cleanedLabel} 相关论述`;
 
     let sourceCitations: number[] | undefined;
     if (Array.isArray(nodeObj.sourceCitations)) {
@@ -223,7 +224,7 @@ export function parseGraphExtractionResponse(
 
     nodeMap.set(rawId, {
       id: rawId,
-      label: rawLabel.slice(0, 24),
+      label: cleanedLabel.slice(0, 24),
       type: rawType,
       description,
       ...(sourceCitations ? { sourceCitations } : {}),

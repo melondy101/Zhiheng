@@ -45,6 +45,7 @@ import {
 } from './report-synthesis';
 import type { SynthesisRequest, SynthesisSource } from './report-synthesis';
 import { logStartupPath } from './startup-log';
+import { LLMRequestError } from './llm-fallback';
 
 // Log environment configuration on module load (once).
 logStartupPath();
@@ -485,7 +486,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(
-        () => reject(new Error(`LLM API timeout after ${timeoutMs}ms`)),
+        () => reject(new LLMRequestError('timeout', `LLM API timeout after ${timeoutMs}ms`)),
         timeoutMs
       );
     });
@@ -517,7 +518,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
           error: `LLM API HTTP ${response.status}`,
           responsePreview,
         });
-        throw new Error(`LLM API HTTP ${response.status}`);
+        throw new LLMRequestError('http', `LLM API HTTP ${response.status}`);
       }
       let parsed: unknown;
       try {
@@ -536,7 +537,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
           error: `LLM API returned non-JSON body: ${err instanceof Error ? err.message : String(err)}`,
           responsePreview,
         });
-        throw new Error('LLM API returned non-JSON body');
+        throw new LLMRequestError('invalid_response', 'LLM API returned non-JSON body');
       }
       const content = extractChoiceContent(parsed);
       logRequest({
@@ -553,6 +554,9 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
       });
       return parsed;
     } catch (err) {
+      if (controller.signal.aborted && !(err instanceof LLMRequestError)) {
+        throw new LLMRequestError('timeout', `LLM API timeout after ${timeoutMs}ms`);
+      }
       const knownLLMError = err instanceof Error && err.message.startsWith('LLM ');
       if (!knownLLMError) {
         logRequest({

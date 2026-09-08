@@ -167,6 +167,26 @@ function asCitationIds(value: unknown, validIds: Set<number>): number[] {
 }
 
 /**
+ * A cited evidence summary must retain at least one meaningful phrase from a
+ * material it cites. This is intentionally a lexical floor, not a claim of
+ * semantic entailment: it blocks unrelated fabricated summaries while still
+ * allowing the model to compress wording.
+ */
+export function isEvidenceTraceable(summary: string, citationIds: number[], sources: SynthesisSource[]): boolean {
+  const normalized = normalizeForComparison(summary);
+  if (normalized.length < 2) return false;
+  return citationIds.some((citationId) => {
+    const source = sources.find((item) => item.citationId === citationId);
+    if (!source) return false;
+    const material = normalizeForComparison(`${source.title ?? ''}${source.excerpt ?? ''}`);
+    for (let index = 0; index < normalized.length - 1; index++) {
+      if (material.includes(normalized.slice(index, index + 2))) return true;
+    }
+    return false;
+  });
+}
+
+/**
  * True when the candidate conclusion is merely lifted from the material:
  * it is a source title, or it appears verbatim inside an excerpt, or it
  * swallows an entire excerpt. Such text is a citation, not a viewpoint.
@@ -208,7 +228,7 @@ function parseViewpoint(raw: unknown, sources: SynthesisSource[], index: number)
     const summary = asString(evidenceRecord.summary);
     if (summary === null || summary.length > MAX_EVIDENCE_SUMMARY_CHARS) continue;
     const citationIds = asCitationIds(evidenceRecord.citationIds, validIds);
-    if (citationIds.length === 0) continue;
+    if (citationIds.length === 0 || !isEvidenceTraceable(summary, citationIds, sources)) continue;
     evidence.push({ summary, citationIds });
   }
 

@@ -162,6 +162,7 @@ function toResponseBody(
     question: state.assistantQuestion,
     checkpoint: state.pendingCheckpoint,
     usedFallback: state.usedFallback,
+    ...(state.fallbackReason ? { fallbackReason: state.fallbackReason } : {}),
     uncertainStreak: state.uncertainStreak,
     hint,
     // #16: report evidence relevant to the current question, deterministically
@@ -219,6 +220,7 @@ async function planNextRound(
   const strategy = pickNextStrategy(session);
   let questionText: string;
   let usedFallback = false;
+  let fallbackReason: import('./llm-fallback').LLMFailureReason | undefined;
 
   // Round 1 in Fun mode uses character opening greeting + orientation question
   if (isFirstRound && session.mode === 'fun' && session.character && session.selectedViewpoint) {
@@ -233,6 +235,7 @@ async function planNextRound(
     recordStrategy(session, strategy);
     questionText = fb.question;
     usedFallback = fb.usedFallback;
+    fallbackReason = fb.failureReason;
 
     if (session.mode === 'fun' && session.character) {
       questionText = formatCharacterQuestion(session.character, questionText);
@@ -244,6 +247,7 @@ async function planNextRound(
     strategy,
     assistantQuestion: questionText,
     usedFallback,
+    ...(fallbackReason ? { fallbackReason } : {}),
     pendingCheckpoint: false,
     uncertainStreak,
   };
@@ -715,6 +719,7 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
       strategy: nextStrategy,
       assistantQuestion: nextAssistantQuestion,
       usedFallback: fb.usedFallback,
+      ...(fb.failureReason ? { fallbackReason: fb.failureReason } : {}),
       pendingCheckpoint: false,
       uncertainStreak: streak,
       directiveRound: nextDirectiveRound,
