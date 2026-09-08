@@ -86,7 +86,7 @@ export default function StanceSelector({
                 : 'border-gray-200 hover:border-gray-300 text-gray-700'
             }`}
           >
-            <div className="text-xs font-semibold">深度探问</div>
+            <div className="text-xs font-semibold">深度思辨</div>
             <div className="text-[10px] text-gray-500 mt-0.5">8策略全量认知轨迹</div>
           </button>
           <button
@@ -98,7 +98,7 @@ export default function StanceSelector({
                 : 'border-gray-200 hover:border-gray-300 text-gray-700'
             }`}
           >
-            <div className="text-xs font-semibold">趣味伴思</div>
+            <div className="text-xs font-semibold">趣味思辨</div>
             <div className="text-[10px] text-gray-500 mt-0.5">拟人化辩友陪伴</div>
           </button>
           <button
@@ -181,9 +181,9 @@ export default function StanceSelector({
         )}
       </div>
 
-      <h3 className="font-semibold mb-2">选择一个观点，或输入你自己的看法</h3>
+      <h3 className="font-semibold mb-2">选择一个起始观点，或输入你自己的看法</h3>
       <p className="text-xs text-gray-500 mb-4">
-        三个 AI 建议提供不同切入角度；你也可以跳过并直接输入。
+        AI 建议是可质疑的起点，不是结论；你也可以跳过并直接输入。
       </p>
 
       <div className="space-y-2 mb-4" data-testid="stance-options">

@@ -211,13 +211,20 @@ export function isLiftedFromMaterial(conclusion: string, sources: SynthesisSourc
   return false;
 }
 
-function parseViewpoint(raw: unknown, sources: SynthesisSource[], index: number): ReportViewpoint | null {
+/** A suggestion must add a position, rather than merely restating the prompt. */
+export function isQuestionRestatement(conclusion: string, question: string): boolean {
+  const candidate = normalizeForComparison(conclusion);
+  const prompt = normalizeForComparison(question);
+  return prompt.length >= 8 && (candidate === prompt || candidate.includes(prompt));
+}
+
+function parseViewpoint(raw: unknown, sources: SynthesisSource[], index: number, question: string): ReportViewpoint | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const record = raw as Record<string, unknown>;
 
   const conclusion = asString(record.conclusion);
   if (conclusion === null || conclusion.length > MAX_CONCLUSION_CHARS) return null;
-  if (isLiftedFromMaterial(conclusion, sources)) return null;
+  if (isLiftedFromMaterial(conclusion, sources) || isQuestionRestatement(conclusion, question)) return null;
 
   const validIds = new Set(sources.map((s) => s.citationId));
   const rawEvidence = Array.isArray(record.evidence) ? record.evidence : [];
@@ -245,7 +252,8 @@ function parseViewpoint(raw: unknown, sources: SynthesisSource[], index: number)
  */
 export function parseSynthesisResponse(
   content: string,
-  sources: SynthesisSource[]
+  sources: SynthesisSource[],
+  question = ''
 ): ReportSynthesis | null {
   if (!content || typeof content !== 'string') return null;
 
@@ -282,7 +290,7 @@ export function parseSynthesisResponse(
   record.viewpoints
     .slice(0, MAX_SYNTHESIS_VIEWPOINTS)
     .forEach((raw, index) => {
-      const viewpoint = parseViewpoint(raw, sources, index);
+      const viewpoint = parseViewpoint(raw, sources, index, question);
       if (viewpoint) viewpoints.push(viewpoint);
     });
 
@@ -298,14 +306,15 @@ export function parseSynthesisResponse(
  */
 export function isSynthesisUsable(
   synthesis: ReportSynthesis,
-  sources: SynthesisSource[]
+  sources: SynthesisSource[],
+  question = ''
 ): boolean {
   if (synthesis.viewpoints.length === 0) return false;
 
   const validIds = new Set(sources.map((s) => s.citationId));
   return synthesis.viewpoints.every((viewpoint) => {
     if (viewpoint.conclusion.trim().length === 0) return false;
-    if (isLiftedFromMaterial(viewpoint.conclusion, sources)) return false;
+    if (isLiftedFromMaterial(viewpoint.conclusion, sources) || isQuestionRestatement(viewpoint.conclusion, question)) return false;
     return viewpoint.evidence.some(
       (item) =>
         item.summary.trim().length > 0 && item.citationIds.some((id) => validIds.has(id))

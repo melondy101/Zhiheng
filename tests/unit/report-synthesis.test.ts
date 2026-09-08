@@ -50,6 +50,16 @@ const VALID_RESPONSE = JSON.stringify({
 });
 
 describe('parseSynthesisResponse — strict validation', () => {
+  it('rejects a conclusion that only repeats the user question', () => {
+    const response = JSON.stringify({
+      viewpoints: [{
+        conclusion: 'AI 会取代人类创造力吗？',
+        evidence: [{ summary: '材料说明创作者正在使用工具。', citationIds: [1] }],
+      }],
+    });
+    assert.strictEqual(parseSynthesisResponse(response, SOURCES, 'AI 会取代人类创造力吗？'), null);
+  });
+
   it('accepts a well-formed response and preserves citation ids', () => {
     const result = parseSynthesisResponse(VALID_RESPONSE, SOURCES);
     assert.ok(result, 'a valid response must be accepted');

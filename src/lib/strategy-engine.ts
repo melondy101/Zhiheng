@@ -59,8 +59,8 @@ export interface StrategyQuestionTemplate {
 
 export const STRATEGY_QUESTION_TEMPLATES: Record<StrategyId, StrategyQuestionTemplate> = {
   M1_evidence: {
-    plain: '你能给出一个具体的数据或例子来支持你目前的观点吗？',
-    withClaim: (claim) => `你提到"${claim}"。这个主张有具体的数据或例子支持吗？`,
+    plain: '请描述一个最能支持你目前观点的具体的数据或例子，并说明它为什么重要？',
+    withClaim: (claim) => `你提到"${claim}"。请描述一个最能支撑它的具体的数据或例子，并说明它为什么重要？`,
   },
   M2_premise: {
     plain: '你的观点背后，是否有一个隐含的前提？如果该前提不成立，你的结论会改变吗？',

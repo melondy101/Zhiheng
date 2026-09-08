@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { hotlistBackground, makeHotlistCoreQuestion } from '@/lib/hotlist-question';
 
 interface HotlistItem {
   id: string;
@@ -65,7 +66,9 @@ export default function HomePage({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const handleHotlistClick = (title: string) => {
-    setQuestion(title);
+    const coreQuestion = makeHotlistCoreQuestion(title);
+    setQuestion(coreQuestion);
+    setInitialOpinion(hotlistBackground(title, coreQuestion) ?? '');
     const textarea = document.getElementById('question') as HTMLTextAreaElement | null;
     if (textarea) {
       textarea.focus();
@@ -317,7 +320,7 @@ export default function HomePage({
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
                 <h2 className="text-sm font-semibold text-slate-800">知乎热榜灵感</h2>
-                <span className="text-xs text-slate-400">（点击直接填入思考问题）</span>
+                <span className="text-xs text-slate-400">（点击生成单一核心问题）</span>
               </div>
               {hotlist && (
                 <span

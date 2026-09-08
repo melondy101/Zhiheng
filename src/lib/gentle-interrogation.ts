@@ -192,7 +192,7 @@ function buildStrategyFollowUp(
   _answerText: string
 ): string {
   const templates: Record<StrategyId, string> = {
-    M1_evidence: '你能给出一个具体的数据或例子来支持你目前的想法吗？',
+    M1_evidence: '请描述一个最能支持你目前想法的具体的数据或例子，并说明它为什么重要？',
     M2_premise: '你的观点背后，是否有一个隐含的前提？如果该前提不成立，你的结论会改变吗？',
     M3_anchoring: '在形成这个看法时，最初吸引你的事实是否主导了后续的全部判断？',
     M4_steelman: '请尝试用最强的一种对立观点重新论证。哪种反驳最难回应？',

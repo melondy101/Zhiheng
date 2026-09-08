@@ -196,7 +196,7 @@ async function buildSynthesis(
 
   try {
     const synthesis = await llmProvider.generateSynthesis(request);
-    if (synthesis && isSynthesisUsable(synthesis, request.sources)) return synthesis;
+    if (synthesis && isSynthesisUsable(synthesis, request.sources, question)) return synthesis;
   } catch (err) {
     console.warn(
       '[report] LLM synthesis failed — omitting AI-generated viewpoints:',

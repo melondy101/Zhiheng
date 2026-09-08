@@ -1024,6 +1024,7 @@ describe('buildGraph', () => {
 
 // ---- Ticket #8: Three distinct viewpoint suggestions ----
 import { buildStructuredViewpoints } from '../../src/lib/report-builder';
+import { isQuestionRestatement } from '../../src/lib/report-synthesis';
 
 describe('buildStructuredViewpoints', () => {
   it('returns exactly three viewpoints', () => {
@@ -1050,6 +1051,19 @@ describe('buildStructuredViewpoints', () => {
       assert.ok(vp.id.length > 0);
       assert.ok(vp.text.length > 0);
     });
+  });
+});
+
+describe('AI viewpoint quality guard', () => {
+  it('rejects a suggestion that merely repeats the user question', () => {
+    assert.strictEqual(
+      isQuestionRestatement('吃白菜真的能减肥吗？', '吃白菜真的能减肥吗？'),
+      true
+    );
+    assert.strictEqual(
+      isQuestionRestatement('只吃白菜不能保证减肥，仍取决于总能量摄入。', '吃白菜真的能减肥吗？'),
+      false
+    );
   });
 });
 

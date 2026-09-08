@@ -127,6 +127,7 @@ export interface LLMChatMessage {
  */
 const SAFETY_CONSTRAINTS =
   '安全约束：只提问，不回答；不替用户作答或表态；不输出观点裁决、正确性判断或评分；' +
+  '优先使用“请描述、你如何判断、什么会改变你的看法”等开放式问法，给用户充分作答空间；' +
   '只输出一个以问号结尾的单个问题，不要任何解释、前缀、引号或额外内容。';
 
 const SYSTEM_PREAMBLE =
@@ -358,12 +359,12 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
 
     const batches = partitionSynthesisSources(request.sources);
     if (batches.length === 1) {
-      return this.generateSynthesisPass(buildSynthesisMessages(request), request.sources);
+      return this.generateSynthesisPass(buildSynthesisMessages(request), request.sources, request.question);
     }
 
     const settled = await Promise.allSettled(
       batches.map((sources) =>
-        this.generateSynthesisPass(buildSynthesisMessages({ question: request.question, sources }), sources)
+        this.generateSynthesisPass(buildSynthesisMessages({ question: request.question, sources }), sources, request.question)
       )
     );
     const candidates = settled.flatMap((result) =>
@@ -375,13 +376,15 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
 
     return this.generateSynthesisPass(
       buildFinalSynthesisMessages(request.question, candidates),
-      request.sources
+      request.sources,
+      request.question
     );
   }
 
   private async generateSynthesisPass(
     messages: Array<{ role: 'system' | 'user'; content: string }>,
-    validationSources: SynthesisSource[]
+    validationSources: SynthesisSource[],
+    question: string
   ): Promise<ReportSynthesis> {
     const body = await this.postChatCompletion(
       JSON.stringify({
@@ -396,7 +399,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     if (content === null) {
       throw new Error('LLM API returned an unexpected response shape');
     }
-    const synthesis = parseSynthesisResponse(content, validationSources);
+    const synthesis = parseSynthesisResponse(content, validationSources, question);
     if (!synthesis) {
       throw new Error(
         'LLM synthesis failed validation (unparseable, or every viewpoint was a source title, an excerpt lift, or unbacked by a real citation)'

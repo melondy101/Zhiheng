@@ -131,7 +131,7 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
 
       {card.finalPosition && (
         <section className="mb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-1">5. 最终观点</h4>
+          <h4 className="text-sm font-semibold text-gray-600 mb-1">5. 你最后表达的观点</h4>
           <p className="text-sm bg-purple-50 p-3 rounded">
             {card.finalPosition.text}
             <TraceLink id={card.finalPosition.messageId} />
