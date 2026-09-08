@@ -1102,6 +1102,12 @@ describe('pickNextStrategy', () => {
   it('round 5: M5 restate', () => {
     assert.strictEqual(pickNextStrategy(makeSession(4)), 'M5_restate');
   });
+  it('keeps the fifth quick-mode round as a viewpoint restatement for every target', () => {
+    for (const target of ['clarify_position', 'weigh_decision', 'refine_expression'] as const) {
+      const session = { ...makeSession(4), mode: 'quick' as const, target };
+      assert.strictEqual(pickNextStrategy(session), 'M5_restate', target);
+    }
+  });
   it('round 6+: rotates without immediate repeat', () => {
     const s = makeSession(5, ['M1', 'M2', 'M4', 'M6', 'M5']);
     const next = pickNextStrategy(s);

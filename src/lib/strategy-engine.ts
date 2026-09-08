@@ -234,11 +234,11 @@ export function pickNextStrategy(session: Session, directiveRound?: number): Str
       'M8_contradiction',
     ];
   } else if (session.target === 'clarify_position') {
-    planned = ['M1_evidence', 'M2_premise', 'M4_steelman', 'M6_reversal', 'M5_system2'];
+    planned = ['M1_evidence', 'M2_premise', 'M4_steelman', 'M6_reversal', 'M5_restate'];
   } else if (session.target === 'weigh_decision') {
-    planned = ['M4_steelman', 'M6_reversal', 'M1_evidence', 'M2_premise', 'M5_system2'];
+    planned = ['M4_steelman', 'M6_reversal', 'M1_evidence', 'M2_premise', 'M5_restate'];
   } else if (session.target === 'refine_expression') {
-    planned = ['M5_system2', 'M3_anchoring', 'M2_premise', 'M4_steelman', 'M1_evidence'];
+    planned = ['M5_system2', 'M3_anchoring', 'M2_premise', 'M4_steelman', 'M5_restate'];
   }
 
   if (round <= planned.length) {
