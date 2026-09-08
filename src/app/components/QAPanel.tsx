@@ -91,6 +91,7 @@ const SOURCE_TYPE_LABELS: Record<CitedSource['source']['type'], string> = {
   web: '全网',
   ai_synthesis: 'AI 综合分析',
   personal_history: '历史报告',
+  knowledge_base: '内置知识库',
 };
 
 /**

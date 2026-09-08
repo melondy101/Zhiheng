@@ -34,6 +34,7 @@ import {
 } from './knowledge-graph-llm';
 import { STRATEGIES, type StrategyId } from './strategy-engine';
 import { buildInterrogationContext, selectRoundSources } from './interrogation-context';
+import { getKnowledgeBaseItemForStrategy } from './knowledge-base/provider';
 import { logRequest, maskSensitiveHeaders, previewBody } from './request-log';
 import { getCharacter, getCharacterPromptGuidance } from './character';
 import {
@@ -148,11 +149,19 @@ export function buildStrategyQuestionMessages(
 ): LLMChatMessage[] {
   const context = buildInterrogationContext(session, strategy);
   const strategyInfo = STRATEGIES[strategy];
+  const kbItem = context.kbFramework ?? getKnowledgeBaseItemForStrategy(strategy);
 
   const systemParts = [
     SYSTEM_PREAMBLE,
     `当前追问策略：${strategyInfo.name}（${strategyInfo.description}）。`,
   ];
+
+  if (kbItem) {
+    systemParts.push(
+      `方法论依据与追问范式：【${kbItem.topic}】${kbItem.summary}`,
+      `追问导向：参考${kbItem.category === 'logic' ? '逻辑谬误辨析' : kbItem.category === 'philosophy' ? '苏格拉底反诘法' : '经典辩论攻防模型'}，针对观点的深层假设、反例检验或对抗论据深入推演。`
+    );
+  }
 
   if (session.mode === 'fun' && session.character) {
     systemParts.push(getCharacterPromptGuidance(session.character));

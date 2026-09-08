@@ -298,6 +298,7 @@ export function sourceKindLabel(source: Source): string {
     case 'zhihu': return '知乎社区材料';
     case 'web': return '外部检索材料';
     case 'personal_history': return '个人历史材料';
+    case 'knowledge_base': return '内置知识库材料';
     case 'ai_synthesis': return 'AI 综合材料';
   }
 }

@@ -24,6 +24,20 @@ export const HOTLIST_SNAPSHOT_MIGRATION = `CREATE TABLE IF NOT EXISTS zhiyan_hot
   updated_at TIMESTAMPTZ NOT NULL
 )`;
 
+export const KNOWLEDGE_BASE_MIGRATION = `CREATE TABLE IF NOT EXISTS zhiyan_knowledge_base (
+  id TEXT NOT NULL PRIMARY KEY,
+  category TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  content TEXT NOT NULL,
+  tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+  suggested_questions JSONB NOT NULL DEFAULT '[]'::jsonb,
+  fallacies_identified JSONB,
+  argument_patterns JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`;
+
 export const MIGRATION_STATEMENTS: readonly string[] = [
   // One row per (owner, session). The full Session (report, messages, result
   // card, interrogation state) is stored as JSONB so the adapter stays
@@ -56,6 +70,11 @@ export const MIGRATION_STATEMENTS: readonly string[] = [
 
   // The hotlist snapshot (#T1).
   HOTLIST_SNAPSHOT_MIGRATION,
+
+  // Knowledge base table and index (M2).
+  KNOWLEDGE_BASE_MIGRATION,
+  `CREATE INDEX IF NOT EXISTS idx_zhiyan_kb_category_topic
+    ON zhiyan_knowledge_base (category, topic)`,
 ];
 
 /**

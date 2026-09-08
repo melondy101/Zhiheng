@@ -16,6 +16,8 @@
 import type { CitedSource, Session, Viewpoint } from './providers';
 import { isRoundAnswer } from './providers';
 import type { StrategyId } from './strategy-engine';
+import type { KnowledgeBaseItem } from './knowledge-base/types';
+import { getKnowledgeBaseItemForStrategy } from './knowledge-base/provider';
 
 export interface InterrogationContext {
   /** The round whose question is being planned (1-based). */
@@ -29,6 +31,8 @@ export interface InterrogationContext {
   lastAnswer: string | null;
   /** All report citations in ascending citation-number order. */
   citations: CitedSource[];
+  /** Philosophical/debate knowledge base framework mapped to this strategy (#M2). */
+  kbFramework?: KnowledgeBaseItem | null;
 }
 
 /** Maximum characters of a claim fragment embedded into a question. */
@@ -122,6 +126,7 @@ export function buildInterrogationContext(
     stance,
     lastAnswer: lastUserAnswer(session),
     citations: allCitations(session),
+    kbFramework: getKnowledgeBaseItemForStrategy(strategy),
   };
 }
 

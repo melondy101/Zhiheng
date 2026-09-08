@@ -43,6 +43,7 @@ function groupByType(sources: Source[]): Record<string, Source[]> {
     zhihu: [],
     web: [],
     personal_history: [],
+    knowledge_base: [],
     ai_synthesis: [],
   };
   for (const s of sources) {
@@ -57,6 +58,7 @@ const TYPE_LABELS: Record<string, string> = {
   zhihu: '知乎来源',
   web: '全网来源',
   personal_history: '我的历史报告',
+  knowledge_base: '内置知识库（哲学/辩论/逻辑）',
   ai_synthesis: 'AI 综合分析',
 };
 

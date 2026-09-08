@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getServerStorage, StorageUnavailableError } from '@/lib/server-storage';
 import { readOwnerId } from '@/lib/owner-id';
-import type { Session, ReportProgress, SourceState } from '@/lib/providers';
+import type { Session, ReportProgress, SourceState, Source } from '@/lib/providers';
 import { createZhihuSearchProvider, createGlobalSearchProvider } from '@/lib/zhihu-retrieval';
 import { HistorySearchProvider, type HistorySessionSnapshot } from '@/lib/history-search';
+import { defaultKnowledgeBaseProvider } from '@/lib/knowledge-base';
 import { buildReport } from '@/lib/report-builder';
 import { safeBuildGraphAsync } from '@/lib/knowledge-graph';
 import { llmProvider } from '@/lib/server-providers';
@@ -100,17 +101,37 @@ export async function POST(request: Request) {
   const historyProvider = new HistorySearchProvider();
   const parsedHistorySessions = parseHistorySessions(historySessions);
 
-  const [zhihuResult, webResult, historyResult] = await Promise.all([
+  const [zhihuResult, webResult, historyResult, kbResults] = await Promise.all([
     zhihuProvider.search(question),
     webProvider.search(question),
     historyProvider.search(question, parsedHistorySessions, excludedHistoryIds as string[]),
+    defaultKnowledgeBaseProvider.search(question, { limit: 2 }),
   ]);
+
+  const kbSources: Source[] = kbResults.map((r) => ({
+    id: `kb_${r.item.id}`,
+    type: 'knowledge_base',
+    author:
+      r.item.category === 'philosophy'
+        ? '哲学思辨知识库'
+        : r.item.category === 'debate'
+        ? '辩论模型知识库'
+        : r.item.category === 'logic'
+        ? '逻辑与认知谬误知识库'
+        : '垂直领域分析库',
+    title: `${r.item.topic}（${r.item.title}）`,
+    url: null,
+    excerpt: `${r.item.summary} —— ${r.item.content}`,
+    category: r.item.category,
+    topic: r.item.topic,
+  }));
 
   // Log the actual retrieval results for debugging
   console.log('[report] Retrieval results:', {
     zhihu: { count: zhihuResult.sources.length, source: zhihuResult.source, stale: zhihuResult.stale, updatedAt: zhihuResult.updatedAt },
     web: { count: webResult.sources.length, source: webResult.source, stale: webResult.stale, updatedAt: webResult.updatedAt },
     history: { count: historyResult.sources.length },
+    kb: { count: kbSources.length },
     question,
   });
   const zhihuSourceState: SourceState = zhihuResult.source;
@@ -140,6 +161,7 @@ export async function POST(request: Request) {
     zhihuSources: zhihuResult.sources,
     webSources: webResult.sources,
     historySources: historyResult.sources,
+    kbSources,
     zhihuSourceState,
     webSourceState,
     llmProvider,

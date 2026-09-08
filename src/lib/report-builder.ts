@@ -21,6 +21,7 @@ export interface ReportBuilderOptions {
   zhihuSources: Source[];
   webSources: Source[];
   historySources?: Source[];
+  kbSources?: Source[];
   zhihuSourceState?: SourceState;
   webSourceState?: SourceState;
   onProgress?: (progress: ReportProgress) => void;
@@ -52,10 +53,10 @@ const emit =
   };
 
 /** Merge sources from multiple providers, deduplicate by id. */
-function mergeSources(zhihu: Source[], web: Source[], history: Source[] = []): Source[] {
+function mergeSources(zhihu: Source[], web: Source[], history: Source[] = [], kb: Source[] = []): Source[] {
   const seen = new Set<string>();
   const merged: Source[] = [];
-  for (const s of [...zhihu, ...web, ...history]) {
+  for (const s of [...zhihu, ...web, ...history, ...kb]) {
     if (!seen.has(s.id)) {
       seen.add(s.id);
       merged.push(s);
@@ -67,7 +68,7 @@ function mergeSources(zhihu: Source[], web: Source[], history: Source[] = []): S
 /** Produce a numbered list of references grouped by type. */
 function groupReferences(allSources: Source[]): Source[] {
   // Match the reader-facing citation groups.
-  const order: Record<string, number> = { zhihu: 0, web: 1, personal_history: 2, ai_synthesis: 3 };
+  const order: Record<string, number> = { zhihu: 0, web: 1, personal_history: 2, knowledge_base: 3, ai_synthesis: 4 };
   return [...allSources].sort((a, b) => {
     const diff = (order[a.type] ?? 9) - (order[b.type] ?? 9);
     return diff !== 0 ? diff : a.id.localeCompare(b.id);
@@ -279,6 +280,7 @@ export function buildStructuredViewpoints(
 export async function buildReport(options: ReportBuilderOptions): Promise<ReportBuildResult> {
   const progressLog: ReportProgress[] = [];
   const historySources = options.historySources ?? [];
+  const kbSources = options.kbSources ?? [];
   const progress = emit(
     (evt) => {
       progressLog.push(evt);
@@ -296,6 +298,9 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
   // Stage 2b: History search (handled by caller)
   const p2b = progress('history_search', `正在检索个人历史报告（${historySources.length} 条结果）`);
 
+  // Stage 2c: Knowledge base search (M2)
+  const p2c = progress('kb_search', `正在匹配内置哲学与论证知识库（${kbSources.length} 条参考条目）`);
+
   // Simulate a small processing delay for visual feedback
   await new Promise<void>(resolve => setTimeout(resolve, 50));
 
@@ -303,7 +308,7 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
   const p3 = progress('synthesizing', '正在整理观点与争议');
 
   // Merge and deduplicate all sources (constrained to first 8 for report generation)
-  const allSources = mergeSources(options.zhihuSources, options.webSources, historySources).slice(0, 8);
+  const allSources = mergeSources(options.zhihuSources, options.webSources, historySources, kbSources).slice(0, 8);
 
   // Group and number references
   const grouped = groupReferences(allSources);

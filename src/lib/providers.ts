@@ -107,7 +107,7 @@ export interface Report {
 // Null ≠ fabricated — missing fields are left blank, never invented.
 export interface Source {
   id: string;
-  type: 'zhihu' | 'web' | 'ai_synthesis' | 'personal_history';
+  type: 'zhihu' | 'web' | 'ai_synthesis' | 'personal_history' | 'knowledge_base';
   author: string | null;
   title: string | null;
   url: string | null;
@@ -116,6 +116,9 @@ export interface Source {
   sourceSessionId?: string;
   /** Present when type=personal_history */
   provenance?: string;
+  /** Present when type=knowledge_base */
+  category?: string;
+  topic?: string;
 }
 
 /**
@@ -134,6 +137,7 @@ export type ReportProgressStage =
   | 'zhihu_search'
   | 'web_search'
   | 'history_search'
+  | 'kb_search'
   | 'synthesizing'
   | 'building_graph'
   | 'complete';

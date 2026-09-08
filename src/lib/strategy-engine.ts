@@ -12,6 +12,8 @@ import {
   contextClaimFragment,
   type InterrogationContext,
 } from './interrogation-context';
+import type { KnowledgeBaseItem } from './knowledge-base/types';
+import { getKnowledgeBaseItemForStrategy } from './knowledge-base/provider';
 
 export type StrategyId =
   | 'M1_evidence'
@@ -28,6 +30,10 @@ export interface Strategy {
   id: StrategyId;
   name: string;
   description: string;
+  /** Curated knowledge base item id mapped to this strategy (#M2). */
+  kbItemId?: string;
+  /** High-level philosophical/argumentation framework name (#M2). */
+  kbFramework?: string;
   /** Allowed at this round given the session state. */
   isApplicable: (session: Session, history: StrategyId[]) => boolean;
   /**
@@ -97,6 +103,77 @@ export const STRATEGY_QUESTION_TEMPLATES: Record<StrategyId, StrategyQuestionTem
       `结合你提到的"${claim}"，你能用一两句话重新表述你当前的观点吗？`,
   },
 };
+
+/**
+ * Socratic question templates grounded in classical philosophy, debate models,
+ * and cognitive fallacy discernment (#M2, KB-05).
+ */
+export const SOCRATIC_STRATEGY_TEMPLATES: Record<StrategyId, StrategyQuestionTemplate> = {
+  M1_evidence: {
+    plain: '根据举证责任原则，支撑这一判断最核心的观察、数据或事实依据是什么？',
+    withClaim: (claim) =>
+      `根据举证责任原则，关于"${claim}"，支持它的最核心事实证据或具体观察是什么？`,
+  },
+  M2_premise: {
+    plain: '运用苏格拉底反诘法深入审视：这个论断立足于怎样的深层假设，若该假设在极端情境下动摇，结论又会如何调整？',
+    withClaim: (claim) =>
+      `运用苏格拉底反诘法深入审视：针对"${claim}"，这一说法立足于怎样的深层假设，若该假设动摇，结论又会如何调整？`,
+  },
+  M3_anchoring: {
+    plain: '反思认知锚定与确认偏误：在这个议题上，你是否优先吸纳了符合预期的证据，而忽略了可能推翻它的矛盾线索？',
+    withClaim: (claim) =>
+      `反思认知锚定与确认偏误：关于"${claim}"，我们是否优先关注了支持它的线索，而忽略了可能推翻它的矛盾迹象？`,
+  },
+  M4_steelman: {
+    plain: '实践最强反驳原则：站在最理性、最严密的反对者立场，你认为对方能对你的主张提出的最强质疑是什么？',
+    withClaim: (claim) =>
+      `实践最强反驳原则：针对你提出的"${claim}"，站在最理性且深思熟虑的对立立场，他们能给出的最有力反驳是什么？`,
+  },
+  M5_system2: {
+    plain: '激活系统二审慎思维：跳出即时直觉，从复杂系统的意外后果与长远连锁影响考量，这一主张有哪些边界条件？',
+    withClaim: (claim) =>
+      `激活系统二审慎思维：跳出即时直觉，针对"${claim}"，在复杂系统的意外后果与多变量权衡下，它是否存在隐性代价？`,
+  },
+  M6_reversal: {
+    plain: '置于罗尔斯无知之幕后重新审视：如果不预设自身所处的利益或立场，为完全相反的观点辩护，最站得住脚的理由是什么？',
+    withClaim: (claim) =>
+      `置于罗尔斯无知之幕后重新审视：关于"${claim}"，如果不预设原有立场，站在受该论断冲击最大的视角，你会如何辩护相反观点？`,
+  },
+  M7_metacognition: {
+    plain: '依循笛卡尔方法怀疑溯源：这一观点是基于哪些关键信息源或推导节点形成的，其中最容易受到质疑的环节是什么？',
+    withClaim: (claim) =>
+      `依循笛卡尔方法怀疑溯源：针对"${claim}"，这个判断是基于哪些关键信息源逐步建立的，其中最脆弱的推导环节是什么？`,
+  },
+  M8_contradiction: {
+    plain: '运用黑格尔辩证矛盾分析：讨论中出现的不同维度之间是否存在内在张力，这两者如何在更高层次的命题中达成综合？',
+    withClaim: (claim) =>
+      `运用黑格尔辩证矛盾分析：对比前后观点与你提到的"${claim}"，它们之间的张力究竟源于何处，能否在更高维度完成综合？`,
+  },
+  M5_restate: {
+    plain: '参照图尔敏论证模型：在历经推演审视后，请明确你的主张（Claim）与限定条件（Qualifier），重新凝练你当前的立场？',
+    withClaim: (claim) =>
+      `参照图尔敏论证模型：在历经多轮思辨后，结合你提到的"${claim}"与必要的限定条件，你能重新凝练现在的最终立场吗？`,
+  },
+};
+
+/**
+ * Retrieve the Socratic probing question for a given strategy, quoting the user's claim if available.
+ */
+export function getSocraticQuestion(strategy: StrategyId, claim?: string | null): string {
+  const template = SOCRATIC_STRATEGY_TEMPLATES[strategy];
+  if (!template) {
+    const fallback = STRATEGY_QUESTION_TEMPLATES[strategy];
+    return claim ? fallback.withClaim(claim) : fallback.plain;
+  }
+  return claim ? template.withClaim(claim) : template.plain;
+}
+
+/**
+ * Retrieve the curated knowledge base framework mapped to a strategy.
+ */
+export function getStrategyKnowledgeBaseFramework(strategy: StrategyId): KnowledgeBaseItem | null {
+  return getKnowledgeBaseItemForStrategy(strategy);
+}
 
 /** Honest degradation notice prepended to every strategy-template question. */
 const TEMPLATE_FALLBACK_DISCLOSURE =
@@ -195,6 +272,8 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     id: 'M1_evidence',
     name: '证据追问',
     description: '要求具体的数据或例子',
+    kbItemId: 'debate-burden-of-proof',
+    kbFramework: '举证责任原则',
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M1_evidence'),
   },
@@ -202,6 +281,8 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     id: 'M2_premise',
     name: '前提追问',
     description: '揭示未明说的前提假设',
+    kbItemId: 'philo-socratic-elenchus',
+    kbFramework: '苏格拉底反诘法',
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M2_premise'),
   },
@@ -209,6 +290,8 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     id: 'M3_anchoring',
     name: '锚定揭露',
     description: '反思初始参考基准与先入为主',
+    kbItemId: 'logic-confirmation-bias',
+    kbFramework: '确认偏误与认知锚定',
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M3_anchoring'),
   },
@@ -216,6 +299,8 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     id: 'M4_steelman',
     name: '钢铁人反驳',
     description: '面对对方最强论点',
+    kbItemId: 'debate-steelmanning',
+    kbFramework: '最强反驳/Steelmanning',
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M4_steelman'),
   },
@@ -223,6 +308,8 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     id: 'M5_system2',
     name: '系统二激活',
     description: '跳出直觉，长远约束与多变量权衡',
+    kbItemId: 'domain-unintended-consequences',
+    kbFramework: '意外后果法则与系统二审慎',
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M5_system2'),
   },
@@ -230,6 +317,8 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     id: 'M6_reversal',
     name: '立场反转',
     description: '从对立立场重新论证',
+    kbItemId: 'philo-rawls-veil',
+    kbFramework: '罗尔斯无知之幕与视角转换',
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M6_reversal'),
   },
@@ -237,6 +326,8 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     id: 'M7_metacognition',
     name: '元认知溯源',
     description: '追溯观点形成的信息源与思考节点',
+    kbItemId: 'philo-cartesian-doubt',
+    kbFramework: '笛卡尔方法怀疑与元认知',
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M7_metacognition'),
   },
@@ -244,6 +335,8 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     id: 'M8_contradiction',
     name: '内部矛盾核验',
     description: '对照前后潜在张力与不一致',
+    kbItemId: 'philo-hegel-dialectic',
+    kbFramework: '黑格尔辩证矛盾与综合',
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M8_contradiction'),
   },
@@ -251,6 +344,8 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     id: 'M5_restate',
     name: '观点重述',
     description: '重新表述当前观点',
+    kbItemId: 'debate-toulmin-model',
+    kbFramework: '图尔敏论证六要素模型',
     isApplicable: () => true,
     fallbackTemplate: (s, ctx) => templateQuestion(s, ctx, 'M5_restate'),
   },
