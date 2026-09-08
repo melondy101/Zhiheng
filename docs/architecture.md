@@ -81,7 +81,7 @@ interface LLMProvider {
 **策略选择与生成分离**：
 - 策略：`src/lib/strategy-engine.ts` 决定下一轮用哪个策略（M1/M2/M4/M6/M5）
 - 生成：LLM 只在 `pickNextStrategy()` 给出的策略范围内出题
-- Fallback：`src/lib/llm-fallback.ts` 的 `withFallback()` 包一层 — 失败重试 1 次，再使用策略模板
+- Fallback：`src/lib/llm-fallback.ts` 的 `withFallback()` 包一层 — 失败重试 1 次，再使用策略模板；失败分类为 `timeout`、`network`、`http`、`invalid_response`、`invalid_synthesis` 或 `unknown`，UI 据此说明是响应慢、连接失败、服务拒绝还是返回内容未通过校验。
 
 **#25 护栏（独立 contract 函数，不可只靠 system prompt）**：
 - `src/lib/openai-llm-provider.ts` 导出 `assertNonJudgingQuestion(text)`，被 `isValidQuestionText` 通过 `try/catch` 消费为单一真相
@@ -225,7 +225,7 @@ interface Source {
 2. **起始立场** — `session.selectedViewpoint`（AI 建议被选 / 用户自写）
 3. **新增证据** — 中间轮的 user message
 4. **观点修正** — 相邻 user message 文本不同 → 修正对
-5. **最终观点** — 最后一个 user message
+5. **你最后表达的观点** — 最后一个实质性 user message；它是可追溯的用户原话，不是 AI 自动总结
 6. **未解决问题** — 当前为空数组（未来由 LLM 提取）
 
 每段都有可追溯的 `messageId`（点击可定位原消息）。
@@ -279,7 +279,9 @@ tests/
 - 2 秒内出现可见进度反馈 ✓（`loading` 状态）
 - 尽量 15 秒内完成报告正文 ✓（fixture 延迟 200-500ms + 50ms 构建）
 - 20 秒仍未完成 → 缓存降级 ✓（searchWithTimeout 5s）
-- LLM 失败 → 重试一次 + 策略模板 ✓（`withFallback`）
+- LLM 失败 → 重试一次 + 策略模板；UI 按失败类别披露 ✓（`withFallback`）
+- 图谱节点经标签清洗：过滤口语填充、过短标签和昵称式尾缀；LLM 与确定性 fallback 共用规则 ✓
+- 综合观点的每条证据必须能与其引用材料做词面追溯，且结论不能复述原问题 ✓
 - 知识图谱允许正文后异步完成 ✓（API 路由 try/catch 包装）
 
 ## 10. 外部平台与数据库变更门禁

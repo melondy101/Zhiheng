@@ -1,6 +1,6 @@
 # 知研 (Zhiyan) — AI 时代的思辨陪练
 
-> 知乎黑客松 MVP · Next.js 15 + React 19 · integration 最新 `f35a711`（GitHub #50 官方刘看山 GIF 已合入并关闭）；真实环境验收后进入 M1（#26）
+> 知乎黑客松 MVP · Next.js 15 + React 19
 
 让 AI 通过追问帮助人类打磨观点，而非替用户思考。报告、引用、知识图谱、五轮诘问与可追溯成果卡 — 完整可演示。
 
@@ -22,7 +22,7 @@ npm start -- --port 3001
 
 # 质量门禁
 npm run typecheck   # TypeScript 严格模式
-npm test            # 单元/集成测试（426 tests, 113 suites）
+npm test            # 单元与集成测试
 npm run test:e2e    # E2E（含 LLM 失败降级 Golden Path）
 npm run check       # 全量门禁
 ```
@@ -34,12 +34,12 @@ npm run check       # 全量门禁
 
 启动 dev server 后，浏览器打开 `http://localhost:3001`，按以下任一路径走完：
 
-1. **首页** → 输入问题或点击知乎热榜 Top 10（带 live/cache/demo 状态徽章）
+1. **首页** → 输入问题，或点击知乎热榜 Top 10；热榜标题会拆成单一核心问题，原标题保留为背景（带 live/cache/demo 状态徽章）
 2. **报告生成** → 知乎 + 全网并行检索（live-first；失败按 fresh cache → stale cache → demo 降级）；引用区对 Provider null 元数据自动显示"（无摘要）"占位而非字面 `null`
 3. **观点引导** → 选 3 个 AI 建议之一 / 自写
 4. **历史材料管理**（GitHub #23，integration `81771a1`） → 报告"本报告引用 N 条个人历史"列表；勾掉单项 → 点"重新生成报告"→ 新报告排除该条、保留其余；原 session 不删；空状态显示"暂无任何引用材料"
 5. **五轮诘问** → 证据 → 前提 → 钢铁人反驳 → 立场反转 → 观点重述；LLM 在配置有效时按真实模型出题，否则稳定走策略模板（不替用户裁决）
-6. **成果卡** → 6 段可追溯 (初始表达/起始立场/新增证据/观点修正/最终观点/未解决问题)
+6. **成果卡** → 6 段可追溯（初始表达/起始立场/新增证据/观点修正/你最后表达的观点/未解决问题）；它不把用户原话伪装成 AI 总结
 7. **刷新页面** → 重新打开成果卡（localStorage 或 Neon 跨设备恢复，owner header 隔离）
 
 **三个预置主题**（可在 `src/lib/demo-sources.ts` 找到，fixture 降级时强制使用）：
@@ -92,6 +92,7 @@ npm run check       # 全量门禁
 - **诘问策略**：MVP 仅 M1/M2/M4/M6/M5 5 轮；完整 8 策略 + 19 陷阱检测未实现
 - **报告 source state 跨浏览器恢复**：历史内部 ticket #24 已合并 — `Session.reportSourceState` 是权威来源，跨浏览器刷新后 badge 由持久化 Session 恢复（不再依赖 side-key）；知识图谱同源披露 provenance；无 DB 时 UI 显式标注"本地存储：未同步到远端"
 - **LLM 真实接入验收**：尚待主控在受控环境亲自执行；fake/integration 测试已覆盖全部降级分支
+- **LLM 输出质量**：模型综合观点必须有可追溯证据，且不能只是复述原问题；不合格结果会被拒绝并显示材料而非伪造观点
 
 ## 项目结构
 
@@ -115,46 +116,8 @@ docs/
 
 ## 文档导航
 
-- [产品设计 v4.1](docs/prd/2026-09-01-zhiyan-design-v4.1.md) — 当前产品蓝图、MVP 与 M1 决策
-- [M1 交付 Backlog](docs/prd/2026-09-01-zhiyan-m1-delivery-backlog.md) — GitHub 映射、依赖与并行窗口
+- [产品设计 v4.2](docs/prd/2026-09-02-zhiyan-design-v4.2.md) — 当前产品设计基线
+- [M1 交付 Backlog](docs/prd/2026-09-01-zhiyan-m1-delivery-backlog.md) — 历史交付映射与依赖
 - [架构说明](docs/architecture.md) — Provider 合约、数据流、状态机
 - [刘看山反馈资源策略](docs/assets/feedback-cue-assets.md) — `SessionFeedbackCue` 资源来源、加载与降级（#50）
 - [Agent 规范](AGENTS.md) — 项目内 AI 协作规则
-- [Issue Tracker 规范](docs/agents/issue-tracker.md) — GitHub issue 操作
-
-## 已合并 ticket 清单（截至 integration `81771a1`）
-
-| # | 标题 | 集成 SHA |
-|---|------|----------|
-| 2 | 建立可持久化的最小思辨闭环 | `5f8ab82` |
-| 3 | 接入知乎热榜选题 | `17b5478` |
-| 4 | 生成带真实引用的研究报告 | `8fa8b24` |
-| 5 | 支持研究报告的诚实降级 | `5e7bd9b` |
-| 6 | 加入历史报告上下文与重新生成 | `a9a8216` |
-| 7 | 提供可检查的知识图谱 | `05b2b5f` |
-| 8 | 三种观点引导并保留作者来源 | `bdbc3d6` |
-| 9 | 完成标准模式五轮诘问 | `66cbbf6` |
-| 10 | 不确定回答/退出/LLM 故障 | `bf940f6` |
-| 11 | 可追溯且抗失败的思辨成果卡 | `0094dc5` |
-| 12 | 会话生命周期与简化画像 | `fe268ae` |
-| 13 | 封闭黑客松演示 Golden Path | `61453f8` |
-| 19 | 接入真实检索并保持来源诚实降级 | `c21e0ce` |
-| 20 | 接入真实 LLM 追问并保留策略降级 | `ce1b000` |
-| 21 | 接入 Neon 持久化与匿名会话所有权 | `90901aa` |
-| 22 | 修正真实检索的 live-first 降级顺序 | `605b7a6` |
-| **23** | **GitHub #23：支持从当前报告上下文移除历史材料并再生成** | **`81771a1`** |
-| 24 | 持久化检索来源状态（历史内部 #24；**非 GitHub #24 刘看山**） | `46c1bf7` |
-| 25 | 强化 LLM "不得裁决用户观点" 护栏 | `44a400a` |
-| **47** | **GitHub #47：刘看山反馈组件/资源策略/无障碍降级** | **`52c904a`** |
-| **48** | **GitHub #48：刘看山反馈状态机接入 + 浏览器 Golden Path** | **`fd9da7b`** |
-| **50** | **GitHub #50：将四种会话反馈替换为官方刘看山 GIF** | **`f35a711`** |
-
-> ⚠️ **编号防错**：历史合并的 `5dbc053 fix(#23)` 和 `46c1bf7 fix(#24)` 是**历史内部 ticket 编号**，分别对应"引用缺失元数据的 null 泄露"和"持久化检索来源状态"——**不是** GitHub Issue #23（移除历史材料）和 #24（刘看山）。GitHub #24 当前拆为 P2 子票 #47/#48；具体状态以 GitHub Issue 为准。#47/#48 的素材替换后续票是 GitHub #50（已合并并关闭）。
-
-每个 ticket 的 handoff 在 `.scratch/agent-runs/ticket-NN/HANDOFF.md`。
-
-待办：
-
-- **GitHub #26**：M1 阶段总控与准入门禁；真实环境验收有结论后才能开始 M1 实现
-- **GitHub #47/#48**：刘看山反馈 P2 拆票，已合并到 integration `fd9da7b`，待授权关闭（#50 素材替换已合入并关闭）
-- **真实环境验收**：Zhihu、LLM、Neon 与已部署 Vercel 环境尚未证实；#30 已解决 HistorySearchProvider 的服务端/浏览器存储边界
