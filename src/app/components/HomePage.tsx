@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { hotlistBackground, makeHotlistCoreQuestion } from '@/lib/hotlist-question';
+import { useCurrentUser } from '../providers/UserProvider';
+import { User as UserIcon, LogIn, UserPlus, LogOut, ShieldCheck, Sparkles } from 'lucide-react';
 
 interface HotlistItem {
   id: string;
@@ -60,15 +61,14 @@ export default function HomePage({
   recentSessions,
   onResumeSession,
 }: HomePageProps) {
+  const { user, openAuthModal, logout } = useCurrentUser();
   const [question, setQuestion] = useState('');
   const [initialOpinion, setInitialOpinion] = useState('');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const handleHotlistClick = (title: string) => {
-    const coreQuestion = makeHotlistCoreQuestion(title);
-    setQuestion(coreQuestion);
-    setInitialOpinion(hotlistBackground(title, coreQuestion) ?? '');
+    setQuestion(title);
     const textarea = document.getElementById('question') as HTMLTextAreaElement | null;
     if (textarea) {
       textarea.focus();
@@ -101,7 +101,22 @@ export default function HomePage({
           </button>
           <span className="font-bold text-lg text-blue-600">知研</span>
         </div>
-        <span className="text-xs text-slate-500">AI 问人 · 追问思辨</span>
+        <div className="flex items-center gap-2">
+          {user ? (
+            user.isGuest ? (
+              <button
+                type="button"
+                onClick={() => openAuthModal('register')}
+                className="px-2.5 py-1 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1"
+              >
+                <Sparkles className="w-3 h-3 text-amber-500" />
+                <span>转正保存</span>
+              </button>
+            ) : (
+              <span className="text-xs text-slate-600 font-medium">{user.name}</span>
+            )
+          ) : null}
+        </div>
       </div>
 
       {/* Left Sidebar (DeepSeek Style: Collapsible with Toggle Button) */}
@@ -174,51 +189,106 @@ export default function HomePage({
 
         {/* Scrollable Container with Recent Sessions */}
         {!isSidebarCollapsed ? (
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 min-w-[280px]">
-            <div className="flex items-center justify-between px-1">
-              <div className="flex items-center gap-1.5">
-                <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <h2 className="text-sm font-semibold text-slate-700">最近会话</h2>
+          <>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 min-w-[280px]">
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-1.5">
+                  <svg className="w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <h2 className="text-sm font-semibold text-slate-700">最近会话</h2>
+                </div>
+                {hasSessions && (
+                  <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-xs font-mono">
+                    {recentSessions.length}
+                  </span>
+                )}
               </div>
-              {hasSessions && (
-                <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-xs font-mono">
-                  {recentSessions.length}
-                </span>
-              )}
+
+              <div id="recent-sessions-container" className="space-y-1.5 pt-1">
+                {hasSessions ? (
+                  <div className="space-y-1.5">
+                    {recentSessions.map((sess) => (
+                      <button
+                        key={sess.id}
+                        type="button"
+                        onClick={() => onResumeSession?.(sess.id)}
+                        className="w-full text-left p-2.5 rounded-xl hover:bg-blue-50/60 hover:border-blue-200 border border-slate-100/80 bg-slate-50/50 flex flex-col gap-1 text-xs transition-colors group"
+                      >
+                        <span className="font-medium text-slate-700 group-hover:text-blue-600 line-clamp-2 leading-relaxed">
+                          {sess.question}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono" suppressHydrationWarning>
+                          {formatTime(sess.updatedAt)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-10 px-2 text-slate-400">
+                    <p className="text-xs">暂无历史会话记录</p>
+                    <p className="text-[11px] text-slate-300 mt-1">开始提问后将自动保存</p>
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div id="recent-sessions-container" className="space-y-1.5 pt-1">
-              {hasSessions ? (
-                <div className="space-y-1.5">
-                  {recentSessions.map((sess) => (
+            {/* Bottom-Left Fixed Sidebar User Card */}
+            <div id="sidebar-user-card-container" className="mt-auto p-3 border-t border-slate-100 bg-slate-50/50 min-w-[280px]">
+              {user ? (
+                user.isGuest ? (
+                  <div id="sidebar-guest-card" className="p-3 bg-white border border-blue-100 rounded-xl shadow-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-semibold">
+                          访
+                        </div>
+                        <span className="text-xs font-medium text-slate-700">{user.name}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openAuthModal('login')}
+                        className="text-[11px] text-slate-500 hover:text-blue-600 transition-colors"
+                      >
+                        登录
+                      </button>
+                    </div>
                     <button
-                      key={sess.id}
                       type="button"
-                      onClick={() => onResumeSession?.(sess.id)}
-                      className="w-full text-left p-2.5 rounded-xl hover:bg-blue-50/60 hover:border-blue-200 border border-slate-100/80 bg-slate-50/50 flex flex-col gap-1 text-xs transition-colors group"
+                      onClick={() => openAuthModal('register')}
+                      className="w-full py-1.5 px-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-medium rounded-lg shadow-xs flex items-center justify-center gap-1.5 transition-all"
                     >
-                      <span className="font-medium text-slate-700 group-hover:text-blue-600 line-clamp-2 leading-relaxed">
-                        {sess.question}
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-mono" suppressHydrationWarning>
-                        {formatTime(sess.updatedAt)}
-                      </span>
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      <span>转正保存思辨进度</span>
                     </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-10 px-2 text-slate-400">
-                  <p className="text-xs">暂无历史会话记录</p>
-                  <p className="text-[11px] text-slate-300 mt-1">开始提问后将自动保存</p>
-                </div>
-              )}
+                  </div>
+                ) : (
+                  <div id="sidebar-user-profile-card" className="p-2.5 bg-white border border-slate-200 rounded-xl shadow-xs flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+                        {user.name.slice(0, 1).toUpperCase()}
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-semibold text-slate-800 line-clamp-1">{user.name}</span>
+                        <span className="text-[10px] text-slate-400 line-clamp-1">{user.email}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => logout()}
+                      title="退出登录"
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </button>
+                  </div>
+                )
+              ) : null}
             </div>
-          </div>
+          </>
         ) : (
           /* Collapsed Icons Column */
-          <div className="flex-1 flex flex-col items-center py-4 space-y-3">
+          <div className="flex-1 flex flex-col justify-between items-center py-4">
             <button
               type="button"
               onClick={() => setIsSidebarCollapsed(false)}
@@ -232,12 +302,48 @@ export default function HomePage({
                 <span className="absolute top-1 right-1 w-2 h-2 bg-blue-600 rounded-full ring-2 ring-white" />
               )}
             </button>
+            <button
+              type="button"
+              onClick={() => openAuthModal(user?.isGuest ? 'register' : 'login')}
+              title={user?.isGuest ? '转正注册' : user?.name || '个人中心'}
+              className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-colors"
+            >
+              <UserIcon className="w-5 h-5" />
+            </button>
           </div>
         )}
       </aside>
 
       {/* Main Content / Chat & Input Panel (DeepSeek Style Center Stage) */}
       <main className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 lg:p-12 overflow-y-auto relative">
+        {/* Top Right User Pill on Desktop */}
+        <div className="hidden md:flex absolute top-6 right-8 items-center gap-2">
+          {user && user.isGuest ? (
+            <div className="flex items-center gap-2 bg-white/80 backdrop-blur-sm border border-slate-200/80 rounded-full py-1 px-3 shadow-xs">
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+              <span className="text-xs text-slate-600">{user.name}</span>
+              <button
+                type="button"
+                onClick={() => openAuthModal('register')}
+                className="text-xs font-semibold text-blue-600 hover:text-blue-700 pl-1 border-l border-slate-200"
+              >
+                一键转正
+              </button>
+            </div>
+          ) : user ? (
+            <div className="flex items-center gap-2 bg-white/80 backdrop-blur-sm border border-slate-200/80 rounded-full py-1 px-3 shadow-xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span className="text-xs font-semibold text-slate-800">{user.name}</span>
+              <button
+                type="button"
+                onClick={() => logout()}
+                className="text-xs text-slate-400 hover:text-red-600 pl-1 border-l border-slate-200"
+              >
+                退出
+              </button>
+            </div>
+          ) : null}
+        </div>
         <div className="w-full max-w-3xl space-y-6 my-auto">
           {/* Hero Prompt */}
           <div className="text-center space-y-2 pt-2">
@@ -320,7 +426,7 @@ export default function HomePage({
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
                 <h2 className="text-sm font-semibold text-slate-800">知乎热榜灵感</h2>
-                <span className="text-xs text-slate-400">（点击生成单一核心问题）</span>
+                <span className="text-xs text-slate-400">（点击直接填入思考问题）</span>
               </div>
               {hotlist && (
                 <span

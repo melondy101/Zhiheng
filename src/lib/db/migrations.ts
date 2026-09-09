@@ -75,6 +75,42 @@ export const MIGRATION_STATEMENTS: readonly string[] = [
   KNOWLEDGE_BASE_MIGRATION,
   `CREATE INDEX IF NOT EXISTS idx_zhiyan_kb_category_topic
     ON zhiyan_knowledge_base (category, topic)`,
+
+  // User accounts and authentication.
+  `CREATE TABLE IF NOT EXISTS zhiyan_users (
+    id TEXT NOT NULL PRIMARY KEY,
+    name VARCHAR(64) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    email_lower VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL DEFAULT '',
+    is_guest BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_zhiyan_users_email_lower
+    ON zhiyan_users (email_lower)`,
+
+  // Email verification codes.
+  `CREATE TABLE IF NOT EXISTS zhiyan_email_verifications (
+    id TEXT NOT NULL PRIMARY KEY,
+    email_lower VARCHAR(255) NOT NULL,
+    code CHAR(6) NOT NULL,
+    attempts SMALLINT NOT NULL DEFAULT 0,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_zhiyan_email_verifications_email
+    ON zhiyan_email_verifications (email_lower)`,
+
+  // Rate limiting and security audit log.
+  `CREATE TABLE IF NOT EXISTS zhiyan_auth_attempts (
+    id TEXT NOT NULL PRIMARY KEY,
+    ip_address VARCHAR(45) NOT NULL,
+    action_type VARCHAR(32) NOT NULL,
+    attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_zhiyan_auth_attempts_ip_action
+    ON zhiyan_auth_attempts (ip_address, action_type, attempted_at)`,
 ];
 
 /**

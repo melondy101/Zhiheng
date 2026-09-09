@@ -9,18 +9,22 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx scripts/db-migrate.ts",
-    "test": "npx tsx --tsconfig tsconfig.test.json --test tests/unit/knowledge-base.test.ts tests/unit/interrogation-kb-strategy.test.ts tests/unit/knowledge-graph-contract.test.ts tests/unit/providers.test.ts tests/unit/hotlist-question.test.ts tests/unit/zhihu-retrieval.test.ts tests/unit/openai-llm-provider.test.ts tests/unit/interrogation-orchestrator.test.ts tests/unit/interrogation-context.test.ts tests/unit/result-card-builder.test.ts tests/unit/session-feedback-cue.test.tsx tests/unit/feedback-cue-state.test.ts tests/unit/optimistic-reconcile.test.ts tests/unit/hotlist-snapshot-cache.test.ts tests/unit/hotlist-resolver.test.ts tests/unit/hotlist-source-label.test.ts tests/unit/intent-classifier.test.ts tests/unit/round-progression.test.ts tests/unit/storage-owned.test.ts tests/unit/session-recovery.test.ts tests/unit/session-source-state.test.ts tests/integration/interrogate-api.test.ts tests/integration/retrieval-api.test.ts tests/integration/llm-provider-api.test.ts tests/integration/profile-api.test.ts tests/integration/neon-storage.test.ts tests/integration/storage-degradation.test.ts tests/integration/report-source-state.test.ts tests/integration/report-history-exclusion.test.ts tests/integration/interrogate-intent.test.ts tests/integration/hotlist-route-wiring.test.ts tests/integration/report-synthesis-api.test.ts",
+    "test": "npx tsx --tsconfig tsconfig.test.json --test tests/unit/auth-user-store.test.ts tests/unit/knowledge-base.test.ts tests/unit/interrogation-kb-strategy.test.ts tests/unit/knowledge-graph-contract.test.ts tests/unit/providers.test.ts tests/unit/zhihu-retrieval.test.ts tests/unit/openai-llm-provider.test.ts tests/unit/interrogation-orchestrator.test.ts tests/unit/interrogation-context.test.ts tests/unit/result-card-builder.test.ts tests/unit/session-feedback-cue.test.tsx tests/unit/feedback-cue-state.test.ts tests/unit/optimistic-reconcile.test.ts tests/unit/hotlist-snapshot-cache.test.ts tests/unit/hotlist-resolver.test.ts tests/unit/hotlist-source-label.test.ts tests/unit/intent-classifier.test.ts tests/unit/round-progression.test.ts tests/unit/storage-owned.test.ts tests/unit/session-recovery.test.ts tests/unit/session-source-state.test.ts tests/integration/interrogate-api.test.ts tests/integration/retrieval-api.test.ts tests/integration/llm-provider-api.test.ts tests/integration/profile-api.test.ts tests/integration/neon-storage.test.ts tests/integration/storage-degradation.test.ts tests/integration/report-source-state.test.ts tests/integration/report-history-exclusion.test.ts tests/integration/interrogate-intent.test.ts tests/integration/hotlist-route-wiring.test.ts tests/integration/report-synthesis-api.test.ts",
     "test:e2e": "playwright test && playwright test --config playwright.llm-failure.config.js",
     "check": "npm run typecheck && npm run lint && npm run build && npm test && npm run test:e2e"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.12",
+    "lucide-react": "^1.43.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
+    "@types/bcryptjs": "^3.0.0",
     "@types/node": "^20.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
