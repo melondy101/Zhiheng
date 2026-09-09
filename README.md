@@ -4,6 +4,11 @@
 
 让 AI 通过追问帮助人类打磨观点，而非替用户思考。报告、引用、知识图谱、五轮诘问与可追溯成果卡 — 完整可演示。
 
+> 独立开发、已部署的原型：AI 提供证据与追问结构，但不替用户裁决观点；真实服务不可用时，界面会诚实区分缓存、fixture 与本地降级。<br>
+> *An independently built thinking companion that helps people examine ideas without deciding for them.*
+
+[在线体验](https://zhiheng-4yvv7zg1f-2014596548-3040s-projects.vercel.app) · [产品设计](docs/prd/2026-09-01-zhiyan-design-v4.1.md) · [架构说明](docs/architecture.md)
+
 ---
 
 ## 快速开始
