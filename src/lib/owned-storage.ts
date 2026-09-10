@@ -21,6 +21,8 @@ import { StorageUnavailableError } from './db/sql-executor';
 
 /** Server-side storage contract, scoped by anonymous owner id (#21). */
 export interface OwnedStorageProvider {
+  savePublicShare(id: string, markdown: string, createdAt: number): Promise<void>;
+  loadPublicShare(id: string): Promise<{ markdown: string; createdAt: number } | null>;
   saveSession(ownerId: string, session: Session): Promise<void>;
   loadSession(ownerId: string, id: string): Promise<Session | null>;
   listSessions(ownerId: string): Promise<Session[]>;
@@ -71,6 +73,15 @@ export function applyProfileTombstoneRule(
 export class MemoryOwnedStorageProvider implements OwnedStorageProvider {
   private sessions = new Map<string, Map<string, Session>>();
   private profiles = new Map<string, UserProfile>();
+  private shares = new Map<string, { markdown: string; createdAt: number }>();
+
+  async savePublicShare(id: string, markdown: string, createdAt: number): Promise<void> {
+    this.shares.set(id, { markdown, createdAt });
+  }
+
+  async loadPublicShare(id: string): Promise<{ markdown: string; createdAt: number } | null> {
+    return this.shares.get(id) ?? null;
+  }
 
   async saveSession(ownerId: string, session: Session): Promise<void> {
     let ownerStore = this.sessions.get(ownerId);
@@ -122,6 +133,9 @@ export class UnavailableOwnedStorageProvider implements OwnedStorageProvider {
   private fail(): never {
     throw new StorageUnavailableError('Server storage unavailable', { cause: this.cause });
   }
+
+  async savePublicShare(): Promise<void> { this.fail(); }
+  async loadPublicShare(): Promise<{ markdown: string; createdAt: number } | null> { this.fail(); }
 
   async saveSession(): Promise<void> {
     this.fail();

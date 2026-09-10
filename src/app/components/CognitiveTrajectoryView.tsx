@@ -2,17 +2,20 @@
 
 import type { CognitiveTrajectoryEvent } from '@/lib/cognitive-trajectory';
 import { COGNITIVE_EVENT_LABELS } from '@/lib/cognitive-trajectory';
+import type { ReactNode } from 'react';
 
 interface CognitiveTrajectoryViewProps {
   events: CognitiveTrajectoryEvent[];
   compact?: boolean;
+  children?: ReactNode;
 }
 
 export default function CognitiveTrajectoryView({
   events,
   compact = false,
+  children,
 }: CognitiveTrajectoryViewProps) {
-  if (!events || events.length === 0) {
+  if ((!events || events.length === 0) && !children) {
     return null;
   }
 
@@ -85,6 +88,7 @@ export default function CognitiveTrajectoryView({
           </div>
         ))}
       </div>
+      {children}
     </div>
   );
 }

@@ -6,8 +6,8 @@ import { createZhihuSearchProvider, createGlobalSearchProvider } from '@/lib/zhi
 import { HistorySearchProvider, type HistorySessionSnapshot } from '@/lib/history-search';
 import { defaultKnowledgeBaseProvider } from '@/lib/knowledge-base';
 import { buildReport } from '@/lib/report-builder';
-import { safeBuildGraphAsync } from '@/lib/knowledge-graph';
-import { llmProvider } from '@/lib/server-providers';
+import { buildRequiredGraphAsync } from '@/lib/knowledge-graph';
+import { graphLlmProvider, llmProvider } from '@/lib/server-providers';
 
 export const runtime = 'nodejs';
 
@@ -75,6 +75,7 @@ function parseHistorySessions(value: unknown): HistorySessionSnapshot[] {
 }
 
 export async function POST(request: Request) {
+  const requestStartedAt = Date.now();
   // #21: every storage-touching request must carry the anonymous ownership
   // header; the session is stored under that owner and is invisible to
   // other owners.
@@ -101,12 +102,21 @@ export async function POST(request: Request) {
   const historyProvider = new HistorySearchProvider();
   const parsedHistorySessions = parseHistorySessions(historySessions);
 
+  const retrievalStartedAt = Date.now();
   const [zhihuResult, webResult, historyResult, kbResults] = await Promise.all([
     zhihuProvider.search(question),
     webProvider.search(question),
     historyProvider.search(question, parsedHistorySessions, excludedHistoryIds as string[]),
     defaultKnowledgeBaseProvider.search(question, { limit: 2 }),
   ]);
+  const retrievalDurationMs = Date.now() - retrievalStartedAt;
+  console.log('[report] Retrieval completed:', {
+    durationMs: retrievalDurationMs,
+    zhihu: zhihuResult.source,
+    web: webResult.source,
+    zhihuCount: zhihuResult.sources.length,
+    webCount: webResult.sources.length,
+  });
 
   const kbSources: Source[] = kbResults.map((r) => ({
     id: `kb_${r.item.id}`,
@@ -156,6 +166,7 @@ export async function POST(request: Request) {
     hasLLM: !!llmProvider.generateSynthesis,
     llmProviderType: llmProvider.constructor.name,
   });
+  const synthesisStartedAt = Date.now();
   const { report, progress } = await buildReport({
     question,
     zhihuSources: zhihuResult.sources,
@@ -166,17 +177,24 @@ export async function POST(request: Request) {
     webSourceState,
     llmProvider,
   });
+  const synthesisDurationMs = Date.now() - synthesisStartedAt;
+  console.log('[report] Report synthesis completed:', {
+    durationMs: synthesisDurationMs,
+    hasSynthesis: Boolean(report.synthesis),
+  });
 
-  // Build knowledge graph from report sources (non-blocking if it fails)
+  // The graph is a required LLM product artifact; never substitute a local graph.
   // #24: attach sourceState for KG provenance so the view can show truthful
   // source provenance even for graphs restored from a stored session.
-  let knowledgeGraph = null;
+  let knowledgeGraph;
   try {
-    const raw = await safeBuildGraphAsync(report, report.references, llmProvider);
+    const graphStartedAt = Date.now();
+    const raw = await buildRequiredGraphAsync(report, report.references, graphLlmProvider);
     knowledgeGraph = { ...raw, sourceState };
-  } catch {
-    // Graph failure must not break the report
-    knowledgeGraph = null;
+    console.log('[report] Knowledge graph completed:', { durationMs: Date.now() - graphStartedAt, provider: 'graph-llm' });
+  } catch (error) {
+    console.error('[report] Required knowledge graph failed:', error instanceof Error ? error.message : String(error));
+    return NextResponse.json({ error: '知识图谱生成失败，请稍后重试', detail: error instanceof Error ? error.message : String(error) }, { status: 502 });
   }
 
   // Ticket #15: persist the full initial session state (including the user's
@@ -245,5 +263,10 @@ export async function POST(request: Request) {
     knowledgeGraph,
     saved,
     storage: storageSignal,
+    timings: {
+      totalMs: Date.now() - requestStartedAt,
+      retrievalMs: retrievalDurationMs,
+      synthesisMs: synthesisDurationMs,
+    },
   });
 }

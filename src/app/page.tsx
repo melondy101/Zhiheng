@@ -134,6 +134,18 @@ async function fetchServerSession(sessionId: string): Promise<Session | null> {
   }
 }
 
+async function reportApiError(response: Response): Promise<Error> {
+  const fallback = `生成报告失败（HTTP ${response.status}）`;
+  try {
+    const body = await response.json() as { error?: unknown; detail?: unknown };
+    const message = typeof body.error === 'string' ? body.error : fallback;
+    const detail = typeof body.detail === 'string' ? body.detail : '';
+    return new Error(detail ? `${message}：${detail}` : message);
+  } catch {
+    return new Error(fallback);
+  }
+}
+
 /** The owner-scoped server profile, or null when unavailable (#21). */
 async function fetchServerProfile(): Promise<import('@/lib/lifecycle').UserProfile | null> {
   try {
@@ -345,6 +357,7 @@ export default function Home() {
   const [resultCard, setResultCard] = useState<ResultCard | null>(null);
   const [answer, setAnswer] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState<'retrieval' | 'synthesis' | 'graph'>('retrieval');
   const [startError, setStartError] = useState<string | null>(null);
   const [recentSessions, setRecentSessions] = useState<Session[]>([]);
   // #21: honest server-storage status line for the session view.
@@ -368,6 +381,19 @@ export default function Home() {
   const [followUp, setFollowUp] = useState<string | null>(null);
   const [directiveRound, setDirectiveRound] = useState(0);
   const [suggestSummary, setSuggestSummary] = useState(false);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingPhase('retrieval');
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      setLoadingPhase(elapsed < 4_000 ? 'retrieval' : elapsed < 35_000 ? 'synthesis' : 'graph');
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   // #23: toggle a personal_history source in/out of the report context.
   const handleHistorySourceToggle = (sourceSessionId: string, included: boolean) => {
@@ -393,7 +419,7 @@ export default function Home() {
           historySessions: await historySessionsForReport(),
         }),
       });
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (!res.ok) throw await reportApiError(res);
 
       const { sessionId, report, knowledgeGraph, sourceState, saved, storage } = (await res.json()) as {
         sessionId: string;
@@ -691,9 +717,7 @@ export default function Home() {
         }),
       });
 
-      if (!res.ok) {
-        throw new Error(`API error: ${res.status}`);
-      }
+      if (!res.ok) throw await reportApiError(res);
 
       const { sessionId, report, knowledgeGraph, sourceState, saved, storage } = (await res.json()) as {
         sessionId: string;
@@ -889,13 +913,24 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-2xl mb-4">知研</div>
-          <p className="text-gray-600 mb-3">加载中...</p>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-lg">
+          <div className="mb-4 text-center text-2xl font-bold text-blue-600">知研</div>
           {feedbackCueState === 'retrieving' && (
-            <SessionFeedbackCue state="retrieving" className="inline-flex text-left" />
+            <SessionFeedbackCue state="retrieving" className="mb-5 w-full" />
           )}
+          <div className="mb-2 flex items-center justify-between text-xs font-medium text-slate-600">
+            <span>正在准备你的思辨材料</span>
+            <span className="text-blue-600">请稍候</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+            <div className="h-full w-2/5 rounded-full bg-blue-600 loading-progress-bar" />
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-2 text-center text-[11px] text-slate-400">
+            <span className={loadingPhase === 'retrieval' ? 'font-medium text-blue-600' : 'text-slate-400'}>检索知乎与全网</span>
+            <span className={loadingPhase === 'synthesis' ? 'font-medium text-blue-600' : 'text-slate-400'}>生成 AI 观点</span>
+            <span className={loadingPhase === 'graph' ? 'font-medium text-blue-600' : 'text-slate-400'}>生成知识图谱</span>
+          </div>
         </div>
       </div>
     );
@@ -949,6 +984,7 @@ export default function Home() {
       <div className="flex h-[calc(100vh-57px)]">
         <ReportPanel
           report={report!}
+          question={session?.question}
           zhihuSourceState={reportSourceState?.zhihu}
           webSourceState={reportSourceState?.web}
           cacheUpdatedAt={cacheUpdatedAt}

@@ -63,7 +63,9 @@ export interface KnowledgeGraph {
 }
 
 const TARGET_NODE_COUNT = 8; // within 6-10 range
-const TARGET_EDGE_COUNT = 10;
+// Keep the graph readable while providing a genuinely connected evidence
+// network instead of a topic hub with only a thin chain between neighbors.
+const TARGET_EDGE_COUNT = 20;
 
 const STOP_WORDS = new Set([
   '已无法避免',
@@ -283,10 +285,19 @@ export function buildGraph(report: Report, sources: Source[]): KnowledgeGraph {
     });
   }
 
-  // B. Cross-node semantic relationships (between concepts, claims, actors)
-  for (let i = 1; i < nodes.length - 1 && edgeIdx < TARGET_EDGE_COUNT; i++) {
-    const fromNode = nodes[i];
-    const toNode = nodes[i + 1];
+  // B. Cross-node semantic relationships (between concepts, claims, actors).
+  // Add short-range and skip-one links so related evidence forms a denser
+  // network, while keeping deterministic ordering and bounded edge count.
+  const crossPairs: Array<[number, number]> = [];
+  for (let distance = 1; distance <= 2; distance++) {
+    for (let i = 1; i < nodes.length - distance; i++) {
+      crossPairs.push([i, i + distance]);
+    }
+  }
+  for (const [fromIndex, toIndex] of crossPairs) {
+    if (edgeIdx >= TARGET_EDGE_COUNT) break;
+    const fromNode = nodes[fromIndex];
+    const toNode = nodes[toIndex];
     let predicate: ControlledPredicate = '影响';
     let label = '相互影响';
 
@@ -296,7 +307,7 @@ export function buildGraph(report: Report, sources: Source[]): KnowledgeGraph {
     } else if (fromNode.type === 'claim' && toNode.type === 'claim') {
       predicate = '对比';
       label = '观点对照';
-    } else if (i % 2 === 0) {
+    } else if (fromIndex % 2 === 0) {
       predicate = '导致';
       label = '因果关联';
     }
@@ -450,7 +461,10 @@ export async function safeBuildGraphAsync(
 ): Promise<KnowledgeGraph> {
   if (llmProvider && typeof llmProvider.generateKnowledgeGraph === 'function') {
     try {
-      const llmGraph = await llmProvider.generateKnowledgeGraph({ report, sources });
+      const llmGraph = await Promise.race([
+        llmProvider.generateKnowledgeGraph({ report, sources }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
+      ]);
       if (llmGraph) {
         const check = validateGraph(llmGraph, report);
         if (check.valid) {
@@ -463,4 +477,20 @@ export async function safeBuildGraphAsync(
   }
 
   return safeBuildGraph(report, sources);
+}
+
+/** Required report graph path: only an LLM-produced, validated graph is valid. */
+export async function buildRequiredGraphAsync(
+  report: Report,
+  sources: Source[],
+  llmProvider: import('./providers').LLMProvider | null
+): Promise<KnowledgeGraph> {
+  if (!llmProvider?.generateKnowledgeGraph) {
+    throw new Error('Knowledge graph LLM is not configured');
+  }
+  const graph = await llmProvider.generateKnowledgeGraph({ report, sources });
+  if (!graph) throw new Error('Knowledge graph LLM returned no graph');
+  const check = validateGraph(graph, report);
+  if (!check.valid) throw new Error(`Knowledge graph validation failed: ${check.reason ?? 'invalid graph'}`);
+  return graph;
 }

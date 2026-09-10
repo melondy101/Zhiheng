@@ -25,6 +25,20 @@ const SESSION_COLUMNS = `owner_id, session_id, data, completed, created_at, upda
 export class PostgresOwnedStorageProvider implements OwnedStorageProvider {
   constructor(private readonly executor: SqlExecutor) {}
 
+  async savePublicShare(id: string, markdown: string, createdAt: number): Promise<void> {
+    await this.exec(
+      `INSERT INTO zhiyan_public_shares (share_id, markdown, created_at) VALUES ($1, $2, $3) ON CONFLICT (share_id) DO NOTHING`,
+      [id, markdown, new Date(createdAt).toISOString()]
+    );
+  }
+
+  async loadPublicShare(id: string): Promise<{ markdown: string; createdAt: number } | null> {
+    const { rows } = await this.exec(`SELECT markdown, created_at FROM zhiyan_public_shares WHERE share_id = $1`, [id]);
+    const row = rows[0] as { markdown?: unknown; created_at?: unknown } | undefined;
+    if (!row || typeof row.markdown !== 'string') return null;
+    return { markdown: row.markdown, createdAt: row.created_at ? new Date(String(row.created_at)).getTime() : 0 };
+  }
+
   /**
    * Single choke point for driver failures: ANY executor error (connection
    * loss, timeout, driver crash) surfaces as StorageUnavailableError so

@@ -1,8 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { buildDetailedResultCard, type DetailedResultCard } from '@/lib/result-card-builder';
 import type { Session } from '@/lib/providers';
 import CognitiveTrajectoryView from './CognitiveTrajectoryView';
+import { buildSessionMarkdown } from '@/lib/session-export';
 
 interface ResultCardViewProps {
   card: DetailedResultCard;
@@ -32,6 +34,27 @@ function TraceLink({ id }: { id: string }) {
   );
 }
 
+async function copyToClipboard(value: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      // Fall through to the textarea fallback for local HTTP browsers.
+    }
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  textarea.remove();
+  return copied;
+}
+
 export function ResultCardViewFromSession({ session, onNewSession }: {
   session: Session;
   onNewSession: () => void;
@@ -41,19 +64,48 @@ export function ResultCardViewFromSession({ session, onNewSession }: {
 }
 
 export default function ResultCardView({ card, session, onNewSession }: ResultCardViewProps) {
+  const [shareNotice, setShareNotice] = useState(false);
   const trajectory = session?.cognitiveTrajectory;
   const storyRun = session?.storyRun;
+  const handleShare = async () => {
+    if (!session) return;
+    try {
+      const response = await fetch('/api/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown: buildSessionMarkdown(session) }),
+      });
+      const data = await response.json() as { url?: string; shortened?: boolean; sinkConfigured?: boolean };
+      if (!response.ok || !data.url) throw new Error('分享链接生成失败');
+      if (await copyToClipboard(data.url)) {
+        setShareNotice(true);
+        window.setTimeout(() => setShareNotice(false), 2600);
+      }
+    } catch (error) {
+      console.error('Failed to generate share link:', error);
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-4">
-      <h3 className="text-xl font-bold text-blue-600 mb-2">思辨成果卡</h3>
+      <div className="mb-2 flex items-center gap-3">
+        <h3 className="text-xl font-bold text-blue-600">思辨成果卡</h3>
+        {session && (
+          <button
+            type="button"
+            onClick={() => void handleShare()}
+            className="group inline-flex min-h-12 min-w-12 items-center justify-center rounded-full border border-slate-200 bg-white p-2 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            title="生成分享链接并复制"
+            aria-label="生成分享链接并复制到剪切板"
+            data-testid="share-card-button"
+          >
+            <img src="/sharethis-icon.avif" alt="分享" width="36" height="36" className="h-9 w-9 rounded-full object-cover" />
+          </button>
+        )}
+      </div>
+      {shareNotice && <div role="status" aria-live="polite" className="fixed right-5 top-5 z-50 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 shadow-lg">已复制分享链接</div>}
 
-      {/* Cognitive Trajectory (#D-03) */}
-      {trajectory && trajectory.length > 0 && (
-        <section className="mb-4">
-          <CognitiveTrajectoryView events={trajectory} />
-        </section>
-      )}
+      <CognitiveTrajectoryView events={trajectory ?? []}>
 
       {/* GalGame Story Outcome (#G-05) */}
       {storyRun && (
@@ -169,6 +221,7 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
           本次会话没有用户原创内容，成果卡为空。
         </p>
       )}
+      </CognitiveTrajectoryView>
 
       <button
         onClick={onNewSession}

@@ -6,6 +6,39 @@ body {
   @apply bg-gray-50 text-gray-900;
 }
 
+.holo-share-stage { display: grid; gap: 1.5rem; }
+.holo-card { position: relative; min-height: 430px; overflow: hidden; border: 1px solid #475569; border-radius: 18px; padding: 1.25rem; color: #e0f2fe; background: #07111f; box-shadow: 0 24px 60px rgba(15, 23, 42, .24), inset 0 0 0 1px rgba(255,255,255,.1); transform: perspective(1000px) rotateX(0deg) rotateY(0deg); transition: transform .25s ease, box-shadow .25s ease; }
+.holo-card:hover, .holo-card:focus-visible { transform: perspective(1000px) rotateX(2deg) rotateY(-3deg) translateY(-3px); box-shadow: 0 30px 70px rgba(15,23,42,.34), 0 0 32px rgba(56,189,248,.18), inset 0 0 0 1px rgba(255,255,255,.2); outline: none; }
+.holo-card-foil { position: absolute; inset: -50%; opacity: .4; background: conic-gradient(from 90deg at 50% 50%, transparent 0deg, rgba(56,189,248,.55) 55deg, transparent 110deg, rgba(244,114,182,.45) 190deg, transparent 250deg, rgba(250,204,21,.4) 310deg, transparent 360deg); animation: holo-shift 7s linear infinite; mix-blend-mode: screen; }
+.holo-card-grid { position: absolute; inset: 0; opacity: .25; background-image: linear-gradient(rgba(125,211,252,.16) 1px, transparent 1px), linear-gradient(90deg, rgba(125,211,252,.16) 1px, transparent 1px); background-size: 26px 26px; mask-image: linear-gradient(to bottom, transparent, black 25%, black 75%, transparent); }
+.holo-card-header { position: relative; display: flex; justify-content: space-between; gap: 1rem; align-items: center; font-size: .65rem; letter-spacing: .12em; text-transform: uppercase; }
+.holo-card-mark { color: #67e8f9; font-weight: 800; font-size: 1rem; letter-spacing: .04em; }
+.holo-card-edition { color: #94a3b8; }
+.holo-card-core { position: relative; display: grid; place-items: center; align-content: center; min-height: 350px; text-align: center; }
+.holo-card-orbit { display: grid; place-items: center; width: 112px; height: 112px; margin-bottom: 1.3rem; border: 1px solid rgba(103,232,249,.7); border-radius: 50%; box-shadow: 0 0 30px rgba(34,211,238,.28), inset 0 0 24px rgba(59,130,246,.18); color: #fef08a; font-size: 2.2rem; animation: holo-pulse 3s ease-in-out infinite; }
+.holo-card-kicker { margin: 0 0 .7rem; color: #f0abfc; font-size: .7rem; letter-spacing: .28em; text-transform: uppercase; }
+.holo-card h2 { max-width: 680px; margin: 0; color: #f8fafc; font-size: clamp(1.35rem, 4vw, 2.25rem); line-height: 1.25; }
+.holo-card-detail { display: grid; gap: .8rem; }
+.holo-card-detail section { border: 1px solid #dbeafe; border-radius: 10px; padding: 1rem; background: linear-gradient(135deg, #f8fafc, #eff6ff); }
+.holo-card-detail h3 { margin: 0 0 .55rem; color: #1d4ed8; font-size: .9rem; }
+.holo-card-detail-body { white-space: pre-wrap; overflow-wrap: anywhere; color: #334155; font-size: .8rem; line-height: 1.75; }
+@keyframes holo-shift { to { transform: rotate(360deg); } }
+@keyframes holo-pulse { 50% { transform: scale(1.04); box-shadow: 0 0 48px rgba(34,211,238,.4), inset 0 0 28px rgba(59,130,246,.22); } }
+@media (prefers-reduced-motion: reduce) { .holo-card-foil, .holo-card-orbit { animation: none; } }
+
+@keyframes loading-progress {
+  from { transform: translateX(-140%); }
+  to { transform: translateX(360%); }
+}
+
+.loading-progress-bar {
+  animation: loading-progress 1.35s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-progress-bar { animation: none; width: 65%; }
+}
+
 /* #50: SessionFeedbackCue — scoped, non-blocking status cue styles.
    Assets are official transparent GIFs that carry their own animation.
    No CSS keyframe nudge is applied to avoid overlapping animation.
