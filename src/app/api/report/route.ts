@@ -6,10 +6,11 @@ import { createZhihuSearchProvider, createGlobalSearchProvider } from '@/lib/zhi
 import { HistorySearchProvider, type HistorySessionSnapshot } from '@/lib/history-search';
 import { defaultKnowledgeBaseProvider } from '@/lib/knowledge-base';
 import { buildReport } from '@/lib/report-builder';
-import { buildRequiredGraphAsync } from '@/lib/knowledge-graph';
+import { safeBuildGraphAsync, safeBuildGraph } from '@/lib/knowledge-graph';
 import { graphLlmProvider, llmProvider } from '@/lib/server-providers';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 const SEARCH_TIMEOUT_MS = 5_000;
 
@@ -183,18 +184,23 @@ export async function POST(request: Request) {
     hasSynthesis: Boolean(report.synthesis),
   });
 
-  // The graph is a required LLM product artifact; never substitute a local graph.
   // #24: attach sourceState for KG provenance so the view can show truthful
   // source provenance even for graphs restored from a stored session.
   let knowledgeGraph;
   try {
     const graphStartedAt = Date.now();
-    const raw = await buildRequiredGraphAsync(report, report.references, graphLlmProvider);
+    const raw = await safeBuildGraphAsync(report, report.references, graphLlmProvider);
     knowledgeGraph = { ...raw, sourceState };
-    console.log('[report] Knowledge graph completed:', { durationMs: Date.now() - graphStartedAt, provider: 'graph-llm' });
+    console.log('[report] Knowledge graph completed:', {
+      durationMs: Date.now() - graphStartedAt,
+      isFallback: raw.isFallback,
+      nodeCount: raw.nodes.length,
+      edgeCount: raw.edges.length,
+    });
   } catch (error) {
-    console.error('[report] Required knowledge graph failed:', error instanceof Error ? error.message : String(error));
-    return NextResponse.json({ error: '知识图谱生成失败，请稍后重试', detail: error instanceof Error ? error.message : String(error) }, { status: 502 });
+    console.warn('[report] Knowledge graph async failed, degrading to safe graph:', error instanceof Error ? error.message : String(error));
+    const raw = safeBuildGraph(report, report.references);
+    knowledgeGraph = { ...raw, sourceState };
   }
 
   // Ticket #15: persist the full initial session state (including the user's

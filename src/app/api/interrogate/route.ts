@@ -21,6 +21,7 @@ import type { CharacterId } from '@/lib/character';
 import type { StoryWorldId } from '@/lib/story-run';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 const ACTIONS: InterrogateAction[] = [
   'start',

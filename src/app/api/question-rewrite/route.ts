@@ -3,6 +3,7 @@ import { rewriteQuestionAndSubtitle } from '@/lib/question-rewriter';
 import { llmProvider } from '@/lib/server-providers';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 /**
  * Question Rewriting & Subtitle Generation API endpoint.
