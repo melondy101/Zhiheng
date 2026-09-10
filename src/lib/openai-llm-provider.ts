@@ -646,15 +646,19 @@ export function createLLMProviderFromEnv(
   return new OpenAICompatibleLLMProvider({ config });
 }
 
-/** Separate provider factory for the graph pipeline. */
+/** Separate provider factory for the graph pipeline (prefers GRAPH_LLM_*, falls back to LLM_*). */
 export function createGraphLLMProviderFromEnv(
   env: Record<string, string | undefined> = process.env
 ): LLMProvider | null {
-  const apiKey = env.GRAPH_LLM_API_KEY?.trim();
-  const model = env.GRAPH_LLM_MODEL?.trim();
+  const apiKey = env.GRAPH_LLM_API_KEY?.trim() || env.LLM_API_KEY?.trim();
+  const model = env.GRAPH_LLM_MODEL?.trim() || env.LLM_MODEL?.trim();
   if (!apiKey || !model) return null;
-  const baseUrl = (env.GRAPH_LLM_BASE_URL?.trim() || DEFAULT_LLM_BASE_URL).replace(/\/+$/, '');
-  const timeout = Number(env.GRAPH_LLM_TIMEOUT_MS?.trim());
+  const baseUrl = (
+    env.GRAPH_LLM_BASE_URL?.trim() ||
+    env.LLM_BASE_URL?.trim() ||
+    DEFAULT_LLM_BASE_URL
+  ).replace(/\/+$/, '');
+  const timeout = Number(env.GRAPH_LLM_TIMEOUT_MS?.trim() || env.LLM_SYNTHESIS_TIMEOUT_MS?.trim());
   const timeoutMs = Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_SYNTHESIS_TIMEOUT_MS;
   return new OpenAICompatibleLLMProvider({
     config: { baseUrl, apiKey, model, timeoutMs, synthesisTimeoutMs: timeoutMs },

@@ -9,7 +9,12 @@ export { signSessionToken, verifySessionToken, SESSION_COOKIE_NAME, SESSION_MAX_
 export type { SafeUser, SessionPayload, User, UserStore };
 
 let cachedUserStore: Promise<UserStore> | null = null;
-const memoryStoreInstance = new MemoryUserStore();
+let memoryStoreInstance = new MemoryUserStore();
+
+export function resetUserStore(): void {
+  cachedUserStore = null;
+  memoryStoreInstance = new MemoryUserStore();
+}
 
 export async function getUserStore(): Promise<UserStore> {
   if (cachedUserStore) return cachedUserStore;

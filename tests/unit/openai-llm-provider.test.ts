@@ -25,6 +25,7 @@ import {
   assertNonJudgingQuestion,
   buildStrategyQuestionMessages,
   createLLMProviderFromEnv,
+  createGraphLLMProviderFromEnv,
   extractChoiceContent,
   isValidQuestionText,
   readOpenAILLMConfig,
@@ -680,5 +681,27 @@ describe('createLLMProviderFromEnv and server-providers selection', () => {
     } else {
       assert.ok(llmProvider instanceof FixtureLLMProvider, 'without a key the fixture provider must stay active');
     }
+  });
+
+  it('createGraphLLMProviderFromEnv prioritizes GRAPH_LLM_* and falls back to LLM_*', () => {
+    // 1. None configured
+    assert.strictEqual(createGraphLLMProviderFromEnv({}), null);
+
+    // 2. Falls back to LLM_* when GRAPH_LLM_* is not set
+    const fallbackProvider = createGraphLLMProviderFromEnv({
+      LLM_API_KEY: 'deepseek-key',
+      LLM_MODEL: 'deepseek-chat',
+      LLM_BASE_URL: 'https://api.deepseek.com',
+    });
+    assert.ok(fallbackProvider instanceof OpenAICompatibleLLMProvider);
+
+    // 3. Prioritizes dedicated GRAPH_LLM_* when provided
+    const dedicatedProvider = createGraphLLMProviderFromEnv({
+      LLM_API_KEY: 'deepseek-key',
+      LLM_MODEL: 'deepseek-chat',
+      GRAPH_LLM_API_KEY: 'custom-graph-key',
+      GRAPH_LLM_MODEL: 'custom-graph-model',
+    });
+    assert.ok(dedicatedProvider instanceof OpenAICompatibleLLMProvider);
   });
 });

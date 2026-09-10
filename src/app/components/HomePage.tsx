@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { hotlistBackground, makeHotlistCoreQuestion } from '@/lib/hotlist-question';
 import SessionFeedbackCue from './SessionFeedbackCue';
+import UserNav from './UserNav';
 
 interface HotlistItem {
   id: string;
@@ -102,7 +103,9 @@ export default function HomePage({
           </button>
           <span className="font-bold text-lg text-blue-600">知研</span>
         </div>
-        <span className="text-xs text-slate-500">AI 问人 · 追问思辨</span>
+        <div className="flex items-center gap-2">
+          <UserNav compact />
+        </div>
       </div>
 
       {/* Left Sidebar (DeepSeek Style: Collapsible with Toggle Button) */}
@@ -235,10 +238,19 @@ export default function HomePage({
             </button>
           </div>
         )}
+
+        {/* Sidebar Footer / User Account & Status */}
+        <div className={`border-t border-slate-100 bg-slate-50/70 p-3 ${isSidebarCollapsed ? 'flex justify-center p-2' : ''}`}>
+          <UserNav compact={isSidebarCollapsed} className={isSidebarCollapsed ? '' : 'w-full justify-between'} />
+        </div>
       </aside>
 
       {/* Main Content / Chat & Input Panel (DeepSeek Style Center Stage) */}
       <main className="flex-1 flex flex-col items-center justify-start p-4 sm:p-8 lg:p-12 overflow-y-auto relative">
+        {/* Desktop Top Right User Nav */}
+        <div className="hidden md:flex absolute top-5 right-6 z-10 items-center gap-3">
+          <UserNav />
+        </div>
         {loading && (
           <div
             className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/20 px-4 backdrop-blur-[2px]"

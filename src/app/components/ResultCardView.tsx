@@ -99,6 +99,7 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
             aria-label="生成分享链接并复制到剪切板"
             data-testid="share-card-button"
           >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/sharethis-icon.avif" alt="分享" width="36" height="36" className="h-9 w-9 rounded-full object-cover" />
           </button>
         )}

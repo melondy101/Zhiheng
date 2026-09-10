@@ -30,6 +30,7 @@ import QAPanel from './components/QAPanel';
 import ResultCardView, { ResultCardViewFromSession } from './components/ResultCardView';
 import SessionFeedbackCue from './components/SessionFeedbackCue';
 import { deriveFeedbackCueState } from '@/lib/feedback-cue-state';
+import UserNav from './components/UserNav';
 
 const retrievalProvider = new FixtureRetrievalProvider();
 const storageProvider = new BrowserStorageProvider();
@@ -974,17 +975,26 @@ export default function Home() {
   return (
     <div className="min-h-screen">
       <header className="border-b bg-white">
-        <div className="px-4 py-3 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-blue-600">知研</h1>
-          <div className="flex flex-col items-end min-w-0">
-            <span className="text-sm text-gray-600 truncate max-w-xs">
-              {session?.question}
-            </span>
-            {storageNotice && (
-              <p data-testid="storage-notice" className="text-xs text-amber-600 truncate max-w-md">
-                {storageNotice}
-              </p>
-            )}
+        <div className="px-4 py-3 flex justify-between items-center gap-4">
+          <h1
+            className="text-xl font-bold text-blue-600 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => setPage('home')}
+            title="返回首页"
+          >
+            知研
+          </h1>
+          <div className="flex items-center gap-4">
+            <div className="flex flex-col items-end min-w-0">
+              <span className="text-sm text-gray-600 truncate max-w-xs">
+                {session?.question}
+              </span>
+              {storageNotice && (
+                <p data-testid="storage-notice" className="text-xs text-amber-600 truncate max-w-md">
+                  {storageNotice}
+                </p>
+              )}
+            </div>
+            <UserNav />
           </div>
         </div>
       </header>

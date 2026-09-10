@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { AuthModal } from '../components/AuthModal';
+import { setOwnerId } from '@/lib/owner-id';
 
 export interface CurrentUser {
   id: string;
@@ -46,12 +47,7 @@ export function UserProvider({
         const data = await res.json();
         if (data.user) {
           setUser(data.user);
-          // Sync owner ID to localStorage for backward compatibility
-          try {
-            localStorage.setItem('zhiyan_owner_id', data.user.id);
-          } catch {
-            // ignore
-          }
+          setOwnerId(data.user.id);
         }
       }
     } catch (err) {
@@ -106,11 +102,7 @@ export function UserProvider({
           return { ok: false, error: data.error || '登录失败' };
         }
         setUser(data.user);
-        try {
-          localStorage.setItem('zhiyan_owner_id', data.user.id);
-        } catch {
-          // ignore
-        }
+        setOwnerId(data.user.id);
         closeAuthModal();
         return { ok: true };
       } catch {
@@ -133,11 +125,7 @@ export function UserProvider({
           return { ok: false, error: data.error || '注册失败' };
         }
         setUser(data.user);
-        try {
-          localStorage.setItem('zhiyan_owner_id', data.user.id);
-        } catch {
-          // ignore
-        }
+        setOwnerId(data.user.id);
         closeAuthModal();
         return { ok: true };
       } catch {
@@ -154,11 +142,7 @@ export function UserProvider({
         const data = await res.json();
         if (data.user) {
           setUser(data.user);
-          try {
-            localStorage.setItem('zhiyan_owner_id', data.user.id);
-          } catch {
-            // ignore
-          }
+          setOwnerId(data.user.id);
         }
       }
     } catch (err) {

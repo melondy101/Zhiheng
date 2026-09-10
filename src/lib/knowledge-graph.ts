@@ -17,6 +17,7 @@ export type ControlledPredicate =
   | '依赖'
   | '影响'
   | '对比'
+  | '构成'
   | '主张'
   | '相关';
 
@@ -163,7 +164,7 @@ export function buildGraph(report: Report, sources: Source[]): KnowledgeGraph {
     id: centralId,
     label: report.question.slice(0, 24) + (report.question.length > 24 ? '…' : ''),
     type: 'topic' as GraphNodeType,
-    description: `核心议题: ${report.question}`,
+    description: `核心研讨议题: ${report.question}`,
   });
 
   const nodeLabelSet = new Set<string>([report.question]);

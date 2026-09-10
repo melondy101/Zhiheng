@@ -37,12 +37,24 @@ function randomOwnerId(): string {
 let cachedOwnerId: string | null = null;
 
 /**
- * Get (or create and persist) this browser's anonymous owner id. Cached per
- * page load; falls back to a per-load random id when localStorage is
- * unavailable (SSR, privacy mode) — such a session simply does not persist.
+ * Set the current browser owner id (e.g. after login/register or logout)
+ * and update cache and localStorage.
+ */
+export function setOwnerId(id: string): void {
+  cachedOwnerId = id;
+  try {
+    localStorage.setItem(OWNER_ID_STORAGE_KEY, id);
+  } catch {
+    // quota exceeded / storage blocked
+  }
+}
+
+/**
+ * Get (or create and persist) this browser's owner id.
+ * Checks localStorage first so updates via login/logout are immediately honored;
+ * falls back to a per-load random id when localStorage is unavailable.
  */
 export function getOrCreateOwnerId(): string {
-  if (cachedOwnerId) return cachedOwnerId;
   try {
     const existing = localStorage.getItem(OWNER_ID_STORAGE_KEY);
     if (existing && isValidOwnerId(existing)) {
@@ -50,8 +62,9 @@ export function getOrCreateOwnerId(): string {
       return cachedOwnerId;
     }
   } catch {
-    // localStorage unavailable — fall through to a per-load id.
+    // localStorage unavailable — fall through to memory cache or new id.
   }
+  if (cachedOwnerId) return cachedOwnerId;
   const id = randomOwnerId();
   try {
     localStorage.setItem(OWNER_ID_STORAGE_KEY, id);

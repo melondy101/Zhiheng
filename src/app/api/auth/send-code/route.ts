@@ -73,7 +73,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      message: '验证码已发送至您的邮箱，10 分钟内有效',
+      message: emailResult.message || '验证码已发送至您的邮箱，10 分钟内有效',
     });
   } catch (err) {
     console.error('[auth/send-code] error:', err);
