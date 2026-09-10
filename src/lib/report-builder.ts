@@ -18,6 +18,8 @@ import {
 
 export interface ReportBuilderOptions {
   question: string;
+  subtitle?: string;
+  originalQuestion?: string;
   zhihuSources: Source[];
   webSources: Source[];
   historySources?: Source[];
@@ -331,6 +333,8 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
   const report: Report = {
     question: options.question,
     title,
+    subtitle: options.subtitle,
+    originalQuestion: options.originalQuestion,
     knowledgePoints,
     content,
     viewpoints,

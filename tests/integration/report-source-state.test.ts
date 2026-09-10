@@ -14,6 +14,7 @@ import assert from 'node:assert';
 import { POST as reportPOST } from '../../src/app/api/report/route';
 import { GET as sessionGET, POST as sessionPOST } from '../../src/app/api/session/route';
 import { GET as healthGET } from '../../src/app/api/health/route';
+import { llmProvider } from '../../src/lib/server-providers';
 import type { Session } from '../../src/lib/providers';
 
 // ---------------------------------------------------------------------------
@@ -62,14 +63,68 @@ async function callHealth(): Promise<{ status: number; body: Record<string, unkn
 // ---------------------------------------------------------------------------
 
 const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
+const ORIGINAL_OPENAI_KEY = process.env.OPENAI_API_KEY;
+const ORIGINAL_ZHIHU_SECRET = process.env.ZHIHU_ACCESS_SECRET;
+
+let origDirectSynthesis: typeof llmProvider.generateSynthesis | undefined;
+let origReportSynthesis: typeof llmProvider.generateReportSynthesis | undefined;
+let origCustomCompletion: typeof llmProvider.generateCustomCompletion | undefined;
+let origQuestionRewrite: typeof llmProvider.generateQuestionRewrite | undefined;
+let origKnowledgeGraph: typeof llmProvider.generateKnowledgeGraph | undefined;
 
 before(() => {
   delete process.env.DATABASE_URL;
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.ZHIHU_ACCESS_SECRET;
+
+  origDirectSynthesis = llmProvider.generateSynthesis?.bind(llmProvider);
+  origReportSynthesis = llmProvider.generateReportSynthesis?.bind(llmProvider);
+  origCustomCompletion = llmProvider.generateCustomCompletion?.bind(llmProvider);
+  origQuestionRewrite = llmProvider.generateQuestionRewrite?.bind(llmProvider);
+  origKnowledgeGraph = llmProvider.generateKnowledgeGraph?.bind(llmProvider);
+
+  if (llmProvider.generateSynthesis) {
+    llmProvider.generateSynthesis = async () => null;
+  }
+  if (llmProvider.generateReportSynthesis) {
+    llmProvider.generateReportSynthesis = async () => null;
+  }
+  if (llmProvider.generateCustomCompletion) {
+    llmProvider.generateCustomCompletion = async () => null;
+  }
+  if (llmProvider.generateQuestionRewrite) {
+    llmProvider.generateQuestionRewrite = async () => null;
+  }
+  if (llmProvider.generateKnowledgeGraph) {
+    llmProvider.generateKnowledgeGraph = async () => null;
+  }
 });
 
 after(() => {
   if (ORIGINAL_DATABASE_URL !== undefined) {
     process.env.DATABASE_URL = ORIGINAL_DATABASE_URL;
+  }
+  if (ORIGINAL_OPENAI_KEY !== undefined) {
+    process.env.OPENAI_API_KEY = ORIGINAL_OPENAI_KEY;
+  }
+  if (ORIGINAL_ZHIHU_SECRET !== undefined) {
+    process.env.ZHIHU_ACCESS_SECRET = ORIGINAL_ZHIHU_SECRET;
+  }
+
+  if (origDirectSynthesis && llmProvider.generateSynthesis) {
+    llmProvider.generateSynthesis = origDirectSynthesis;
+  }
+  if (origReportSynthesis && llmProvider.generateReportSynthesis) {
+    llmProvider.generateReportSynthesis = origReportSynthesis;
+  }
+  if (origCustomCompletion && llmProvider.generateCustomCompletion) {
+    llmProvider.generateCustomCompletion = origCustomCompletion;
+  }
+  if (origQuestionRewrite && llmProvider.generateQuestionRewrite) {
+    llmProvider.generateQuestionRewrite = origQuestionRewrite;
+  }
+  if (origKnowledgeGraph && llmProvider.generateKnowledgeGraph) {
+    llmProvider.generateKnowledgeGraph = origKnowledgeGraph;
   }
 });
 

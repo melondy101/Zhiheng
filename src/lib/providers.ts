@@ -87,6 +87,8 @@ export interface ReportSynthesis {
 export interface Report {
   question: string;
   title: string;
+  subtitle?: string;
+  originalQuestion?: string;
   knowledgePoints: string[];
   content: string;
   /** Plain-text viewpoints (legacy, used by #2/#3) */
@@ -155,6 +157,8 @@ export interface ReportProgress {
 export interface Session {
   id: string;
   question: string;
+  subtitle?: string;
+  originalQuestion?: string;
   initialOpinion: string | null;
   report: Report | null;
   knowledgeGraph?: import('./knowledge-graph').KnowledgeGraph | null;
@@ -405,6 +409,22 @@ export interface LLMProvider {
     report: Report;
     sources: Source[];
   }): Promise<import('./knowledge-graph').KnowledgeGraph | null>;
+  /**
+   * Rewrite a question into a deep inquiry question and generate a punchy subtitle.
+   * Optional: returns null to fall back to the deterministic heuristic rewriter.
+   */
+  generateQuestionRewrite?(question: string): Promise<import('./question-rewriter').QuestionRewriteResult | null>;
+  /** Alias for generateSynthesis for backward compatibility in tests. */
+  generateReportSynthesis?(args: {
+    question: string;
+    sources: import('./report-synthesis').SynthesisSource[];
+    historySources?: import('./report-synthesis').SynthesisSource[];
+  }): Promise<ReportSynthesis | null>;
+  /** Generic completion helper for custom prompt messages. */
+  generateCustomCompletion?(
+    messages: Array<{ role: string; content: string }>,
+    timeoutMs?: number
+  ): Promise<string | null>;
 }
 
 export interface StorageProvider {

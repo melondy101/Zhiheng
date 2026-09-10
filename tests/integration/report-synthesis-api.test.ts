@@ -7,6 +7,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { POST as reportPOST } from '../../src/app/api/report/route';
 import { buildReport } from '../../src/lib/report-builder';
+import { llmProvider } from '../../src/lib/server-providers';
 import type {
   LLMProvider,
   Report,
@@ -55,12 +56,39 @@ const REMOVED_SECTIONS = ['反证或不同观点：', '局限：', '## 尚待验
 
 let savedSecret: string | undefined;
 let savedLlmKey: string | undefined;
+let origDirectSynthesis: typeof llmProvider.generateSynthesis | undefined;
+let origReportSynthesis: typeof llmProvider.generateReportSynthesis | undefined;
+let origCustomCompletion: typeof llmProvider.generateCustomCompletion | undefined;
+let origQuestionRewrite: typeof llmProvider.generateQuestionRewrite | undefined;
+let origKnowledgeGraph: typeof llmProvider.generateKnowledgeGraph | undefined;
 
 beforeEach(() => {
   savedSecret = process.env.ZHIHU_ACCESS_SECRET;
   savedLlmKey = process.env.LLM_API_KEY;
   delete process.env.ZHIHU_ACCESS_SECRET;
   delete process.env.LLM_API_KEY;
+
+  origDirectSynthesis = llmProvider.generateSynthesis?.bind(llmProvider);
+  origReportSynthesis = llmProvider.generateReportSynthesis?.bind(llmProvider);
+  origCustomCompletion = llmProvider.generateCustomCompletion?.bind(llmProvider);
+  origQuestionRewrite = llmProvider.generateQuestionRewrite?.bind(llmProvider);
+  origKnowledgeGraph = llmProvider.generateKnowledgeGraph?.bind(llmProvider);
+
+  if (llmProvider.generateSynthesis) {
+    llmProvider.generateSynthesis = async () => null;
+  }
+  if (llmProvider.generateReportSynthesis) {
+    llmProvider.generateReportSynthesis = async () => null;
+  }
+  if (llmProvider.generateCustomCompletion) {
+    llmProvider.generateCustomCompletion = async () => null;
+  }
+  if (llmProvider.generateQuestionRewrite) {
+    llmProvider.generateQuestionRewrite = async () => null;
+  }
+  if (llmProvider.generateKnowledgeGraph) {
+    llmProvider.generateKnowledgeGraph = async () => null;
+  }
 });
 
 afterEach(() => {
@@ -68,6 +96,22 @@ afterEach(() => {
   else process.env.ZHIHU_ACCESS_SECRET = savedSecret;
   if (savedLlmKey === undefined) delete process.env.LLM_API_KEY;
   else process.env.LLM_API_KEY = savedLlmKey;
+
+  if (origDirectSynthesis && llmProvider.generateSynthesis) {
+    llmProvider.generateSynthesis = origDirectSynthesis;
+  }
+  if (origReportSynthesis && llmProvider.generateReportSynthesis) {
+    llmProvider.generateReportSynthesis = origReportSynthesis;
+  }
+  if (origCustomCompletion && llmProvider.generateCustomCompletion) {
+    llmProvider.generateCustomCompletion = origCustomCompletion;
+  }
+  if (origQuestionRewrite && llmProvider.generateQuestionRewrite) {
+    llmProvider.generateQuestionRewrite = origQuestionRewrite;
+  }
+  if (origKnowledgeGraph && llmProvider.generateKnowledgeGraph) {
+    llmProvider.generateKnowledgeGraph = origKnowledgeGraph;
+  }
 });
 
 describe('POST /api/report synthesis (PRD v4.2 §3)', () => {

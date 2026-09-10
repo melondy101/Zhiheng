@@ -44,6 +44,11 @@ import {
   partitionSynthesisSources,
 } from './report-synthesis';
 import type { SynthesisRequest, SynthesisSource } from './report-synthesis';
+import {
+  buildQuestionRewriteMessages,
+  parseQuestionRewriteResponse,
+  type QuestionRewriteResult,
+} from './question-rewriter';
 import { logStartupPath } from './startup-log';
 import { LLMRequestError } from './llm-fallback';
 
@@ -442,6 +447,51 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     }
 
     return graph;
+  }
+
+  /**
+   * Rewrite question into a deep inquiry question and generate a punchy subtitle via LLM.
+   */
+  async generateQuestionRewrite(question: string, timeoutMs = this.config.timeoutMs): Promise<QuestionRewriteResult | null> {
+    if (!question || !question.trim()) return null;
+
+    const messages = buildQuestionRewriteMessages(question);
+    const body = await this.postChatCompletion(
+      JSON.stringify({
+        model: this.config.model,
+        messages,
+        temperature: 0.3,
+        max_tokens: 1024,
+      }),
+      timeoutMs
+    );
+
+    const content = extractChoiceContent(body);
+    if (content === null) {
+      throw new Error('LLM API returned an unexpected response shape for question rewrite');
+    }
+
+    return parseQuestionRewriteResponse(content, question);
+  }
+
+  /**
+   * Generic completion helper for custom prompt messages.
+   */
+  async generateCustomCompletion(
+    messages: Array<{ role: string; content: string }>,
+    timeoutMs = this.config.timeoutMs
+  ): Promise<string | null> {
+    const body = await this.postChatCompletion(
+      JSON.stringify({
+        model: this.config.model,
+        messages,
+        temperature: 0.3,
+        max_tokens: 2048,
+      }),
+      timeoutMs
+    );
+
+    return extractChoiceContent(body);
   }
 
   /**

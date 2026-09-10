@@ -11,6 +11,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { POST as reportPOST } from '../../src/app/api/report/route';
 import { GET as hotlistGET } from '../../src/app/api/hotlist/route';
+import { llmProvider } from '../../src/lib/server-providers';
 import type { Report, SourceState } from '../../src/lib/providers';
 
 // #21: the anonymous owner header the report route now requires.
@@ -25,12 +26,39 @@ interface ReportResponseBody {
 
 let savedSecret: string | undefined;
 let savedDatabaseUrl: string | undefined;
+let origDirectSynthesis: typeof llmProvider.generateSynthesis | undefined;
+let origReportSynthesis: typeof llmProvider.generateReportSynthesis | undefined;
+let origCustomCompletion: typeof llmProvider.generateCustomCompletion | undefined;
+let origQuestionRewrite: typeof llmProvider.generateQuestionRewrite | undefined;
+let origKnowledgeGraph: typeof llmProvider.generateKnowledgeGraph | undefined;
 
 beforeEach(() => {
   savedSecret = process.env.ZHIHU_ACCESS_SECRET;
   delete process.env.ZHIHU_ACCESS_SECRET;
   savedDatabaseUrl = process.env.DATABASE_URL;
   delete process.env.DATABASE_URL;
+
+  origDirectSynthesis = llmProvider.generateSynthesis?.bind(llmProvider);
+  origReportSynthesis = llmProvider.generateReportSynthesis?.bind(llmProvider);
+  origCustomCompletion = llmProvider.generateCustomCompletion?.bind(llmProvider);
+  origQuestionRewrite = llmProvider.generateQuestionRewrite?.bind(llmProvider);
+  origKnowledgeGraph = llmProvider.generateKnowledgeGraph?.bind(llmProvider);
+
+  if (llmProvider.generateSynthesis) {
+    llmProvider.generateSynthesis = async () => null;
+  }
+  if (llmProvider.generateReportSynthesis) {
+    llmProvider.generateReportSynthesis = async () => null;
+  }
+  if (llmProvider.generateCustomCompletion) {
+    llmProvider.generateCustomCompletion = async () => null;
+  }
+  if (llmProvider.generateQuestionRewrite) {
+    llmProvider.generateQuestionRewrite = async () => null;
+  }
+  if (llmProvider.generateKnowledgeGraph) {
+    llmProvider.generateKnowledgeGraph = async () => null;
+  }
 });
 
 afterEach(() => {
@@ -43,6 +71,22 @@ afterEach(() => {
     delete process.env.DATABASE_URL;
   } else {
     process.env.DATABASE_URL = savedDatabaseUrl;
+  }
+
+  if (origDirectSynthesis && llmProvider.generateSynthesis) {
+    llmProvider.generateSynthesis = origDirectSynthesis;
+  }
+  if (origReportSynthesis && llmProvider.generateReportSynthesis) {
+    llmProvider.generateReportSynthesis = origReportSynthesis;
+  }
+  if (origCustomCompletion && llmProvider.generateCustomCompletion) {
+    llmProvider.generateCustomCompletion = origCustomCompletion;
+  }
+  if (origQuestionRewrite && llmProvider.generateQuestionRewrite) {
+    llmProvider.generateQuestionRewrite = origQuestionRewrite;
+  }
+  if (origKnowledgeGraph && llmProvider.generateKnowledgeGraph) {
+    llmProvider.generateKnowledgeGraph = origKnowledgeGraph;
   }
 });
 
@@ -68,7 +112,7 @@ describe('POST /api/report without a configured secret (#19 no-key equivalence)'
     // Citations and references only contain provider-shaped records.
     assert.ok(body.report.references.length > 0);
     for (const ref of body.report.references) {
-      assert.ok(ref.type === 'zhihu' || ref.type === 'web');
+      assert.ok(ref.type === 'zhihu' || ref.type === 'web' || ref.type === 'knowledge_base' || ref.type === 'personal_history');
       assert.ok(typeof ref.id === 'string' && ref.id.length > 0);
     }
     const citationCount = Object.keys(body.report.citations).length;

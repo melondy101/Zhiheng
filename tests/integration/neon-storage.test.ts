@@ -54,7 +54,7 @@ class FakeSqlExecutor implements SqlExecutor {
     if (this.failAll) throw new Error('simulated connection failure');
     const verb = sql.trim().toUpperCase();
 
-    if (verb.startsWith('CREATE TABLE') || verb.startsWith('CREATE INDEX')) {
+    if (verb.startsWith('CREATE TABLE') || verb.startsWith('CREATE INDEX') || verb.startsWith('CREATE UNIQUE INDEX')) {
       return { rows: [] };
     }
     if (verb.startsWith('INSERT INTO ZHIYAN_SESSIONS')) {
@@ -152,7 +152,7 @@ describe('Migrations: repeatable on an empty database (fake executor level)', ()
   it('uses only idempotent CREATE … IF NOT EXISTS statements, never destructive SQL', () => {
     assert.ok(MIGRATION_STATEMENTS.length >= 3, 'sessions + index + profiles expected');
     for (const statement of MIGRATION_STATEMENTS) {
-      assert.match(statement, /CREATE (TABLE|INDEX) IF NOT EXISTS/);
+      assert.match(statement, /CREATE (UNIQUE\s+)?(TABLE|INDEX) IF NOT EXISTS/);
       assert.doesNotMatch(statement, /DROP\s/i);
       assert.doesNotMatch(statement, /DELETE\s/i);
       assert.doesNotMatch(statement, /TRUNCATE/i);

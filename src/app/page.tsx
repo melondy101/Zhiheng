@@ -702,7 +702,11 @@ export default function Home() {
     window.location.href = `?session=${sessionId}`;
   };
 
-  const handleStart = async (question: string, initialOpinion: string | null) => {
+  const handleStart = async (
+    question: string,
+    initialOpinion: string | null,
+    options?: { subtitle?: string; originalQuestion?: string }
+  ) => {
     setLoading(true);
     setStartError(null);
     try {
@@ -712,6 +716,8 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
         body: JSON.stringify({
           question,
+          subtitle: options?.subtitle,
+          originalQuestion: options?.originalQuestion,
           initialOpinion,
           historySessions: await historySessionsForReport(),
         }),
@@ -748,6 +754,8 @@ export default function Home() {
       const newSession: Session = {
         id: sessionId,
         question,
+        subtitle: report.subtitle ?? options?.subtitle,
+        originalQuestion: report.originalQuestion ?? options?.originalQuestion,
         initialOpinion,
         report,
         knowledgeGraph: knowledgeGraph ?? null,

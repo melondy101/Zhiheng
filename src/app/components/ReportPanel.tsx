@@ -179,7 +179,26 @@ export default function ReportPanel({
         </div>
       )}
 
-      <h2 className="text-2xl font-bold mb-6">{report.title}</h2>
+      {/* Title & Subtitle Header */}
+      <div className="mb-6 space-y-2">
+        {report.subtitle && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              data-testid="report-subtitle-badge"
+              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+              {report.subtitle}
+            </span>
+            {report.originalQuestion && report.originalQuestion !== report.question && (
+              <span className="text-xs text-slate-400 line-clamp-1">
+                原议题：{report.originalQuestion}
+              </span>
+            )}
+          </div>
+        )}
+        <h2 className="text-2xl font-bold text-slate-900 leading-snug">{report.title}</h2>
+      </div>
 
       {/* PRD v4.2 §3.3: title → 核心观点 (each with its own evidence) →
           知识图谱 → 分类引用。When synthesis is unavailable, show an explicit
