@@ -78,6 +78,14 @@ export class ServerStorage {
     }
     return scope;
   }
+
+  async savePublicShare(id: string, markdown: string, createdAt: number): Promise<void> {
+    return this.backend.savePublicShare(id, markdown, createdAt);
+  }
+
+  async loadPublicShare(id: string): Promise<{ markdown: string; createdAt: number } | null> {
+    return this.backend.loadPublicShare(id);
+  }
 }
 
 /**

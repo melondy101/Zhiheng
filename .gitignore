@@ -18,6 +18,12 @@ playwright-report/
 .env.*
 !.env.example
 
+# Local Neon link state
+.neon
+
+# Local dev logs
+*.log
+
 # IDE
 .vscode/
 .idea/

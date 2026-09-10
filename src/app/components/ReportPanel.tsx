@@ -1,11 +1,14 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+
 import type { Report as ReportType, Source, SourceState } from '@/lib/providers';
 import type { KnowledgeGraph } from '@/lib/knowledge-graph';
 import KnowledgeGraphView from './KnowledgeGraphView';
 
 interface ReportPanelProps {
   report: ReportType;
+  question?: string;
   zhihuSourceState?: SourceState;
   webSourceState?: SourceState;
   degraded?: boolean;
@@ -29,12 +32,14 @@ const SOURCE_STATE_LABELS: Record<SourceState, string> = {
   live: '实时检索',
   cache: '缓存',
   demo: '演示数据',
+  unavailable: '实时检索暂不可用',
 };
 
 const SOURCE_STATE_COLORS: Record<SourceState, { bg: string; text: string; dot: string }> = {
   live: { bg: 'bg-green-100', text: 'text-green-700', dot: 'bg-green-500' },
   cache: { bg: 'bg-yellow-100', text: 'text-yellow-700', dot: 'bg-yellow-500' },
   demo: { bg: 'bg-gray-100', text: 'text-gray-600', dot: 'bg-gray-400' },
+  unavailable: { bg: 'bg-rose-100', text: 'text-rose-700', dot: 'bg-rose-500' },
 };
 
 /** Group sources by type for display. */
@@ -52,6 +57,14 @@ function groupByType(sources: Source[]): Record<string, Source[]> {
     }
   }
   return groups;
+}
+
+function isUsableExternalUrl(source: Source, sourceState?: SourceState): boolean {
+  if (!source.url?.trim()) return false;
+  // Demo fixtures contain deliberately recognizable placeholder URLs. Never
+  // present them as original Zhihu/web material or make them clickable.
+  if (sourceState === 'demo') return false;
+  return true;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -78,6 +91,7 @@ function cacheBadgeText(cacheUpdatedAt?: number | null, cacheStale?: boolean): s
 
 export default function ReportPanel({
   report,
+  question,
   zhihuSourceState,
   webSourceState,
   degraded,
@@ -89,13 +103,33 @@ export default function ReportPanel({
   cacheUpdatedAt = null,
   cacheStale = false,
 }: ReportPanelProps) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [recommendations, setRecommendations] = useState<{ author: Source[]; topics: Source[] }>({ author: [], topics: [] });
   const grouped = groupByType(report.references);
   const excludedSet = new Set(excludedHistoryIds);
+
+  useEffect(() => {
+    if (!question || report.references.length === 0) return;
+    const controller = new AbortController();
+    void fetch('/api/recommendations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, sources: report.references }),
+      signal: controller.signal,
+    }).then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (data?.source === 'live') setRecommendations({ author: data.author ?? [], topics: data.topics ?? [] });
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [question, report.references]);
 
   // Determine overall worst-case source state for badge display
   const overallState: SourceState | null =
     webSourceState === 'demo' || zhihuSourceState === 'demo'
       ? 'demo'
+      : webSourceState === 'unavailable' || zhihuSourceState === 'unavailable'
+      ? 'unavailable'
       : webSourceState === 'cache' || zhihuSourceState === 'cache'
       ? 'cache'
       : webSourceState === 'live' || zhihuSourceState === 'live'
@@ -103,7 +137,8 @@ export default function ReportPanel({
       : null;
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 border-r">
+    <div className="flex min-w-0 flex-1 border-r bg-slate-50">
+      <main className="min-w-0 flex-1 overflow-y-auto p-6">
       {/* Source state badge (#18: honest live/cache/demo disclosure; #19 adds
           the cache retrieval time for cache states) */}
       {overallState && (
@@ -167,7 +202,16 @@ export default function ReportPanel({
                       {viewpoint.evidence.map((item, itemIndex) => (
                         <li key={itemIndex}>
                           {renderInlineCitations(
-                            `${item.summary} ${item.citationIds.map((id) => `[${id}]`).join('')}`
+                            `${item.summary} ${item.citationIds.map((id) => `[${id}]`).join('')}`,
+                            report.references,
+                            new Set(
+                              report.references
+                                .map((source, index) => {
+                                  const state = source.type === 'zhihu' ? zhihuSourceState : webSourceState;
+                                  return isUsableExternalUrl(source, state) ? index + 1 : null;
+                                })
+                                .filter((id): id is number => id !== null),
+                            ),
                           )}
                         </li>
                       ))}
@@ -187,23 +231,57 @@ export default function ReportPanel({
         </div>
       )}
 
-      {/* Knowledge Graph */}
-      <KnowledgeGraphView
-        graph={knowledgeGraph ?? null}
-        onCitationClick={(citationId) => {
-          const el = document.getElementById(`source-citation-${citationId}`);
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            el.classList.add('ring-2', 'ring-purple-500');
-            setTimeout(() => el.classList.remove('ring-2', 'ring-purple-500'), 2000);
-          }
-        }}
-      />
+      </main>
+
+      <aside
+        className={`order-first min-w-0 overflow-y-auto border-r border-slate-200 bg-white p-4 ${sidebarCollapsed ? 'w-14' : 'w-80'}`}
+        aria-label="研究资料侧边栏"
+      >
+      <div className={`mb-1 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
+        {!sidebarCollapsed && <span className="px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">研究资料</span>}
+        <button
+          type="button"
+          id="collapse-sidebar-button"
+          title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+          aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+          aria-expanded={!sidebarCollapsed}
+          onClick={() => setSidebarCollapsed((value) => !value)}
+          className="hidden items-center justify-center rounded-lg border border-transparent p-1.5 text-slate-400 transition-colors hover:border-slate-200 hover:bg-slate-100 hover:text-slate-700 md:flex"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={sidebarCollapsed ? 'M13 5l7 7-7 7M6 5l7 7-7 7' : 'M11 19l-7-7 7-7m8 14l-7-7 7-7'} />
+          </svg>
+        </button>
+      </div>
+      {!sidebarCollapsed && <div className="space-y-3">
+      <details className="rounded-xl border border-slate-200 bg-slate-50 group" data-testid="knowledge-graph-sidebar">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-purple-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500">
+          <span>知识图谱</span>
+          <span aria-hidden="true" className="text-slate-400 transition-transform group-open:rotate-180">⌄</span>
+        </summary>
+        <div className="border-t border-slate-100 p-3">
+          <KnowledgeGraphView
+            graph={knowledgeGraph ?? null}
+            onCitationClick={(citationId) => {
+              const el = document.getElementById(`source-citation-${citationId}`);
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('ring-2', 'ring-purple-500');
+                setTimeout(() => el.classList.remove('ring-2', 'ring-purple-500'), 2000);
+              }
+            }}
+          />
+        </div>
+      </details>
 
       {/* References section */}
       {report.references.length > 0 && (
-        <div className="bg-white rounded-lg border p-6">
-          <h3 className="font-semibold mb-4 text-blue-600">引用来源</h3>
+        <details className="rounded-xl border border-slate-200 bg-slate-50 group" data-testid="references-sidebar">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-blue-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+            <span>引用来源（{report.references.length}）</span>
+            <span aria-hidden="true" className="text-slate-400 transition-transform group-open:rotate-180">⌄</span>
+          </summary>
+          <div className="border-t border-slate-100 p-4">
 
           {Object.entries(grouped).map(([type, sources]) => {
             if (sources.length === 0) return null;
@@ -241,11 +319,6 @@ export default function ReportPanel({
                                   ? '来源链接：未选择'
                                   : `来源链接：个人历史报告（${src.provenance ?? '个人上下文'}）`}
                               </div>
-                              {src.excerpt && (
-                                <p className="text-gray-600 text-xs mt-1 italic">
-                                  {src.excerpt}
-                                </p>
-                              )}
                               {onHistorySourceToggle && src.sourceSessionId && (
                                 <div className="mt-2 flex items-center gap-2">
                                   <input
@@ -285,7 +358,8 @@ export default function ReportPanel({
                 <div className="space-y-3">
                   {sources.map((src) => {
                     const globalIndex = report.references.indexOf(src) + 1;
-                    const url = src.url?.trim() || null;
+                    const sourceState = src.type === 'zhihu' ? zhihuSourceState : webSourceState;
+                    const url = isUsableExternalUrl(src, sourceState) ? src.url!.trim() : null;
 
                     return (
                       <div
@@ -321,12 +395,9 @@ export default function ReportPanel({
                                 </a>
                               </div>
                             ) : (
-                              <div className="text-gray-400 text-xs mt-1">来源链接：未知</div>
-                            )}
-                            {src.excerpt && (
-                              <p className="text-gray-600 text-xs mt-1 italic">
-                                {src.excerpt}
-                              </p>
+                              <div className="text-gray-400 text-xs mt-1">
+                                {sourceState === 'demo' ? '演示数据：无原始链接' : '来源链接：未知'}
+                              </div>
                             )}
                           </div>
                         </div>
@@ -337,32 +408,78 @@ export default function ReportPanel({
               </div>
             );
           })}
-        </div>
+          </div>
+        </details>
+      )}
+
+      {(recommendations.author.length > 0 || recommendations.topics.length > 0) && (
+        <details className="rounded-xl border border-slate-200 bg-slate-50 group" data-testid="recommendations-sidebar">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+            <span>相关阅读</span>
+            <span aria-hidden="true" className="text-slate-400 transition-transform group-open:rotate-180">⌄</span>
+          </summary>
+          <div className="border-t border-slate-100 p-4 space-y-4">
+            {recommendations.author.length > 0 && <RecommendationGroup title="被引用作者的其他帖子" sources={recommendations.author} />}
+            {recommendations.topics.length > 0 && <RecommendationGroup title="相关话题" sources={recommendations.topics} />}
+          </div>
+        </details>
       )}
 
       {/* #23: explicit empty state when there are no references at all */}
       {report.references.length === 0 && (
-        <div className="bg-white rounded-lg border p-6">
-          <h3 className="font-semibold mb-4 text-blue-600">引用来源</h3>
-          <p className="text-sm text-gray-400 italic">暂无任何引用材料</p>
-        </div>
+        <details className="rounded-xl border border-slate-200 bg-slate-50">
+          <summary className="min-h-11 cursor-pointer list-none px-4 py-3 text-sm font-semibold text-blue-600">引用来源（0）</summary>
+          <p className="border-t border-slate-100 p-4 text-sm italic text-gray-400">暂无任何引用材料</p>
+        </details>
       )}
+      </div>}
+      </aside>
     </div>
   );
 }
 
+function RecommendationGroup({ title, sources }: { title: string; sources: Source[] }) {
+  return <section><h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h4><div className="space-y-2">
+    {sources.map((source) => <a key={source.id} href={source.url!} target="_blank" rel="noopener noreferrer" className="block rounded-lg border border-slate-200 bg-white p-3 hover:border-emerald-300 hover:bg-emerald-50/40">
+      <span className="block text-xs font-medium text-slate-800">{source.title ?? source.excerpt ?? '知乎内容'}</span>
+      <span className="mt-1 block break-all text-[10px] text-emerald-600">{source.url}</span>
+    </a>)}
+  </div></section>;
+}
+
 /** Render inline text, converting [N] citation markers to styled superscript badges. */
-function renderInlineCitations(text: string): React.ReactNode {
+function renderInlineCitations(
+  text: string,
+  references: Source[],
+  clickableCitationIds: Set<number>,
+): React.ReactNode {
   const parts = text.split(/(\[\d+\])/g);
   return parts.map((part, i) => {
     const match = part.match(/^\[(\d+)\]$/);
     if (match) {
       const n = parseInt(match[1], 10);
+      const source = references[n - 1];
+      const url = source?.url?.trim() || null;
+      if (url && clickableCitationIds.has(n)) {
+        return (
+          <a
+            key={i}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-xs font-bold ml-0.5 hover:bg-blue-200 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            title={`打开原始来源 #${n}`}
+            aria-label={`打开原始来源 #${n}`}
+          >
+            {n}
+          </a>
+        );
+      }
       return (
         <sup
           key={i}
           className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-xs font-bold ml-0.5 cursor-default"
-          title={`引用 #${n}`}
+            title={`引用 #${n}`}
         >
           {n}
         </sup>

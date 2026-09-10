@@ -391,7 +391,9 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         model: this.config.model,
         messages,
         temperature: 0.3,
-        max_tokens: 4096,
+        // The report schema is compact. A large output budget makes the
+        // reasoning model spend tens of seconds on unnecessary verbosity.
+        max_tokens: 1536,
       }),
       this.config.synthesisTimeoutMs
     );
@@ -424,7 +426,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         model: this.config.model,
         messages,
         temperature: 0.3,
-        max_tokens: 4096,
+        max_tokens: 1536,
       }),
       this.config.synthesisTimeoutMs
     );
@@ -592,4 +594,19 @@ export function createLLMProviderFromEnv(
   const config = readOpenAILLMConfig(env);
   if (!config) return null;
   return new OpenAICompatibleLLMProvider({ config });
+}
+
+/** Separate provider factory for the graph pipeline. */
+export function createGraphLLMProviderFromEnv(
+  env: Record<string, string | undefined> = process.env
+): LLMProvider | null {
+  const apiKey = env.GRAPH_LLM_API_KEY?.trim();
+  const model = env.GRAPH_LLM_MODEL?.trim();
+  if (!apiKey || !model) return null;
+  const baseUrl = (env.GRAPH_LLM_BASE_URL?.trim() || DEFAULT_LLM_BASE_URL).replace(/\/+$/, '');
+  const timeout = Number(env.GRAPH_LLM_TIMEOUT_MS?.trim());
+  const timeoutMs = Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_SYNTHESIS_TIMEOUT_MS;
+  return new OpenAICompatibleLLMProvider({
+    config: { baseUrl, apiKey, model, timeoutMs, synthesisTimeoutMs: timeoutMs },
+  });
 }

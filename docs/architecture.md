@@ -7,7 +7,7 @@
 ```
 ┌────────────────────────────────────────────────────────────┐
 │                     Pages (App Router)                      │
-│  page.tsx · layout.tsx · components/                        │
+│  page.tsx · layout.tsx · components/ · share/[id]/page.tsx |
 └─────────────────────┬──────────────────────────────────────┘
                       │
         ┌─────────────┼─────────────┐
@@ -30,6 +30,17 @@
         ↓                            ↓
    浏览器 localStorage         服务器 fixture 数据
 ```
+
+**API 路由**（`src/app/api/`）：
+- `/health` — 健康检查
+- `/hotlist` — 知乎热榜
+- `/report` — 报告生成（检索链）
+- `/interrogate` — 诘问引擎
+- `/session` — 会话持久化
+- `/share/[id]` — 公开分享（无需认证）
+- `/recommendations` — 推荐问题列表
+- `/profile` — 用户画像
+- `/auth/*` — 邮箱认证（login/register/logout/me/send-code）
 
 ## 2. Provider 合约
 

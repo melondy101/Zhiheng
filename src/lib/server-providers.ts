@@ -4,7 +4,7 @@
 
 import type { LLMProvider, Session, StorageProvider } from './providers';
 import { FixtureRetrievalProvider, FixtureLLMProvider } from './fixture-providers';
-import { createLLMProviderFromEnv } from './openai-llm-provider';
+import { createLLMProviderFromEnv, createGraphLLMProviderFromEnv } from './openai-llm-provider';
 
 export { FixtureRetrievalProvider, FixtureLLMProvider } from './fixture-providers';
 
@@ -19,6 +19,7 @@ export const retrievalProvider = new FixtureRetrievalProvider();
  * because the fixture succeeds without degradation.
  */
 export const llmProvider: LLMProvider = createLLMProviderFromEnv() ?? new FixtureLLMProvider();
+export const graphLlmProvider: LLMProvider | null = createGraphLLMProviderFromEnv();
 
 // ---------------------------------------------------------------------------
 // Server-side in-memory storage.

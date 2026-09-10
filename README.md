@@ -33,7 +33,7 @@ npm run check       # 全量门禁
 ```
 
 > **端口说明**：默认 3000。系统若被占用，使用 `--port 3001`。Playwright 配置 (playwright.config.js) 也使用 3001。
-> **凭据**：`.env.local` 须包含 `ZHIHU_ACCESS_SECRET` + `LLM_API_KEY`+`LLM_MODEL` 才走真实 Provider；缺失时自动降级到 fixture，且 UI/源标签绝不标 live。`DATABASE_URL` 缺失则降级 localStorage。
+> **凭据**：`.env.local` 须包含 `ZHIHU_ACCESS_SECRET` + `LLM_API_KEY`+`LLM_MODEL` 才走真实 Provider；缺失时自动降级到 fixture，且 UI/源标签绝不标 live。`DATABASE_URL` 缺失则降级 localStorage。分享功能需要 `SINK_API_KEY` + `SHARE_BASE_URL`。认证功能需要 `RESEND_API_KEY` + `RESEND_FROM_EMAIL`。
 
 ## 演示路径
 
@@ -46,6 +46,7 @@ npm run check       # 全量门禁
 5. **五轮诘问** → 证据 → 前提 → 钢铁人反驳 → 立场反转 → 观点重述；LLM 在配置有效时按真实模型出题，否则稳定走策略模板（不替用户裁决）
 6. **成果卡** → 6 段可追溯（初始表达/起始立场/新增证据/观点修正/你最后表达的观点/未解决问题）；它不把用户原话伪装成 AI 总结
 7. **刷新页面** → 重新打开成果卡（localStorage 或 Neon 跨设备恢复，owner header 隔离）
+8. **公开分享** → 分享按钮生成链接；打开 `/share/[id]` 无需登录即可查看（报告 + 成果卡）
 
 **三个预置主题**（可在 `src/lib/demo-sources.ts` 找到，fixture 降级时强制使用）：
 - `AI是否会取代人类创造力`（AI/技术）
@@ -76,6 +77,8 @@ npm run check       # 全量门禁
 | POST | `/api/report` | 生成研究报告（并行搜索 + 知识图谱） |
 | POST | `/api/interrogate` | 诘问（策略引擎 + LLM fallback） |
 | GET/POST | `/api/session` | 会话加载/保存 |
+| GET | `/api/share/[id]` | 公开分享（无需登录） |
+| GET | `/api/recommendations` | 推荐问题列表 |
 
 ## Provider 边界
 

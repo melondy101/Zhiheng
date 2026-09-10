@@ -185,7 +185,10 @@ async function buildSynthesis(
   grouped: Source[],
   llmProvider?: LLMProvider | null
 ): Promise<ReportSynthesis | null> {
-  const request = { question, sources: toSynthesisSources(grouped) };
+  // Keep the full grouped list in the report for citations, but keep the
+  // synthesis request to one batch. Multiple batches trigger several slow LLM
+  // calls plus a final merge, which made the retrieval spinner look stuck.
+  const request = { question, sources: toSynthesisSources(grouped).slice(0, 5) };
   if (request.sources.length === 0) return null;
 
   if (llmProvider === undefined) {

@@ -142,7 +142,7 @@ export type ReportProgressStage =
   | 'building_graph'
   | 'complete';
 
-export type SourceState = 'live' | 'cache' | 'demo';
+export type SourceState = 'live' | 'cache' | 'demo' | 'unavailable';
 
 export interface ReportProgress {
   stage: ReportProgressStage;

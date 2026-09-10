@@ -271,6 +271,7 @@ interface DegradedCall<T> {
   fetchLive: (() => Promise<T>) | null;
   isUsable: (value: T) => boolean;
   demo: () => T;
+  allowDemoFallback?: boolean;
 }
 
 async function retrieveWithDegradation<T>(call: DegradedCall<T>): Promise<DegradedResult<T>> {
@@ -306,7 +307,13 @@ async function retrieveWithDegradation<T>(call: DegradedCall<T>): Promise<Degrad
     };
   }
 
-  // 3. deterministic demo fallback — never labeled 'live'.
+  // 3. A configured live provider must never replace an upstream failure with
+  // fixture content. Returning demo records here makes real reports look
+  // valid while citing placeholder URLs. Demo is reserved for unconfigured
+  // local development only.
+  if (call.config && call.allowDemoFallback !== true) {
+    return { value: [] as T, source: 'unavailable', updatedAt: call.now() };
+  }
   return { value: call.demo(), source: 'demo', updatedAt: call.now() };
 }
 
@@ -468,6 +475,8 @@ export interface LiveSearchProviderOptions {
   now?: () => number;
   /** Count parameter for the search endpoints (1-20, platform default 10). */
   count?: number;
+  /** Production factories disable fixture fallback once a secret is set. */
+  allowDemoFallback?: boolean;
 }
 
 const SEARCH_ENDPOINTS: Record<'zhihu_search' | 'global_search', string> = {
@@ -483,6 +492,7 @@ export class LiveSearchProvider {
   private readonly timeoutMs: number;
   private readonly now: () => number;
   private readonly count: number;
+  private readonly allowDemoFallback: boolean;
 
   constructor(options: LiveSearchProviderOptions) {
     this.kind = options.kind;
@@ -492,6 +502,7 @@ export class LiveSearchProvider {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_LIVE_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
     this.count = options.count ?? 10;
+    this.allowDemoFallback = options.allowDemoFallback ?? true;
   }
 
   /** Search with the full degradation chain; never throws. */
@@ -521,6 +532,7 @@ export class LiveSearchProvider {
       },
       isUsable: (sources) => sources.length > 0,
       demo: () => getDemoSources(question, demoType),
+      allowDemoFallback: this.allowDemoFallback,
     });
     return {
       sources: outcome.value,
@@ -555,6 +567,7 @@ export interface LiveHotlistProviderOptions {
    * -first chain in retrieveWithDegradation, which search still relies on.
    */
   snapshotStore?: HotlistSnapshotStore;
+  allowDemoFallback?: boolean;
 }
 
 const HOTLIST_ENDPOINT = '/api/v1/content/hot_list';
@@ -583,6 +596,7 @@ export class LiveHotlistProvider {
   private readonly timeoutMs: number;
   private readonly now: () => number;
   private readonly snapshotStore: HotlistSnapshotStore | null;
+  private readonly allowDemoFallback: boolean;
 
   constructor(options: LiveHotlistProviderOptions) {
     this.config = options.config;
@@ -591,6 +605,7 @@ export class LiveHotlistProvider {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_LIVE_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
     this.snapshotStore = options.snapshotStore ?? null;
+    this.allowDemoFallback = options.allowDemoFallback ?? true;
   }
 
   /** Fetch the hotlist with the full degradation chain; never throws. */
@@ -614,6 +629,9 @@ export class LiveHotlistProvider {
         `[zhihu-retrieval] live hotlist failed — degrading to demo:`,
         err instanceof Error ? err.message : String(err)
       );
+    }
+    if (this.config && !this.allowDemoFallback) {
+      return { items: [], source: 'unavailable', updatedAt: this.now() };
     }
     return {
       items: DEMO_HOTLIST_ITEMS.map((item) => ({ ...item })),
@@ -737,6 +755,7 @@ export function createZhihuSearchProvider(
     kind: 'zhihu_search',
     config: readZhihuApiConfig(),
     cache: searchCache,
+    allowDemoFallback: false,
     ...overrides,
   });
 }
@@ -748,6 +767,7 @@ export function createGlobalSearchProvider(
     kind: 'global_search',
     config: readZhihuApiConfig(),
     cache: searchCache,
+    allowDemoFallback: false,
     ...overrides,
   });
 }
@@ -758,6 +778,7 @@ export function createHotlistProvider(
   return new LiveHotlistProvider({
     config: readZhihuApiConfig(),
     cache: hotlistCache,
+    allowDemoFallback: false,
     ...overrides,
   });
 }

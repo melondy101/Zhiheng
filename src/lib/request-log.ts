@@ -84,7 +84,9 @@ export interface RequestLogLine {
 export function logRequest(line: RequestLogLine): void {
   const tag = `[req:${line.stage}]`;
   if (line.phase === 'start') {
-    console.log(`${tag} → ${line.method} ${line.url}${line.query ? '?' + line.query : ''}`, {
+    // `url` already contains the query used by fetch. `query` is retained as
+    // a redacted diagnostic field, so do not append it a second time here.
+    console.log(`${tag} → ${line.method} ${line.url}`, {
       headers: line.headers,
       bodyPreview: line.bodyPreview,
     });
