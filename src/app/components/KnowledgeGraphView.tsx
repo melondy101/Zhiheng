@@ -228,7 +228,7 @@ export default function KnowledgeGraphView({
 
   return (
     <div
-      className="bg-white rounded-lg border p-6 mb-4"
+      className="bg-white rounded-xl border border-slate-200/80 p-6 shadow-xs"
       data-testid="knowledge-graph-container"
       role="region"
       aria-label="知识图谱"

@@ -211,6 +211,23 @@ async function buildSynthesis(
   return null;
 }
 
+function extractCoreTopic(q: string): string {
+  return q
+    .replace(/^(如何看待|如何评价|请问|我想知道|大家觉得|为什么说|为什么|怎么看|大家怎么看|求问|如何理解|聊聊|谈谈|关于|围绕|针对|对于)\s*/, '')
+    .replace(/（[^）]*）|\([^)]*\)/g, '')
+    .replace(/[？?。！!，, ]+$/, '')
+    .trim() || q;
+}
+
+function cleanSourceFragment(text?: string): string {
+  if (!text) return '';
+  return text
+    .replace(/^(如何看待|如何评价|为什么|关于|探讨|浅析|浅谈|一文读懂|深度解析|全面解读|讨论)\s*/, '')
+    .replace(/\[\d+\]/g, '')
+    .replace(/[，,。！？!?\s]+$/, '')
+    .trim();
+}
+
 /**
  * Generate structurally distinct viewpoint suggestions (ticket #8, enriched for concrete domain relevance).
  * These are NOT synonyms — they cover different positions, premises, or practical angles.
@@ -236,26 +253,26 @@ export function buildStructuredViewpoints(
   }
 
   // 2. Build rich, topic-specific concrete perspectives based on question and retrieved sources
-  const q = question.trim();
+  const topic = extractCoreTopic(question);
   const meaningfulSources = allSources.filter(
     (s) => (s.title && s.title.trim().length > 4 && !s.title.includes('无标题')) || (s.excerpt && s.excerpt.trim().length > 10)
   );
 
-  const t1 = meaningfulSources[0]?.title?.trim() || meaningfulSources[0]?.excerpt?.trim().slice(0, 35);
-  const t2 = meaningfulSources[1]?.title?.trim() || meaningfulSources[1]?.excerpt?.trim().slice(0, 35);
-  const t3 = meaningfulSources[2]?.title?.trim() || meaningfulSources[2]?.excerpt?.trim().slice(0, 35);
+  const c1 = cleanSourceFragment(meaningfulSources[0]?.title?.trim() || meaningfulSources[0]?.excerpt?.trim().slice(0, 45));
+  const c2 = cleanSourceFragment(meaningfulSources[1]?.title?.trim() || meaningfulSources[1]?.excerpt?.trim().slice(0, 45));
+  const c3 = cleanSourceFragment(meaningfulSources[2]?.title?.trim() || meaningfulSources[2]?.excerpt?.trim().slice(0, 45));
 
-  const vp1Text = t1
-    ? `核心论断：关于"${q.slice(0, 24)}"，重点在于 ${t1}`
-    : `积极推进：关于"${q.slice(0, 24)}"，应顺应核心发展趋势，通过积极创新与实践落地解决问题。`;
+  const vp1Text = c1
+    ? `发展与效能视角：${c1}，表明通过核心机制优化与实践创新能够实现实质性突破。`
+    : `发展与效能视角：${topic}顺应技术与实践演进趋势，能够有效重塑核心流程并带来结构性效率跃升。`;
 
-  const vp2Text = t2
-    ? `审慎制约：围绕"${q.slice(0, 24)}"，必须高度关注 ${t2}`
-    : `审慎质疑：关于"${q.slice(0, 24)}"，目前面临关键成本、伦理或现实约束，不宜盲目乐观。`;
+  const vp2Text = c2
+    ? `成本与约束视角：${c2}，揭示出在边际成本、现实可行性与潜在风险上存在不可忽视的硬性制约。`
+    : `成本与约束视角：受制于落地成本、边际收益递减及隐性风险，${topic}短期内难以实现全面普适替代。`;
 
-  const vp3Text = t3
-    ? `结构反思：针对"${q.slice(0, 24)}"，关键维度体现于 ${t3}`
-    : `情境分化：关于"${q.slice(0, 24)}"，结论不能一概而论，成败高度取决于具体应用场景与前提边界。`;
+  const vp3Text = c3
+    ? `情境与边界视角：${c3}，表明成效与结论高度取决于特定应用场景与前置配套条件。`
+    : `情境与边界视角：结论不应一概而论，成败关键在于具体场景中基础设施、组织协同与治理规则的适配深度。`;
 
   return [
     {
