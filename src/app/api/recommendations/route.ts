@@ -54,10 +54,17 @@ export async function POST(request: Request) {
   const authors = [...new Set(cited.map((source) => source.author).filter((author): author is string => Boolean(author?.trim())))].slice(0, 3);
   const provider = createZhihuSearchProvider({ count: 8, timeoutMs: 5_000 });
 
-  const [topicResult, ...authorResults] = await Promise.all([
-    provider.search(`${question} 相关话题`),
-    ...authors.map((author) => provider.search(`${author} ${question}`)),
-  ]);
+  // Zhihu applies a short-window limit to search requests. This route is
+  // invoked immediately after the report is rendered, so firing the topic and
+  // three author expansions together can turn one optional sidebar into a
+  // four-request burst. Keep this non-critical enrichment serialized: the
+  // report is already visible and each subsequent request starts only after
+  // the previous one has completed.
+  const topicResult = await provider.search(`${question} 相关话题`);
+  const authorResults = [];
+  for (const author of authors) {
+    authorResults.push(await provider.search(`${author} ${question}`));
+  }
 
   const authorRecommendations = uniqueSources(
     authorResults.flatMap((result, index) => result.source === 'live'
