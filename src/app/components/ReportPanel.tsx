@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import type { Report as ReportType, Source, SourceState } from '@/lib/providers';
 import type { KnowledgeGraph } from '@/lib/knowledge-graph';
 import KnowledgeGraphView from './KnowledgeGraphView';
+import { BookOpen, Sparkles, RefreshCw, ExternalLink, Bookmark } from 'lucide-react';
 
 interface ReportPanelProps {
   report: ReportType;
@@ -35,11 +36,11 @@ const SOURCE_STATE_LABELS: Record<SourceState, string> = {
   unavailable: '实时检索暂不可用',
 };
 
-const SOURCE_STATE_COLORS: Record<SourceState, { bg: string; text: string; dot: string }> = {
-  live: { bg: 'bg-green-100', text: 'text-green-700', dot: 'bg-green-500' },
-  cache: { bg: 'bg-yellow-100', text: 'text-yellow-700', dot: 'bg-yellow-500' },
-  demo: { bg: 'bg-gray-100', text: 'text-gray-600', dot: 'bg-gray-400' },
-  unavailable: { bg: 'bg-rose-100', text: 'text-rose-700', dot: 'bg-rose-500' },
+const SOURCE_STATE_COLORS: Record<SourceState, { bg: string; text: string; dot: string; border: string }> = {
+  live: { bg: 'bg-semantic-success-light', text: 'text-semantic-success', dot: 'bg-semantic-success', border: 'border-semantic-success/20' },
+  cache: { bg: 'bg-semantic-warning-light', text: 'text-semantic-warning', dot: 'bg-semantic-warning', border: 'border-semantic-warning/20' },
+  demo: { bg: 'bg-surface-subtle', text: 'text-content-secondary', dot: 'bg-content-tertiary', border: 'border-line' },
+  unavailable: { bg: 'bg-semantic-error-light', text: 'text-semantic-error', dot: 'bg-semantic-error', border: 'border-semantic-error/20' },
 };
 
 /** Group sources by type for display. */
@@ -61,8 +62,6 @@ function groupByType(sources: Source[]): Record<string, Source[]> {
 
 function isUsableExternalUrl(source: Source, sourceState?: SourceState): boolean {
   if (!source.url?.trim()) return false;
-  // Demo fixtures contain deliberately recognizable placeholder URLs. Never
-  // present them as original Zhihu/web material or make them clickable.
   if (sourceState === 'demo') return false;
   return true;
 }
@@ -82,8 +81,7 @@ function formatCacheTime(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** #19: cache badge text — stale caches show the expiry flag plus the time
- * the data was actually retrieved; the time is never faked for live/demo. */
+/** #19: cache badge text — stale caches show the expiry flag plus the time */
 function cacheBadgeText(cacheUpdatedAt?: number | null, cacheStale?: boolean): string {
   if (!cacheUpdatedAt) return cacheStale ? '缓存（已过期）' : '缓存';
   return `缓存${cacheStale ? '（已过期）' : ''} · 更新于 ${formatCacheTime(cacheUpdatedAt)}`;
@@ -136,15 +134,14 @@ export default function ReportPanel({
       : null;
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto border-r bg-slate-50 p-6 space-y-6">
+    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto border-r border-line bg-surface p-4 sm:p-6 space-y-6">
       <main className="min-w-0 flex-1 space-y-6">
-        {/* Source state badge (#18: honest live/cache/demo disclosure; #19 adds
-            the cache retrieval time for cache states) */}
+        {/* Source state badge */}
         {overallState && (
           <div className="flex items-center gap-2">
             <span
               data-testid="report-source-state"
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${SOURCE_STATE_COLORS[overallState].bg} ${SOURCE_STATE_COLORS[overallState].text}`}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-medium border ${SOURCE_STATE_COLORS[overallState].bg} ${SOURCE_STATE_COLORS[overallState].text} ${SOURCE_STATE_COLORS[overallState].border}`}
             >
               <span
                 className={`w-1.5 h-1.5 rounded-full ${SOURCE_STATE_COLORS[overallState].dot}`}
@@ -158,65 +155,70 @@ export default function ReportPanel({
 
         {/* Degradation warning */}
         {degraded && degradationMessage && (
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-xs">
+          <div className="p-3 bg-semantic-warning-light border border-semantic-warning/30 rounded-xl text-semantic-warning text-xs">
             {degradationMessage}
           </div>
         )}
 
-        {/* #23: regenerate button — visible only after user has excluded at least one history source */}
+        {/* Regenerate button */}
         {onRegenerate && excludedHistoryIds.length > 0 && (
           <div>
             <button
+              id="regenerate-report-btn"
+              data-testid="regenerate-report-button"
               onClick={onRegenerate}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-brand hover:bg-brand-hover text-content-inverse text-xs font-medium rounded-xl shadow-xs transition-all"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
               重新生成报告（已排除 {excludedHistoryIds.length} 条历史材料）
             </button>
           </div>
         )}
 
         {/* Title & Subtitle Header */}
-        <div className="space-y-2">
+        <div className="space-y-2 pb-2 border-b border-line">
           {report.subtitle && (
             <div className="flex flex-wrap items-center gap-2">
               <span
                 data-testid="report-subtitle-badge"
-                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100"
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-semibold bg-brand-light text-brand border border-brand-subtle"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                <Bookmark className="w-3 h-3 text-accent" />
                 {report.subtitle}
               </span>
               {report.originalQuestion && report.originalQuestion !== report.question && (
-                <span className="text-xs text-slate-400 line-clamp-1">
+                <span className="text-xs text-content-tertiary line-clamp-1">
                   原议题：{report.originalQuestion}
                 </span>
               )}
             </div>
           )}
-          <h2 className="text-2xl font-bold text-slate-900 leading-snug">{report.title}</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-content-primary leading-snug font-serif">
+            {report.title}
+          </h2>
         </div>
 
-        {/* PRD v4.2 §3.3: title → 核心观点 (each with its own evidence) →
-            知识图谱 → 分类引用。When synthesis is unavailable, show an explicit
-            notice rather than a fabricated set of viewpoints. */}
+        {/* 核心观点 */}
         {report.synthesis && report.synthesis.viewpoints.length > 0 ? (
-          <div className="bg-white rounded-xl border border-slate-200/80 p-6 shadow-xs" data-testid="report-synthesis">
-            <h3 className="font-semibold text-base mb-4 text-blue-600 flex items-center gap-2" data-testid="report-viewpoints-heading">
-              <span>🎯 核心观点</span>
+          <div className="bg-surface-elevated rounded-2xl border border-line p-5 sm:p-6 shadow-xs space-y-4" data-testid="report-synthesis">
+            <h3 className="font-bold text-sm sm:text-base text-brand font-serif flex items-center gap-2 pb-2 border-b border-line" data-testid="report-viewpoints-heading">
+              <Sparkles className="w-4 h-4 text-accent" />
+              <span>核心观点提炼</span>
             </h3>
             <ol className="space-y-4" data-testid="report-viewpoints">
               {report.synthesis.viewpoints.map((viewpoint, index) => (
-                <li key={viewpoint.id} data-testid="report-viewpoint" className="border-b border-slate-100 pb-4 last:border-b-0 last:pb-0">
-                  <p className="font-medium text-sm text-slate-900 mb-2 leading-relaxed" data-testid="report-viewpoint-conclusion">
-                    观点 {index + 1}：{viewpoint.conclusion}
+                <li key={viewpoint.id} data-testid="report-viewpoint" className="border-b border-line pb-4 last:border-b-0 last:pb-0">
+                  <p className="font-semibold text-xs sm:text-sm text-content-primary mb-2.5 leading-relaxed" data-testid="report-viewpoint-conclusion">
+                    <span className="font-mono text-accent mr-1">[{index + 1}]</span>
+                    {viewpoint.conclusion}
                   </p>
                   {viewpoint.evidence.length > 0 && (
-                    <div className="ml-2 pl-3 border-l-2 border-slate-100" data-testid="report-viewpoint-evidence">
-                      <h4 className="font-medium text-xs mb-1.5 text-slate-600">📖 主要内容</h4>
-                      <ul className="list-disc list-inside space-y-1.5 text-sm text-slate-700 leading-relaxed">
+                    <div className="ml-1 pl-3 border-l-2 border-accent/40 bg-surface-subtle/40 p-3 rounded-r-xl" data-testid="report-viewpoint-evidence">
+                      <h4 className="font-semibold text-[11px] mb-1.5 text-content-secondary uppercase tracking-wider flex items-center gap-1">
+                        <BookOpen className="w-3 h-3 text-accent" />
+                        <span>论据出处与摘要</span>
+                      </h4>
+                      <ul className="list-disc list-inside space-y-1.5 text-xs text-content-secondary leading-relaxed">
                         {viewpoint.evidence.map((item, itemIndex) => (
                           <li key={itemIndex}>
                             {renderInlineCitations(
@@ -224,9 +226,9 @@ export default function ReportPanel({
                               report.references,
                               new Set(
                                 report.references
-                                  .map((source, index) => {
+                                  .map((source, idx) => {
                                     const state = source.type === 'zhihu' ? zhihuSourceState : webSourceState;
-                                    return isUsableExternalUrl(source, state) ? index + 1 : null;
+                                    return isUsableExternalUrl(source, state) ? idx + 1 : null;
                                   })
                                   .filter((id): id is number => id !== null),
                               ),
@@ -242,51 +244,49 @@ export default function ReportPanel({
           </div>
         ) : (
           <div
-            className="bg-white rounded-xl border border-slate-200/80 p-6 text-sm text-slate-500 shadow-xs"
+            className="bg-surface-elevated rounded-2xl border border-line p-5 text-xs text-content-secondary shadow-xs"
             data-testid="report-synthesis-legacy"
           >
             当前未能生成 AI 综合观点；材料仍保留在下方引用来源中。请在 AI 服务可用后重新生成报告。
           </div>
         )}
 
-        {/* 1. 知识图谱 (放到报告正文下方) */}
+        {/* 1. 知识图谱 */}
         <KnowledgeGraphView
           graph={knowledgeGraph ?? null}
           onCitationClick={(citationId) => {
             const el = document.getElementById(`source-citation-${citationId}`);
             if (el) {
               el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              el.classList.add('ring-2', 'ring-purple-500');
-              setTimeout(() => el.classList.remove('ring-2', 'ring-purple-500'), 2000);
+              el.classList.add('ring-2', 'ring-accent');
+              setTimeout(() => el.classList.remove('ring-2', 'ring-accent'), 2000);
             }
           }}
         />
 
-        {/* 2. 引用来源 (放到知识图谱下方) */}
-        <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-xs" data-testid="references-sidebar">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-blue-600 flex items-center gap-2">
-              <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-              </svg>
-              <span>引用来源（{report.references.length}）</span>
+        {/* 2. 引用来源 */}
+        <section className="rounded-2xl border border-line bg-surface-elevated p-5 shadow-xs" data-testid="references-sidebar">
+          <div className="flex items-center justify-between mb-4 pb-2 border-b border-line">
+            <h3 className="text-sm sm:text-base font-bold text-brand font-serif flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-accent" />
+              <span>引用来源 ({report.references.length})</span>
             </h3>
-            <span className="text-xs text-slate-400">研报支撑材料明细与出处</span>
+            <span className="text-[11px] text-content-tertiary">研报支撑材料明细与出处</span>
           </div>
 
           {report.references.length > 0 ? (
-            <div className="space-y-5">
+            <div className="space-y-4">
               {Object.entries(grouped).map(([type, sources]) => {
                 if (sources.length === 0) return null;
 
                 // personal_history
                 if (type === 'personal_history') {
                   return (
-                    <div key={type} className="border-t border-slate-100 pt-4 first:border-t-0 first:pt-0">
-                      <h4 className="text-xs font-semibold text-slate-500 mb-3 uppercase tracking-wider">
+                    <div key={type} className="border-t border-line pt-3 first:border-t-0 first:pt-0">
+                      <h4 className="text-[11px] font-semibold text-content-secondary mb-2.5 uppercase tracking-wider">
                         本报告引用 {sources.length} 条个人历史
                       </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                         {sources.map((src) => {
                           const globalIndex = report.references.indexOf(src) + 1;
                           const isExcluded = src.sourceSessionId
@@ -297,17 +297,17 @@ export default function ReportPanel({
                             <div
                               key={src.id}
                               id={`source-citation-${globalIndex}`}
-                              className={`border border-slate-200 rounded-lg p-3 text-sm bg-slate-50/70 transition-all ${isExcluded ? 'opacity-50' : ''}`}
+                              className={`border border-line rounded-xl p-3 text-xs bg-surface transition-all ${isExcluded ? 'opacity-50' : 'hover:bg-surface-subtle'}`}
                             >
                               <div className="flex items-start gap-2.5">
-                                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0 mt-0.5">
+                                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-brand text-content-inverse text-[10px] font-mono font-bold shrink-0 mt-0.5">
                                   {globalIndex}
                                 </span>
                                 <div className="flex-1 min-w-0">
-                                  <span className="text-slate-900 font-medium line-clamp-1">
+                                  <span className="text-content-primary font-medium line-clamp-1">
                                     {src.title ?? '个人历史报告'}
                                   </span>
-                                  <div className="text-slate-400 text-xs mt-1">
+                                  <div className="text-content-tertiary text-[11px] mt-1">
                                     {isExcluded
                                       ? '来源链接：未选择'
                                       : `来源链接：个人历史报告（${src.provenance ?? '个人上下文'}）`}
@@ -317,15 +317,16 @@ export default function ReportPanel({
                                       <input
                                         type="checkbox"
                                         id={`history-toggle-${src.sourceSessionId}`}
+                                        data-testid="history-source-checkbox"
                                         checked={!isExcluded}
                                         onChange={(e) =>
                                           onHistorySourceToggle(src.sourceSessionId!, e.target.checked)
                                         }
-                                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                        className="w-3.5 h-3.5 rounded border-line text-brand focus:ring-brand accent-brand"
                                       />
                                       <label
                                         htmlFor={`history-toggle-${src.sourceSessionId}`}
-                                        className="text-xs text-slate-600 cursor-pointer select-none"
+                                        className="text-[11px] text-content-secondary cursor-pointer select-none"
                                       >
                                         {isExcluded ? '未选择' : '已选择'}（点击
                                         {isExcluded ? '重新选择' : '取消选择'}）
@@ -344,11 +345,11 @@ export default function ReportPanel({
 
                 // Other source types
                 return (
-                  <div key={type} className="border-t border-slate-100 pt-4 first:border-t-0 first:pt-0">
-                    <h4 className="text-xs font-semibold text-slate-500 mb-3 uppercase tracking-wider">
+                  <div key={type} className="border-t border-line pt-3 first:border-t-0 first:pt-0">
+                    <h4 className="text-[11px] font-semibold text-content-secondary mb-2.5 uppercase tracking-wider">
                       {TYPE_LABELS[type] ?? type}（{sources.length}）
                     </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                       {sources.map((src) => {
                         const globalIndex = report.references.indexOf(src) + 1;
                         const sourceState = src.type === 'zhihu' ? zhihuSourceState : webSourceState;
@@ -358,26 +359,26 @@ export default function ReportPanel({
                           <div
                             key={src.id}
                             id={`source-citation-${globalIndex}`}
-                            className="border border-slate-200 rounded-lg p-3 text-sm bg-slate-50/70 transition-all hover:bg-slate-50"
+                            className="border border-line rounded-xl p-3 text-xs bg-surface transition-all hover:bg-surface-subtle"
                           >
                             <div className="flex items-start gap-2.5">
-                              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0 mt-0.5">
+                              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-brand text-content-inverse text-[10px] font-mono font-bold shrink-0 mt-0.5">
                                 {globalIndex}
                               </span>
                               <div className="flex-1 min-w-0">
-                                <div className="text-slate-800 text-xs font-medium">
+                                <div className="text-content-primary text-xs font-medium">
                                   <span>{src.author ?? '未知作者'}</span>
                                   {src.title && (
                                     <>
-                                      <span className="text-slate-300 mx-1">/</span>
-                                      <span className="text-slate-900 font-semibold line-clamp-1 inline">
+                                      <span className="text-content-tertiary mx-1">/</span>
+                                      <span className="text-content-primary font-semibold line-clamp-1 inline">
                                         {src.title}
                                       </span>
                                     </>
                                   )}
                                 </div>
                                 {src.excerpt && (
-                                  <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
+                                  <p className="text-[11px] text-content-secondary mt-1 line-clamp-2 leading-relaxed">
                                     {src.excerpt}
                                   </p>
                                 )}
@@ -387,16 +388,14 @@ export default function ReportPanel({
                                       href={url}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="text-blue-600 hover:underline text-xs inline-flex items-center gap-1 break-all"
+                                      className="text-accent hover:underline text-[11px] inline-flex items-center gap-1 break-all"
                                     >
                                       <span>查看原始出处</span>
-                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                      </svg>
+                                      <ExternalLink className="w-3 h-3" />
                                     </a>
                                   </div>
                                 ) : (
-                                  <div className="text-slate-400 text-[11px] mt-1">
+                                  <div className="text-content-tertiary text-[10px] mt-1 font-mono">
                                     {sourceState === 'demo' ? '演示数据：无原始链接' : '来源链接：内置/非公开材料'}
                                   </div>
                                 )}
@@ -411,21 +410,19 @@ export default function ReportPanel({
               })}
             </div>
           ) : (
-            <p className="text-sm italic text-slate-400 py-2">暂无任何引用材料</p>
+            <p className="text-xs italic text-content-tertiary py-2">暂无任何引用材料</p>
           )}
         </section>
 
-        {/* 3. 相关推荐 / 相关阅读 (放到引用来源下方) */}
+        {/* 3. 相关推荐 */}
         {(recommendations.author.length > 0 || recommendations.topics.length > 0) && (
-          <section className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-xs" data-testid="recommendations-sidebar">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-emerald-700 flex items-center gap-2">
-                <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
-                </svg>
+          <section className="rounded-2xl border border-line bg-surface-elevated p-5 shadow-xs" data-testid="recommendations-sidebar">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-line">
+              <h3 className="text-sm sm:text-base font-bold text-brand font-serif flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-accent" />
                 <span>相关推荐与拓展阅读</span>
               </h3>
-              <span className="text-xs text-slate-400">同作者与关联话题推荐</span>
+              <span className="text-[11px] text-content-tertiary">同作者与关联话题推荐</span>
             </div>
             <div className="space-y-4">
               {recommendations.author.length > 0 && (
@@ -443,12 +440,31 @@ export default function ReportPanel({
 }
 
 function RecommendationGroup({ title, sources }: { title: string; sources: Source[] }) {
-  return <section><h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h4><div className="space-y-2">
-    {sources.map((source) => <a key={source.id} href={source.url!} target="_blank" rel="noopener noreferrer" className="block rounded-lg border border-slate-200 bg-white p-3 hover:border-emerald-300 hover:bg-emerald-50/40">
-      <span className="block text-xs font-medium text-slate-800">{source.title ?? source.excerpt ?? '知乎内容'}</span>
-      <span className="mt-1 block break-all text-[10px] text-emerald-600">{source.url}</span>
-    </a>)}
-  </div></section>;
+  return (
+    <section>
+      <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-content-secondary">
+        {title}
+      </h4>
+      <div className="space-y-2">
+        {sources.map((source) => (
+          <a
+            key={source.id}
+            href={source.url!}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block rounded-xl border border-line bg-surface p-3 hover:border-line-strong hover:bg-surface-subtle transition-colors"
+          >
+            <span className="block text-xs font-medium text-content-primary">
+              {source.title ?? source.excerpt ?? '知乎内容'}
+            </span>
+            <span className="mt-1 block break-all text-[10px] text-accent font-mono">
+              {source.url}
+            </span>
+          </a>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 /** Render inline text, converting [N] citation markers to styled superscript badges. */
@@ -471,7 +487,7 @@ function renderInlineCitations(
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-xs font-bold ml-0.5 hover:bg-blue-200 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-brand-light text-brand border border-brand-subtle text-[10px] font-mono font-bold ml-0.5 hover:bg-brand hover:text-content-inverse transition-colors"
             title={`打开原始来源 #${n}`}
             aria-label={`打开原始来源 #${n}`}
           >
@@ -482,8 +498,8 @@ function renderInlineCitations(
       return (
         <sup
           key={i}
-          className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 text-blue-700 text-xs font-bold ml-0.5 cursor-default"
-            title={`引用 #${n}`}
+          className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-brand-light text-brand border border-brand-subtle text-[10px] font-mono font-bold ml-0.5 cursor-default"
+          title={`引用 #${n}`}
         >
           {n}
         </sup>

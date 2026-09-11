@@ -31,6 +31,7 @@ import ResultCardView, { ResultCardViewFromSession } from './components/ResultCa
 import SessionFeedbackCue from './components/SessionFeedbackCue';
 import { deriveFeedbackCueState } from '@/lib/feedback-cue-state';
 import UserNav from './components/UserNav';
+import ThemeToggle from './components/ThemeToggle';
 
 const retrievalProvider = new FixtureRetrievalProvider();
 const storageProvider = new BrowserStorageProvider();
@@ -922,23 +923,23 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-lg">
-          <div className="mb-4 text-center text-2xl font-bold text-blue-600">知研</div>
+      <div className="min-h-screen flex items-center justify-center bg-surface px-4">
+        <div className="w-full max-w-md rounded-2xl border border-line bg-surface-elevated p-6 shadow-lg">
+          <div className="mb-4 text-center text-2xl font-bold text-brand font-serif">知研</div>
           {feedbackCueState === 'retrieving' && (
             <SessionFeedbackCue state="retrieving" className="mb-5 w-full" />
           )}
-          <div className="mb-2 flex items-center justify-between text-xs font-medium text-slate-600">
+          <div className="mb-2 flex items-center justify-between text-xs font-medium text-content-secondary">
             <span>正在准备你的思辨材料</span>
-            <span className="text-blue-600">请稍候</span>
+            <span className="text-accent font-medium">请稍候</span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
-            <div className="h-full w-2/5 rounded-full bg-blue-600 loading-progress-bar" />
+          <div className="h-2 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
+            <div className="h-full w-2/5 rounded-full bg-brand loading-progress-bar" />
           </div>
-          <div className="mt-4 grid grid-cols-3 gap-2 text-center text-[11px] text-slate-400">
-            <span className={loadingPhase === 'retrieval' ? 'font-medium text-blue-600' : 'text-slate-400'}>检索知乎与全网</span>
-            <span className={loadingPhase === 'synthesis' ? 'font-medium text-blue-600' : 'text-slate-400'}>生成 AI 观点</span>
-            <span className={loadingPhase === 'graph' ? 'font-medium text-blue-600' : 'text-slate-400'}>生成知识图谱</span>
+          <div className="mt-4 grid grid-cols-3 gap-2 text-center text-[11px] text-content-tertiary">
+            <span className={loadingPhase === 'retrieval' ? 'font-medium text-brand' : 'text-content-tertiary'}>检索知乎与全网</span>
+            <span className={loadingPhase === 'synthesis' ? 'font-medium text-brand' : 'text-content-tertiary'}>生成 AI 观点</span>
+            <span className={loadingPhase === 'graph' ? 'font-medium text-brand' : 'text-content-tertiary'}>生成知识图谱</span>
           </div>
         </div>
       </div>
@@ -973,33 +974,39 @@ export default function Home() {
   const cacheStale = reportSourceState?.zhihuStale === true || reportSourceState?.webStale === true;
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b bg-white">
-        <div className="px-4 py-3 flex justify-between items-center gap-4">
-          <h1
-            className="text-xl font-bold text-blue-600 cursor-pointer hover:opacity-80 transition-opacity"
-            onClick={() => setPage('home')}
-            title="返回首页"
-          >
-            知研
-          </h1>
-          <div className="flex items-center gap-4">
+    <div className="min-h-screen bg-surface text-content-primary">
+      <header className="border-b border-line bg-surface-elevated sticky top-0 z-30 shadow-xs">
+        <div className="px-4 py-2.5 flex justify-between items-center gap-4">
+          <div className="flex items-center gap-3">
+            <h1
+              className="text-xl font-bold text-brand font-serif cursor-pointer hover:opacity-80 transition-opacity tracking-wide"
+              onClick={() => setPage('home')}
+              title="返回首页"
+            >
+              知研
+            </h1>
+            <span className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-medium bg-brand-light text-brand rounded border border-brand-subtle">
+              思辨进行中
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
             <div className="flex flex-col items-end min-w-0">
-              <span className="text-sm text-gray-600 truncate max-w-xs">
+              <span className="text-xs sm:text-sm font-medium text-content-primary truncate max-w-xs sm:max-w-md">
                 {session?.question}
               </span>
               {storageNotice && (
-                <p data-testid="storage-notice" className="text-xs text-amber-600 truncate max-w-md">
+                <p data-testid="storage-notice" className="text-[11px] text-accent truncate max-w-md font-mono">
                   {storageNotice}
                 </p>
               )}
             </div>
+            <ThemeToggle compact />
             <UserNav />
           </div>
         </div>
       </header>
 
-      <div className="flex h-[calc(100vh-57px)]">
+      <div className="flex h-[calc(100vh-53px)]">
         <ReportPanel
           report={report!}
           question={session?.question}

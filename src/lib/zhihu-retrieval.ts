@@ -329,8 +329,9 @@ interface LiveCallOptions {
 }
 
 function buildHeaders(config: ZhihuApiConfig, now: () => number): Record<string, string> {
+  const token = config.accessSecret.replace(/^Bearer\s+/i, '').trim();
   return {
-    Authorization: `Bearer ${config.accessSecret}`,
+    Authorization: `Bearer ${token}`,
     'X-Request-Timestamp': String(Math.floor(now() / 1000)),
     'Content-Type': 'application/json',
   };
@@ -404,20 +405,9 @@ async function getJson(
       });
       throw new Error(`Zhihu API HTTP ${response.status}`);
     }
-    logRequest({
-      stage,
-      phase: 'success',
-      url,
-      method: 'GET',
-      query: safeQuery,
-      headers,
-      durationMs,
-      status: response.status,
-      contentType,
-      responsePreview,
-    });
+    let parsed: unknown;
     try {
-      return JSON.parse(bodyText);
+      parsed = JSON.parse(bodyText);
     } catch (err) {
       logRequest({
         stage,
@@ -434,6 +424,42 @@ async function getJson(
       });
       throw new Error('Zhihu API returned non-JSON body');
     }
+
+    if (typeof parsed === 'object' && parsed !== null) {
+      const record = parsed as Record<string, unknown>;
+      const code = typeof record.Code === 'number' ? record.Code : typeof record.code === 'number' ? record.code : null;
+      if (code !== null && code !== 0 && code !== 200) {
+        const msg = String(record.Message || record.message || record.msg || 'Authorization or business error');
+        logRequest({
+          stage,
+          phase: 'failure',
+          url,
+          method: 'GET',
+          query: safeQuery,
+          headers,
+          durationMs,
+          status: response.status,
+          contentType,
+          error: `Zhihu API error ${code}: ${msg}`,
+          responsePreview,
+        });
+        throw new Error(`Zhihu API error ${code}: ${msg}`);
+      }
+    }
+
+    logRequest({
+      stage,
+      phase: 'success',
+      url,
+      method: 'GET',
+      query: safeQuery,
+      headers,
+      durationMs,
+      status: response.status,
+      contentType,
+      responsePreview,
+    });
+    return parsed;
   } catch (err) {
     if (!(err instanceof Error && err.message.startsWith('Zhihu API '))) {
       logRequest({

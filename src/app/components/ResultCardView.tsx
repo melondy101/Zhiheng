@@ -5,6 +5,7 @@ import { buildDetailedResultCard, type DetailedResultCard } from '@/lib/result-c
 import type { Session } from '@/lib/providers';
 import CognitiveTrajectoryView from './CognitiveTrajectoryView';
 import { buildSessionMarkdown } from '@/lib/session-export';
+import { Sparkles, Share2, ArrowRight, BookOpen, CheckCircle, RefreshCw, HelpCircle } from 'lucide-react';
 
 interface ResultCardViewProps {
   card: DetailedResultCard;
@@ -20,7 +21,7 @@ const SOURCE_LABELS: Record<string, string> = {
 
 function SourceLabel({ source }: { source: string }) {
   return (
-    <span className="inline-block px-2 py-0.5 text-[10px] rounded bg-gray-100 text-gray-600 mt-1">
+    <span className="inline-block px-2 py-0.5 text-[10px] rounded-md bg-surface-subtle text-content-secondary border border-line mt-1.5 font-mono">
       {SOURCE_LABELS[source] ?? source}
     </span>
   );
@@ -28,7 +29,7 @@ function SourceLabel({ source }: { source: string }) {
 
 function TraceLink({ id }: { id: string }) {
   return (
-    <span className="text-[10px] text-gray-400 ml-1" title={`来源: ${id}`}>
+    <span className="text-[10px] text-content-tertiary ml-1.5 font-mono" title={`来源: ${id}`}>
       [{id.slice(0, 12)}]
     </span>
   );
@@ -87,43 +88,50 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-4">
-      <div className="mb-2 flex items-center gap-3">
-        <h3 className="text-xl font-bold text-blue-600">思辨成果卡</h3>
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-surface-elevated text-content-primary">
+      <div className="mb-2 flex items-center justify-between pb-3 border-b border-line">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-accent" />
+          <h3 className="text-lg sm:text-xl font-bold text-brand font-serif">思辨成果卡</h3>
+        </div>
         {session && (
           <button
             type="button"
             onClick={() => void handleShare()}
-            className="group inline-flex min-h-12 min-w-12 items-center justify-center rounded-full border border-slate-200 bg-white p-2 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-line bg-surface hover:bg-surface-subtle text-xs font-medium text-content-primary shadow-2xs transition-all hover:scale-[1.02] focus:outline-none"
             title="生成分享链接并复制"
             aria-label="生成分享链接并复制到剪切板"
             data-testid="share-card-button"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/sharethis-icon.avif" alt="分享" width="36" height="36" className="h-9 w-9 rounded-full object-cover" />
+            <Share2 className="w-3.5 h-3.5 text-accent" />
+            <span>分享成果</span>
           </button>
         )}
       </div>
-      {shareNotice && <div role="status" aria-live="polite" className="fixed right-5 top-5 z-50 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 shadow-lg">已复制分享链接</div>}
+      {shareNotice && (
+        <div role="status" aria-live="polite" className="fixed right-5 top-5 z-50 rounded-xl border border-semantic-success/30 bg-semantic-success-light px-4 py-3 text-xs font-medium text-semantic-success shadow-lg">
+          已复制分享链接
+        </div>
+      )}
 
       <CognitiveTrajectoryView events={trajectory ?? []}>
 
       {/* GalGame Story Outcome (#G-05) */}
       {storyRun && (
-        <section className="mb-4 bg-purple-50/70 border border-purple-200 rounded-xl p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <h4 className="text-xs font-bold text-purple-900">推演剧本结局反思</h4>
-            <span className="text-[10px] text-purple-700 bg-purple-100 px-2 py-0.5 rounded">
+        <section className="mb-4 bg-surface border border-line rounded-2xl p-5 space-y-3 shadow-xs">
+          <div className="flex items-center justify-between pb-2 border-b border-line">
+            <h4 className="text-xs sm:text-sm font-bold text-brand font-serif">推演剧本结局反思</h4>
+            <span className="text-[10px] text-accent bg-accent-light px-2 py-0.5 rounded font-mono border border-accent/20">
               Act {storyRun.currentActIndex + 1}
             </span>
           </div>
           {storyRun.outcomeNarrative && (
-            <p className="text-xs text-gray-800 leading-relaxed font-serif">
+            <p className="text-xs text-content-primary leading-relaxed font-serif">
               {storyRun.outcomeNarrative}
             </p>
           )}
           {storyRun.reflectionSummary && (
-            <p className="text-xs text-purple-900 bg-white/80 p-3 rounded border border-purple-100 leading-relaxed">
+            <p className="text-xs text-content-secondary bg-surface-subtle p-3 rounded-xl border border-line leading-relaxed">
               {storyRun.reflectionSummary}
             </p>
           )}
@@ -132,32 +140,32 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
 
       {card.initialExpression && (
         <section className="mb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-1">1. 初始表达</h4>
-          <p className="text-sm bg-gray-50 p-3 rounded">
+          <h4 className="text-xs font-semibold text-content-secondary mb-1.5 uppercase tracking-wider">1. 初始表达</h4>
+          <div className="text-xs sm:text-sm bg-surface p-3.5 rounded-xl border border-line leading-relaxed">
             {card.initialExpression.text}
             <TraceLink id={card.initialExpression.messageId} />
-          </p>
+          </div>
           <SourceLabel source="user_authored" />
         </section>
       )}
 
       {card.startingStance && (
         <section className="mb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-1">2. 起始立场</h4>
-          <p className="text-sm bg-blue-50 p-3 rounded">
+          <h4 className="text-xs font-semibold text-content-secondary mb-1.5 uppercase tracking-wider">2. 起始立场</h4>
+          <div className="text-xs sm:text-sm bg-surface p-3.5 rounded-xl border border-line leading-relaxed font-serif">
             {card.startingStance.text}
             <TraceLink id={card.startingStance.messageId ?? ''} />
-          </p>
+          </div>
           <SourceLabel source={card.startingStance.source} />
         </section>
       )}
 
       {card.newEvidence.length > 0 && (
         <section className="mb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-1">3. 新增证据</h4>
-          <ul className="text-sm space-y-1">
+          <h4 className="text-xs font-semibold text-content-secondary mb-1.5 uppercase tracking-wider">3. 新增证据</h4>
+          <ul className="text-xs sm:text-sm space-y-1.5">
             {card.newEvidence.map((ev) => (
-              <li key={ev.messageId} className="bg-green-50 p-2 rounded">
+              <li key={ev.messageId} className="bg-surface p-3 rounded-xl border border-line leading-relaxed">
                 {ev.text}
                 <TraceLink id={ev.messageId} />
               </li>
@@ -168,14 +176,14 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
 
       {card.stanceRevisions.length > 0 && (
         <section className="mb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-1">4. 观点修正</h4>
-          <ul className="text-sm space-y-2">
+          <h4 className="text-xs font-semibold text-content-secondary mb-1.5 uppercase tracking-wider">4. 观点修正</h4>
+          <ul className="text-xs sm:text-sm space-y-2">
             {card.stanceRevisions.map((rev, i) => (
-              <li key={i} className="bg-yellow-50 p-2 rounded">
-                <div className="text-gray-500 text-xs">从：</div>
-                <div>{rev.from.text}<TraceLink id={rev.from.messageId} /></div>
-                <div className="text-gray-500 text-xs mt-1">到：</div>
-                <div>{rev.to.text}<TraceLink id={rev.to.messageId} /></div>
+              <li key={i} className="bg-surface p-3.5 rounded-xl border border-line leading-relaxed">
+                <div className="text-content-tertiary text-[11px]">从：</div>
+                <div className="text-content-secondary">{rev.from.text}<TraceLink id={rev.from.messageId} /></div>
+                <div className="text-accent text-[11px] mt-1.5 font-medium">到：</div>
+                <div className="text-content-primary font-medium">{rev.to.text}<TraceLink id={rev.to.messageId} /></div>
               </li>
             ))}
           </ul>
@@ -184,20 +192,20 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
 
       {card.finalPosition && (
         <section className="mb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-1">5. 你最后表达的观点</h4>
-          <p className="text-sm bg-purple-50 p-3 rounded">
+          <h4 className="text-xs font-semibold text-content-secondary mb-1.5 uppercase tracking-wider">5. 你最后表达的观点</h4>
+          <div className="text-xs sm:text-sm bg-brand-light p-3.5 rounded-xl border border-brand-subtle text-brand font-medium leading-relaxed font-serif">
             {card.finalPosition.text}
             <TraceLink id={card.finalPosition.messageId} />
-          </p>
+          </div>
         </section>
       )}
 
       {card.uncertainAnswers.length > 0 && (
         <section className="mb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-1">6. 保留的不确定回答</h4>
-          <ul className="text-sm space-y-1">
+          <h4 className="text-xs font-semibold text-content-secondary mb-1.5 uppercase tracking-wider">6. 保留的不确定回答</h4>
+          <ul className="text-xs sm:text-sm space-y-1.5">
             {card.uncertainAnswers.map((a) => (
-              <li key={a.messageId} className="bg-gray-50 p-2 rounded">
+              <li key={a.messageId} className="bg-surface p-3 rounded-xl border border-line text-content-secondary leading-relaxed">
                 {a.text}
                 <TraceLink id={a.messageId} />
               </li>
@@ -208,8 +216,8 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
 
       {card.unresolved.length > 0 && (
         <section className="mb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-1">7. 未解决问题</h4>
-          <ul className="text-sm list-disc list-inside">
+          <h4 className="text-xs font-semibold text-content-secondary mb-1.5 uppercase tracking-wider">7. 未解决问题</h4>
+          <ul className="text-xs sm:text-sm list-disc list-inside space-y-1 text-content-secondary">
             {card.unresolved.map((u, i) => (
               <li key={i}>{u}</li>
             ))}
@@ -218,7 +226,7 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
       )}
 
       {!card.finalPosition && !card.startingStance && !card.initialExpression && (
-        <p className="text-sm text-gray-500">
+        <p className="text-xs text-content-tertiary">
           本次会话没有用户原创内容，成果卡为空。
         </p>
       )}
@@ -226,9 +234,10 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
 
       <button
         onClick={onNewSession}
-        className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        className="w-full mt-4 py-3 px-4 bg-brand hover:bg-brand-hover text-content-inverse rounded-xl font-medium text-xs sm:text-sm shadow-xs transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
       >
-        开启新一轮思辨
+        <span>开启新一轮思辨</span>
+        <ArrowRight className="w-4 h-4" />
       </button>
     </div>
   );

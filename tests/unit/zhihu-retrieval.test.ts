@@ -432,6 +432,7 @@ describe('LiveSearchProvider degradation', () => {
     { name: 'empty usable result', respond: async () => jsonResponse([]) },
     { name: 'HTTP 451', respond: async () => new Response('unavailable for legal reasons', { status: 451 }) },
     { name: 'HTTP 401 auth failure', respond: async () => jsonResponse({ error: 'unauthorized' }, 401) },
+    { name: 'API Code 20001 auth failure', respond: async () => jsonResponse({ Code: 20001, Message: 'Authorization failed', Data: null }, 200) },
     { name: 'HTTP 403 forbidden', respond: async () => jsonResponse({ error: 'forbidden' }, 403) },
     { name: 'HTTP 429 rate limited', respond: async () => jsonResponse({ error: 'rate limited' }, 429) },
     { name: 'HTTP 500 server error', respond: async () => jsonResponse({ error: 'boom' }, 500) },

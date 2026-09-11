@@ -185,16 +185,16 @@ export default function KnowledgeGraphView({
 
   if (isLoading || !graph) {
     return (
-      <div className="bg-white rounded-lg border p-6 mb-4" data-testid="knowledge-graph-loading">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-purple-700 flex items-center gap-2">
+      <div className="bg-surface-elevated rounded-2xl border border-line p-5 sm:p-6 mb-4 shadow-xs" data-testid="knowledge-graph-loading">
+        <div className="flex items-center justify-between mb-3 pb-2 border-b border-line">
+          <h3 className="font-bold text-sm sm:text-base text-brand font-serif flex items-center gap-2">
             <span>🕸️</span> 知识图谱
           </h3>
-          <span className="text-xs text-gray-400">构建中…</span>
+          <span className="text-xs text-content-tertiary">构建中…</span>
         </div>
-        <div className="h-64 flex flex-col items-center justify-center bg-gray-50 rounded border border-dashed border-gray-200">
-          <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mb-3" />
-          <p className="text-sm text-gray-500">正在从多源报告与论述中提炼知识实体与拓扑关系…</p>
+        <div className="h-64 flex flex-col items-center justify-center bg-surface rounded-xl border border-dashed border-line">
+          <div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin mb-3" />
+          <p className="text-xs text-content-secondary">正在从多源报告与论述中提炼知识实体与拓扑关系…</p>
         </div>
       </div>
     );
@@ -228,19 +228,19 @@ export default function KnowledgeGraphView({
 
   return (
     <div
-      className="bg-white rounded-xl border border-slate-200/80 p-6 shadow-xs"
+      className="bg-surface-elevated rounded-2xl border border-line p-5 sm:p-6 shadow-xs text-content-primary"
       data-testid="knowledge-graph-container"
       role="region"
       aria-label="知识图谱"
       id={`knowledge-graph-${instanceId}`}
     >
       {/* Header with Title & View Mode Toggle */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-2 border-b border-line">
         <div>
-          <h3 className="font-semibold text-purple-700 flex items-center gap-2" data-testid="knowledge-graph-title">
+          <h3 className="font-bold text-sm sm:text-base text-brand font-serif flex items-center gap-2" data-testid="knowledge-graph-title">
             <span>🕸️</span> 知识图谱
           </h3>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-[11px] text-content-secondary mt-0.5">
             结构化呈现议题核心概念、争议主张与引证关系（支持键盘与无障碍交互）
           </p>
         </div>
@@ -250,7 +250,7 @@ export default function KnowledgeGraphView({
           <button
             type="button"
             onClick={() => setViewMode(viewMode === 'graph' ? 'text' : 'graph')}
-            className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 transition-colors font-medium flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            className="text-xs px-3 py-1.5 rounded-xl border border-line text-content-primary bg-surface hover:bg-surface-subtle transition-colors font-medium flex items-center gap-1.5 shadow-2xs"
             aria-pressed={viewMode === 'text'}
             data-testid="graph-view-mode-toggle"
           >

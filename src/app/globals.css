@@ -2,13 +2,196 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* ── 方案三：现代人文杂志 (Editorial Clarity) — 白天模式 ── */
+  --color-primary:         #1E293B;   /* 藏青墨黑 - 品牌/导航/主按钮 */
+  --color-primary-hover:   #0F172A;
+  --color-primary-light:   #EEF2F6;   /* 淡墨蓝轻触背景 */
+  --color-primary-subtle:  #CBD5E1;   /* 墨边强调 */
+  --color-accent:          #B45309;   /* 陶土棕红 - 知乎热榜/学术批注/重点高亮 */
+  --color-accent-hover:    #92400E;
+  --color-accent-light:    #FEF3C7;
+
+  /* ── Surfaces (Editorial Parchment) ── */
+  --color-bg:              #F4F1EA;   /* 经典书卷米白底色 */
+  --color-bg-elevated:     #FCFBF9;   /* 羊皮纸白卡片浮层 */
+  --color-bg-subtle:       #ECE7DE;   /* 柔灰纸色底栏/侧边 */
+  --color-bg-muted:        #E2DCD2;   /* hover 态 */
+
+  /* ── Text ── */
+  --color-text-primary:    #1C1917;   /* 墨汁黑 - 标题与正文 */
+  --color-text-secondary:  #57534E;   /* 铅笔灰 - 次要文字与批注 */
+  --color-text-tertiary:   #8C867E;   /* 浅灰 - 占位符与时间戳 */
+  --color-text-on-primary: #FFFFFF;
+
+  /* ── Borders ── */
+  --color-border:          #E4DFD5;   /* 书页细边框 */
+  --color-border-strong:   #CDC5B7;   /* 章节分割线 */
+
+  /* ── Semantic ── */
+  --color-success:         #059669;
+  --color-success-light:   #ECFDF5;
+  --color-warning:         #D97706;
+  --color-warning-light:   #FFFBEB;
+  --color-error:           #DC2626;
+  --color-error-light:     #FEF2F2;
+  --color-info:            #4338CA;   /* 深度洞察靛青色 */
+  --color-info-light:      #EEF2FF;
+
+  /* ── Radius ── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* ── Shadow ── */
+  --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.04);
+  --shadow-md: 0 4px 12px rgba(28, 25, 23, 0.06);
+  --shadow-lg: 0 12px 32px rgba(28, 25, 23, 0.09);
+}
+
+.dark {
+  /* ── 方案二：黑曜石对弈暗室 (Obsidian Dialectic) — 黑天模式 ── */
+  --color-primary:         #818CF8;   /* 荧光淡靛蓝 - 高对比阅读无眩光 */
+  --color-primary-hover:   #A5B4FC;
+  --color-primary-light:   rgba(129, 140, 248, 0.14);
+  --color-primary-subtle:  rgba(129, 140, 248, 0.28);
+  --color-accent:          #FBBF24;   /* 流光琥珀 - 极客高光 */
+  --color-accent-hover:    #F59E0B;
+  --color-accent-light:    rgba(251, 191, 36, 0.14);
+
+  /* ── Surfaces (Obsidian Darkness) ── */
+  --color-bg:              #0C0A09;   /* 深暖黑曜石底 */
+  --color-bg-elevated:     #1C1917;   /* 深岩卡片层 */
+  --color-bg-subtle:       #292524;   /* 柔和暗岩灰 */
+  --color-bg-muted:        #38332E;   /* hover 态 */
+
+  /* ── Text ── */
+  --color-text-primary:    #FAFAF9;   /* 暖白正文 */
+  --color-text-secondary:  #A8A29E;   /* 冷灰次要文字 */
+  --color-text-tertiary:   #78716C;   /* 占位灰 */
+  --color-text-on-primary: #0C0A09;
+
+  /* ── Borders ── */
+  --color-border:          #292524;   /* 哑光暗边框 */
+  --color-border-strong:   #44403C;   /* 强调分割线 */
+
+  /* ── Semantic ── */
+  --color-success:         #34D399;
+  --color-success-light:   rgba(52, 211, 153, 0.14);
+  --color-warning:         #FBBF24;
+  --color-warning-light:   rgba(251, 191, 36, 0.14);
+  --color-error:           #F87171;
+  --color-error-light:     rgba(248, 113, 113, 0.14);
+  --color-info:            #A78BFA;
+  --color-info-light:      rgba(167, 139, 250, 0.14);
+
+  /* ── Shadow ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.6);
+}
+
 body {
-  @apply bg-gray-50 text-gray-900;
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+/* ── 纸质微噪底纹 (仅在白天模式展现典雅书卷质感) ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dark body::before {
+  display: none;
+}
+
+/* ── 追问光标微动效 ── */
+@keyframes questionBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.question-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  background: var(--color-primary);
+  animation: questionBlink 800ms step-end infinite;
+  margin-right: 6px;
+  vertical-align: text-bottom;
+}
+
+/* ── 中文正文排版（杂志与深度思考最适 1.8 行高） ── */
+.prose-editorial {
+  font-size: 0.9375rem;
+  line-height: 1.8;
+  letter-spacing: 0.015em;
+  color: var(--color-text-primary);
+}
+
+.prose-editorial p {
+  margin-bottom: 0.875rem;
+}
+
+.prose-quote {
+  border-left: 3px solid var(--color-accent);
+  padding-left: 1rem;
+  font-style: normal;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-subtle);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  margin: 0.75rem 0;
+}
+
+/* ── 按钮微按压反馈 ── */
+button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .holo-share-stage { display: grid; gap: 1.5rem; }
-.holo-card { position: relative; min-height: 430px; overflow: hidden; border: 1px solid #475569; border-radius: 18px; padding: 1.25rem; color: #e0f2fe; background: #07111f; box-shadow: 0 24px 60px rgba(15, 23, 42, .24), inset 0 0 0 1px rgba(255,255,255,.1); transform: perspective(1000px) rotateX(0deg) rotateY(0deg); transition: transform .25s ease, box-shadow .25s ease; }
-.holo-card:hover, .holo-card:focus-visible { transform: perspective(1000px) rotateX(2deg) rotateY(-3deg) translateY(-3px); box-shadow: 0 30px 70px rgba(15,23,42,.34), 0 0 32px rgba(56,189,248,.18), inset 0 0 0 1px rgba(255,255,255,.2); outline: none; }
+.holo-card {
+  position: relative;
+  min-height: 430px;
+  overflow: hidden;
+  border: 1px solid #475569;
+  border-radius: 18px;
+  padding: 1.25rem;
+  color: #e0f2fe;
+  background: #07111f;
+  box-shadow: 
+    0 8px 24px -6px rgba(15, 23, 42, 0.28),
+    0 20px 48px -12px rgba(15, 23, 42, 0.36),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transform-style: preserve-3d;
+  transform: perspective(1000px) rotateX(0deg) rotateY(0deg) translateY(0) translateZ(0);
+  transition: 
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.45s ease;
+  will-change: transform, box-shadow;
+}
+
+.holo-card:hover,
+.holo-card:focus-visible {
+  transform: perspective(1000px) rotateX(4deg) rotateY(-5deg) translateY(-8px) translateZ(12px);
+  box-shadow: 
+    0 16px 32px -8px rgba(15, 23, 42, 0.32),
+    0 36px 72px -16px rgba(15, 23, 42, 0.48),
+    0 0 40px -4px rgba(56, 189, 248, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  border-color: rgba(103, 232, 249, 0.6);
+  outline: none;
+}
 .holo-card-foil { position: absolute; inset: -50%; opacity: .4; background: conic-gradient(from 90deg at 50% 50%, transparent 0deg, rgba(56,189,248,.55) 55deg, transparent 110deg, rgba(244,114,182,.45) 190deg, transparent 250deg, rgba(250,204,21,.4) 310deg, transparent 360deg); animation: holo-shift 7s linear infinite; mix-blend-mode: screen; }
 .holo-card-grid { position: absolute; inset: 0; opacity: .25; background-image: linear-gradient(rgba(125,211,252,.16) 1px, transparent 1px), linear-gradient(90deg, rgba(125,211,252,.16) 1px, transparent 1px); background-size: 26px 26px; mask-image: linear-gradient(to bottom, transparent, black 25%, black 75%, transparent); }
 .holo-card-header { position: relative; display: flex; justify-content: space-between; gap: 1rem; align-items: center; font-size: .65rem; letter-spacing: .12em; text-transform: uppercase; }
@@ -24,7 +207,10 @@ body {
 .holo-card-detail-body { white-space: pre-wrap; overflow-wrap: anywhere; color: #334155; font-size: .8rem; line-height: 1.75; }
 @keyframes holo-shift { to { transform: rotate(360deg); } }
 @keyframes holo-pulse { 50% { transform: scale(1.04); box-shadow: 0 0 48px rgba(34,211,238,.4), inset 0 0 28px rgba(59,130,246,.22); } }
-@media (prefers-reduced-motion: reduce) { .holo-card-foil, .holo-card-orbit { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .holo-card { transform: none !important; transition: none !important; }
+  .holo-card-foil, .holo-card-orbit { animation: none; }
+}
 
 @keyframes loading-progress {
   from { transform: translateX(-140%); }
@@ -39,21 +225,14 @@ body {
   .loading-progress-bar { animation: none; width: 65%; }
 }
 
-/* #50: SessionFeedbackCue — scoped, non-blocking status cue styles.
-   Assets are official transparent GIFs that carry their own animation.
-   No CSS keyframe nudge is applied to avoid overlapping animation.
-   When prefers-reduced-motion is active, the component renders its text/glyph
-   fallback instead of a GIF, so motion is not the only way to perceive state.
-   Image dimensions (width/height) are set in the <img> tag to prevent
-   layout shifts; the art class only provides flex layout constraints. */
 .session-feedback-cue {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-radius: 0.75rem;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
   max-width: 100%;
 }
 
@@ -80,13 +259,13 @@ body {
   margin: 0;
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #1e3a8a;
+  color: var(--color-primary);
 }
 
 .session-feedback-cue-description {
   margin: 0.125rem 0 0;
   font-size: 0.75rem;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 @media (prefers-reduced-motion: reduce) {

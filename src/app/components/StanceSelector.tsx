@@ -5,6 +5,7 @@ import type { Viewpoint } from '@/lib/providers';
 import type { QuickTargetId, SessionMode } from '@/lib/mode-config';
 import { CHARACTERS, adaptViewpointsForCharacter, type CharacterId } from '@/lib/character';
 import { STORY_WORLDS, type StoryWorldId } from '@/lib/story-run';
+import { Lightbulb, Send, Compass, Sparkles, BookOpen, Layers } from 'lucide-react';
 
 interface StanceSelectorProps {
   viewpoints: string[];
@@ -60,65 +61,68 @@ export default function StanceSelector({
   };
 
   return (
-    <div className="p-6 border-b" data-testid="stance-selector">
+    <div className="p-4 sm:p-6 border-b border-line bg-surface-elevated text-content-primary" data-testid="stance-selector">
       {/* Mode selection (#Q-01, #D-01, #F-01, #G-01) */}
-      <div className="mb-5 pb-5 border-b border-gray-100" data-testid="mode-selector">
-        <label className="block text-xs font-semibold text-gray-700 mb-2">思辨模式：</label>
+      <div className="mb-5 pb-5 border-b border-line" data-testid="mode-selector">
+        <label className="block text-xs font-semibold text-content-secondary uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+          <Compass className="w-3.5 h-3.5 text-accent" />
+          <span>思辨模式：</span>
+        </label>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <button
             type="button"
             onClick={() => setMode('quick')}
-            className={`p-2.5 rounded-lg border text-left transition-colors ${
+            className={`p-3 rounded-xl border text-left transition-all ${
               mode === 'quick'
-                ? 'border-blue-500 bg-blue-50/50 text-blue-900 font-medium'
-                : 'border-gray-200 hover:border-gray-300 text-gray-700'
+                ? 'border-brand bg-brand-light text-brand font-medium shadow-xs ring-1 ring-brand/30'
+                : 'border-line bg-surface hover:bg-surface-subtle hover:border-line-strong text-content-primary'
             }`}
           >
-            <div className="text-xs font-semibold">快速思辨</div>
-            <div className="text-[10px] text-gray-500 mt-0.5">3轮以内明确立场</div>
+            <div className="text-xs font-bold font-serif">快速思辨</div>
+            <div className="text-[10px] text-content-tertiary mt-0.5">3轮以内明确立场</div>
           </button>
           <button
             type="button"
             onClick={() => setMode('deep')}
-            className={`p-2.5 rounded-lg border text-left transition-colors ${
+            className={`p-3 rounded-xl border text-left transition-all ${
               mode === 'deep'
-                ? 'border-indigo-500 bg-indigo-50/50 text-indigo-900 font-medium'
-                : 'border-gray-200 hover:border-gray-300 text-gray-700'
+                ? 'border-brand bg-brand-light text-brand font-medium shadow-xs ring-1 ring-brand/30'
+                : 'border-line bg-surface hover:bg-surface-subtle hover:border-line-strong text-content-primary'
             }`}
           >
-            <div className="text-xs font-semibold">深度思辨</div>
-            <div className="text-[10px] text-gray-500 mt-0.5">8策略全量认知轨迹</div>
+            <div className="text-xs font-bold font-serif">深度思辨</div>
+            <div className="text-[10px] text-content-tertiary mt-0.5">8策略全量认知轨迹</div>
           </button>
           <button
             type="button"
             onClick={() => setMode('fun')}
-            className={`p-2.5 rounded-lg border text-left transition-colors ${
+            className={`p-3 rounded-xl border text-left transition-all ${
               mode === 'fun'
-                ? 'border-emerald-500 bg-emerald-50/50 text-emerald-900 font-medium'
-                : 'border-gray-200 hover:border-gray-300 text-gray-700'
+                ? 'border-brand bg-brand-light text-brand font-medium shadow-xs ring-1 ring-brand/30'
+                : 'border-line bg-surface hover:bg-surface-subtle hover:border-line-strong text-content-primary'
             }`}
           >
-            <div className="text-xs font-semibold">趣味思辨</div>
-            <div className="text-[10px] text-gray-500 mt-0.5">拟人化辩友陪伴</div>
+            <div className="text-xs font-bold font-serif">趣味思辨</div>
+            <div className="text-[10px] text-content-tertiary mt-0.5">拟人化辩友陪伴</div>
           </button>
           <button
             type="button"
             onClick={() => setMode('story')}
-            className={`p-2.5 rounded-lg border text-left transition-colors ${
+            className={`p-3 rounded-xl border text-left transition-all ${
               mode === 'story'
-                ? 'border-purple-500 bg-purple-50/50 text-purple-900 font-medium'
-                : 'border-gray-200 hover:border-gray-300 text-gray-700'
+                ? 'border-brand bg-brand-light text-brand font-medium shadow-xs ring-1 ring-brand/30'
+                : 'border-line bg-surface hover:bg-surface-subtle hover:border-line-strong text-content-primary'
             }`}
           >
-            <div className="text-xs font-semibold">推演剧本</div>
-            <div className="text-[10px] text-gray-500 mt-0.5">GalGame沉浸推演</div>
+            <div className="text-xs font-bold font-serif">推演剧本</div>
+            <div className="text-[10px] text-content-tertiary mt-0.5">GalGame沉浸推演</div>
           </button>
         </div>
 
         {/* Sub-config options for chosen mode */}
         {mode === 'quick' && (
-          <div className="mt-3 flex items-center gap-2 text-xs">
-            <span className="text-gray-500 text-[11px]">快速导向：</span>
+          <div className="mt-3 flex items-center gap-2 text-xs flex-wrap">
+            <span className="text-content-tertiary text-[11px]">快速导向：</span>
             {[
               { id: 'clarify_position', label: '明确立场' },
               { id: 'weigh_decision', label: '权衡决策' },
@@ -128,10 +132,10 @@ export default function StanceSelector({
                 key={t.id}
                 type="button"
                 onClick={() => setTarget(t.id as QuickTargetId)}
-                className={`px-2.5 py-1 rounded text-xs border ${
+                className={`px-2.5 py-1 rounded-lg text-xs border transition-colors ${
                   target === t.id
-                    ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
-                    : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    ? 'border-brand bg-brand-light text-brand font-medium'
+                    : 'border-line bg-surface text-content-secondary hover:border-line-strong'
                 }`}
               >
                 {t.label}
@@ -141,17 +145,17 @@ export default function StanceSelector({
         )}
 
         {mode === 'fun' && (
-          <div className="mt-3 flex items-center gap-2 text-xs">
-            <span className="text-gray-500 text-[11px]">陪伴辩友：</span>
+          <div className="mt-3 flex items-center gap-2 text-xs flex-wrap">
+            <span className="text-content-tertiary text-[11px]">陪伴辩友：</span>
             {Object.values(CHARACTERS).map((c) => (
               <button
                 key={c.id}
                 type="button"
                 onClick={() => setCharacter(c.id)}
-                className={`px-2.5 py-1 rounded text-xs border ${
+                className={`px-2.5 py-1 rounded-lg text-xs border transition-colors ${
                   character === c.id
-                    ? 'border-emerald-500 bg-emerald-50 text-emerald-700 font-medium'
-                    : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    ? 'border-brand bg-brand-light text-brand font-medium'
+                    : 'border-line bg-surface text-content-secondary hover:border-line-strong'
                 }`}
               >
                 {c.name}
@@ -161,17 +165,17 @@ export default function StanceSelector({
         )}
 
         {mode === 'story' && (
-          <div className="mt-3 flex items-center gap-2 text-xs">
-            <span className="text-gray-500 text-[11px]">推演世界：</span>
+          <div className="mt-3 flex items-center gap-2 text-xs flex-wrap">
+            <span className="text-content-tertiary text-[11px]">推演世界：</span>
             {Object.values(STORY_WORLDS).map((w) => (
               <button
                 key={w.id}
                 type="button"
                 onClick={() => setWorld(w.id)}
-                className={`px-2.5 py-1 rounded text-xs border ${
+                className={`px-2.5 py-1 rounded-lg text-xs border transition-colors ${
                   world === w.id
-                    ? 'border-purple-500 bg-purple-50 text-purple-700 font-medium'
-                    : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    ? 'border-brand bg-brand-light text-brand font-medium'
+                    : 'border-line bg-surface text-content-secondary hover:border-line-strong'
                 }`}
               >
                 {w.name}
@@ -181,12 +185,14 @@ export default function StanceSelector({
         )}
       </div>
 
-      <h3 className="font-semibold mb-2">选择一个起始观点，或输入你自己的看法</h3>
-      <p className="text-xs text-gray-500 mb-4">
+      <h3 className="font-bold text-sm sm:text-base text-brand font-serif mb-1">
+        选择一个起始观点，或输入你自己的看法
+      </h3>
+      <p className="text-xs text-content-secondary mb-4 leading-relaxed">
         AI 建议是可质疑的起点，不是结论；你也可以跳过并直接输入。
       </p>
 
-      <div className="space-y-2 mb-4" data-testid="stance-options">
+      <div className="space-y-2.5 mb-4" data-testid="stance-options">
         {displayList.map((vp) => (
           <button
             key={vp.id}
@@ -198,12 +204,14 @@ export default function StanceSelector({
               })
             }
             data-testid="stance-option"
-            className="w-full text-left p-3 border rounded-lg hover:border-blue-500 hover:bg-blue-50 text-sm transition-colors"
+            className="w-full text-left p-3.5 border border-line rounded-xl hover:border-line-strong hover:bg-surface-subtle bg-surface text-xs sm:text-sm text-content-primary transition-all flex items-start gap-2.5 shadow-2xs group"
           >
-            <span className="inline-block px-1.5 py-0.5 text-[10px] rounded bg-blue-50 text-blue-600 mr-2 align-middle font-medium">
+            <span className="inline-block px-2 py-0.5 text-[10px] rounded-md bg-brand-light text-brand border border-brand-subtle font-mono font-medium shrink-0 mt-0.5">
               AI 建议
             </span>
-            {vp.text}
+            <span className="leading-relaxed group-hover:text-brand font-medium">
+              {vp.text}
+            </span>
           </button>
         ))}
       </div>
@@ -214,31 +222,32 @@ export default function StanceSelector({
           value={customText}
           onChange={(e) => setCustomText(e.target.value)}
           placeholder="或直接输入你的观点..."
-          className="flex-1 p-2 border rounded-lg text-sm"
+          className="flex-1 px-3.5 py-2.5 border border-line bg-surface rounded-xl text-xs sm:text-sm text-content-primary placeholder:text-content-tertiary focus:ring-2 focus:ring-brand/20 focus:border-brand outline-none transition-all"
           onKeyDown={(e) => e.key === 'Enter' && customText.trim() && handleCustom(customText.trim())}
         />
         <button
           onClick={() => customText.trim() && handleCustom(customText.trim())}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+          className="px-4 py-2.5 bg-brand hover:bg-brand-hover text-content-inverse rounded-xl text-xs sm:text-sm font-medium shadow-xs transition-all active:scale-[0.98] shrink-0"
         >
           使用
         </button>
       </div>
 
-      <div className="mt-8 pt-6 border-t border-gray-100">
-        <div className="bg-blue-50/60 rounded-xl p-5 border border-blue-100/80 text-xs text-gray-600 leading-relaxed space-y-2.5">
-          <p className="font-semibold text-blue-900 text-sm flex items-center gap-1.5">
-            <span>💡</span> 为什么要选择切入观点？
+      <div className="mt-6 pt-5 border-t border-line">
+        <div className="bg-surface rounded-2xl p-5 border border-line text-xs text-content-secondary leading-relaxed space-y-2.5 shadow-xs">
+          <p className="font-bold text-brand font-serif text-xs sm:text-sm flex items-center gap-1.5">
+            <Lightbulb className="w-4 h-4 text-accent" />
+            <span>为什么要选择切入观点？</span>
           </p>
-          <p className="text-gray-700">
+          <p className="text-content-secondary">
             知研思辨引擎将围绕你选择的切入点展开温和的多角度推演，协助你：
           </p>
-          <ul className="list-disc list-inside space-y-1.5 text-gray-600 pl-1">
+          <ul className="list-disc list-inside space-y-1.5 text-content-secondary pl-1">
             <li>厘清结论背后的关键前提与假设</li>
             <li>检验支撑论据的有效性与适用边界</li>
             <li>发现不同视角的反思与洞见，形成更周密的个人判断</li>
           </ul>
-          <p className="text-gray-500 pt-1">
+          <p className="text-content-tertiary pt-1">
             思辨过程循序渐进，每次只聚焦一个清晰的思考维度。你随时可以在思辨过程中补充或修正你的看法。
           </p>
         </div>
