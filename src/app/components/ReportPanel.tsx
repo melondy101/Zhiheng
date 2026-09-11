@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 
 import type { Report as ReportType, Source, SourceState } from '@/lib/providers';
 import type { KnowledgeGraph } from '@/lib/knowledge-graph';
+import type { ServiceDiagnostic } from '@/lib/service-diagnostics';
 import KnowledgeGraphView from './KnowledgeGraphView';
-import { BookOpen, Sparkles, RefreshCw, ExternalLink, Bookmark } from 'lucide-react';
+import { BookOpen, Sparkles, RefreshCw, ExternalLink, Bookmark, AlertTriangle, ShieldAlert, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ReportPanelProps {
   report: ReportType;
@@ -14,6 +15,7 @@ interface ReportPanelProps {
   webSourceState?: SourceState;
   degraded?: boolean;
   degradationMessage?: string;
+  diagnostics?: Record<string, ServiceDiagnostic> | null;
   /** Current session ID for history source management */
   sessionId?: string;
   /** IDs of history sources excluded by the user */
@@ -94,6 +96,7 @@ export default function ReportPanel({
   webSourceState,
   degraded,
   degradationMessage,
+  diagnostics,
   excludedHistoryIds = [],
   onHistorySourceToggle,
   onRegenerate,
@@ -102,8 +105,12 @@ export default function ReportPanel({
   cacheStale = false,
 }: ReportPanelProps) {
   const [recommendations, setRecommendations] = useState<{ author: Source[]; topics: Source[] }>({ author: [], topics: [] });
+  const [showDiagnosticsDetail, setShowDiagnosticsDetail] = useState(false);
   const grouped = groupByType(report.references);
   const excludedSet = new Set(excludedHistoryIds);
+
+  const diagList = diagnostics ? Object.values(diagnostics) : [];
+  const degradedDiags = diagList.filter(d => !d.success || d.reason !== 'ok');
 
   useEffect(() => {
     if (!question || report.references.length === 0) return;
@@ -136,27 +143,74 @@ export default function ReportPanel({
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto border-r border-line bg-surface p-4 sm:p-6 space-y-6">
       <main className="min-w-0 flex-1 space-y-6">
-        {/* Source state badge */}
-        {overallState && (
-          <div className="flex items-center gap-2">
-            <span
-              data-testid="report-source-state"
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-medium border ${SOURCE_STATE_COLORS[overallState].bg} ${SOURCE_STATE_COLORS[overallState].text} ${SOURCE_STATE_COLORS[overallState].border}`}
-            >
+        {/* Source state badge & diagnostics pill */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          {overallState && (
+            <div className="flex items-center gap-2">
               <span
-                className={`w-1.5 h-1.5 rounded-full ${SOURCE_STATE_COLORS[overallState].dot}`}
-              />
-              {overallState === 'cache'
-                ? cacheBadgeText(cacheUpdatedAt, cacheStale)
-                : SOURCE_STATE_LABELS[overallState]}
-            </span>
-          </div>
-        )}
+                data-testid="report-source-state"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-medium border ${SOURCE_STATE_COLORS[overallState].bg} ${SOURCE_STATE_COLORS[overallState].text} ${SOURCE_STATE_COLORS[overallState].border}`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${SOURCE_STATE_COLORS[overallState].dot}`}
+                />
+                {overallState === 'cache'
+                  ? cacheBadgeText(cacheUpdatedAt, cacheStale)
+                  : SOURCE_STATE_LABELS[overallState]}
+              </span>
+            </div>
+          )}
 
-        {/* Degradation warning */}
-        {degraded && degradationMessage && (
-          <div className="p-3 bg-semantic-warning-light border border-semantic-warning/30 rounded-xl text-semantic-warning text-xs">
-            {degradationMessage}
+          {degradedDiags.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowDiagnosticsDetail(prev => !prev)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors cursor-pointer"
+            >
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>服务诊断 ({degradedDiags.length} 项降级)</span>
+              {showDiagnosticsDetail ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+          )}
+        </div>
+
+        {/* Degradation Diagnostics Box */}
+        {(degradedDiags.length > 0 || (degraded && degradationMessage)) && (
+          <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-2 text-xs">
+            <div className="flex items-start gap-2 text-amber-700 dark:text-amber-400 font-medium">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="space-y-1 min-w-0 flex-1">
+                <p className="font-semibold">接口状态与降级说明</p>
+                <p className="text-content-secondary leading-relaxed">
+                  {degradationMessage || '部分检索或AI服务触发限制，系统已自动通过内置知识库与备用策略生成完整研报。'}
+                </p>
+              </div>
+            </div>
+
+            {(showDiagnosticsDetail || degradedDiags.length > 0) && (
+              <div className="pt-2 border-t border-amber-500/20 space-y-1.5">
+                {degradedDiags.map((d, i) => (
+                  <div key={i} className="flex items-start justify-between gap-2 p-2 bg-surface rounded-lg border border-line text-[11px]">
+                    <div className="space-y-0.5">
+                      <span className="font-semibold text-content-primary">{d.serviceName}</span>
+                      <p className="text-content-secondary">{d.message}</p>
+                      {d.detail && <p className="text-[10px] text-content-tertiary font-mono">{d.detail}</p>}
+                    </div>
+                    <span
+                      className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${
+                        d.reason === 'daily_quota'
+                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                          : d.reason === 'rate_limit'
+                          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                          : 'bg-surface-subtle text-content-secondary'
+                      }`}
+                    >
+                      {d.reasonLabel}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

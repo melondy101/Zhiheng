@@ -9,7 +9,9 @@
 // the no-key environment makes the provider's live path impossible.
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { GET as hotlistGET } from '../../src/app/api/hotlist/route';
+import { GET as rawHotlistGET } from '../../src/app/api/hotlist/route';
+
+const hotlistGET = (req?: Request) => rawHotlistGET(req ?? new Request('http://localhost:3000/api/hotlist'));
 import {
   defaultHotlistRouteDependencies,
   getHotlistRouteDependencies,
@@ -218,5 +220,36 @@ describe('GET /api/hotlist wiring (ticket T1)', () => {
     assert.ok(provider, 'the provider is built from the composed dependencies');
     assert.strictEqual(result.source, 'cache');
     assert.deepStrictEqual(result.items, items);
+  });
+
+  it('h. manual refresh (?refresh=true) forces fresh load and rate limits after 10 requests', async () => {
+    let forceCalled = false;
+    setHotlistRouteDependencies({
+      createSnapshotStore: async () => new FakeSnapshotStore(null),
+      createProvider: () => ({
+        fetchHotlist: async (opts?: { force?: boolean }) => {
+          if (opts?.force) forceCalled = true;
+          return { items: [hotItem('强制刷新条目')], source: 'live' as const, updatedAt: Date.now() };
+        },
+      } as unknown as LiveHotlistProvider),
+    });
+
+    const req = new Request('http://localhost:3000/api/hotlist?refresh=true', {
+      headers: { 'x-zhiyan-owner-id': 'test_rate_owner' },
+    });
+
+    // Up to 10 requests allowed
+    for (let i = 1; i <= 10; i++) {
+      const res = await hotlistGET(req);
+      assert.strictEqual(res.status, 200, `Request #${i} should succeed with 200`);
+    }
+    assert.strictEqual(forceCalled, true);
+
+    // 11th request returns 429
+    const blockedRes = await hotlistGET(req);
+    assert.strictEqual(blockedRes.status, 429, '11th manual refresh should return 429');
+    const blockedBody = (await blockedRes.json()) as { error: string; message: string; allowed: boolean };
+    assert.strictEqual(blockedBody.error, 'RATE_LIMIT_EXCEEDED');
+    assert.strictEqual(blockedBody.allowed, false);
   });
 });

@@ -8,6 +8,7 @@ import { defaultKnowledgeBaseProvider } from '@/lib/knowledge-base';
 import { buildReport } from '@/lib/report-builder';
 import { safeBuildGraphAsync, safeBuildGraph } from '@/lib/knowledge-graph';
 import { graphLlmProvider, llmProvider } from '@/lib/server-providers';
+import { classifyLLMError, classifyZhihuError, type ServiceDiagnostic } from '@/lib/service-diagnostics';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -164,7 +165,7 @@ export async function POST(request: Request) {
       llmProviderType: llmProvider.constructor.name,
     });
     const synthesisStartedAt = Date.now();
-    const { report, progress } = await buildReport({
+    const { report, progress, synthesisDiagnostic } = await buildReport({
       question,
       zhihuSources: zhihuResult.sources,
       webSources: webResult.sources,
@@ -175,18 +176,24 @@ export async function POST(request: Request) {
       llmProvider,
     });
     const synthesisDurationMs = Date.now() - synthesisStartedAt;
-    console.log('[report] Report synthesis completed:', {
-      durationMs: synthesisDurationMs,
-      hasSynthesis: Boolean(report.synthesis),
-    });
 
     // #24: attach sourceState for KG provenance so the view can show truthful
     // source provenance even for graphs restored from a stored session.
     let knowledgeGraph;
+    let graphDiagnostic: ServiceDiagnostic | undefined;
     try {
       const graphStartedAt = Date.now();
       const raw = await safeBuildGraphAsync(report, report.references, graphLlmProvider);
       knowledgeGraph = { ...raw, sourceState };
+      graphDiagnostic = {
+        service: 'ai_graph',
+        serviceName: 'AI 知识图谱生成',
+        success: !raw.isFallback,
+        reason: raw.isFallback ? 'other' : 'ok',
+        reasonLabel: raw.isFallback ? '降级静态提取' : '正常',
+        message: raw.isFallback ? '知识图谱使用基于规则的实体提取' : 'AI 知识图谱推理构建成功',
+        timestamp: Date.now(),
+      };
       console.log('[report] Knowledge graph completed:', {
         durationMs: Date.now() - graphStartedAt,
         isFallback: raw.isFallback,
@@ -197,7 +204,44 @@ export async function POST(request: Request) {
       console.warn('[report] Knowledge graph async failed, degrading to safe graph:', error instanceof Error ? error.message : String(error));
       const raw = safeBuildGraph(report, report.references);
       knowledgeGraph = { ...raw, sourceState };
+      graphDiagnostic = classifyLLMError('ai_graph', error);
     }
+
+    const effectiveSynthesisDiag = synthesisDiagnostic ?? {
+      service: 'ai_synthesis',
+      serviceName: 'AI 研报多观点提炼',
+      success: Boolean(report.synthesis),
+      reason: report.synthesis ? 'ok' : 'unconfigured',
+      reasonLabel: report.synthesis ? '正常' : '未配置秘钥',
+      message: report.synthesis ? 'AI 综合观点提炼成功' : '未生成 AI 观点',
+      timestamp: Date.now(),
+    };
+
+    const diagnostics = {
+      zhihuSearch: zhihuResult.diagnostic ?? classifyZhihuError('zhihu_search', null),
+      webSearch: webResult.diagnostic ?? classifyZhihuError('global_search', null),
+      aiSynthesis: effectiveSynthesisDiag,
+      aiGraph: graphDiagnostic,
+    };
+
+    // Print clear structured diagnostic logs in backend console as requested
+    console.log('================== [REPORT SERVICE DIAGNOSTICS] ==================');
+    console.log(`[report:diagnostics] 议题: "${question}"`);
+    console.log(
+      `[report:diagnostics] 1. 知乎内容检索 (Zhihu Search): [${diagnostics.zhihuSearch.reasonLabel}] - ${diagnostics.zhihuSearch.message} (获取到 ${zhihuResult.sources.length} 条材料, 数据源: ${zhihuResult.source})`
+    );
+    console.log(
+      `[report:diagnostics] 2. 全网内容检索 (Global Search): [${diagnostics.webSearch.reasonLabel}] - ${diagnostics.webSearch.message} (获取到 ${webResult.sources.length} 条材料, 数据源: ${webResult.source})`
+    );
+    console.log(
+      `[report:diagnostics] 3. AI 观点提炼 (AI Synthesis): [${diagnostics.aiSynthesis.reasonLabel}] - ${diagnostics.aiSynthesis.message}`
+    );
+    if (diagnostics.aiGraph) {
+      console.log(
+        `[report:diagnostics] 4. AI 知识图谱 (AI Graph): [${diagnostics.aiGraph.reasonLabel}] - ${diagnostics.aiGraph.message}`
+      );
+    }
+    console.log('===================================================================');
 
     // Ticket #15: persist the full initial session state (including the user's
     // initial opinion and the knowledge graph) so the interrogation API returns
@@ -250,20 +294,13 @@ export async function POST(request: Request) {
       webSourceState: p.webSourceState ?? webSourceState,
     }));
 
-    console.log('[report] Final report summary:', {
-      title: report.title,
-      knowledgePointsCount: report.knowledgePoints.length,
-      viewpointsCount: report.viewpoints.length,
-      referencesCount: report.references.length,
-      hasSynthesis: !!report.synthesis,
-      sourceState,
-    });
     return NextResponse.json({
       sessionId: session.id,
       report,
       progress: enrichedProgress,
       sourceState,
       knowledgeGraph,
+      diagnostics,
       saved,
       storage: storageSignal,
       timings: {
@@ -273,10 +310,15 @@ export async function POST(request: Request) {
       },
     });
   } catch (fatalErr) {
-    console.error('[report] Fatal error in report generation:', fatalErr);
+    const fatalDiag = classifyLLMError('ai_synthesis', fatalErr);
+    console.error('[report:fatal_error] Fatal error in report generation:', fatalErr);
+    console.error(`[report:fatal_error] Classified diagnostic: reason=${fatalDiag.reason}, message=${fatalDiag.message}`);
     return NextResponse.json(
       {
-        error: '研报生成异常，请稍后重试',
+        error: fatalDiag.message || '研报生成异常，请稍后重试',
+        reason: fatalDiag.reason,
+        reasonLabel: fatalDiag.reasonLabel,
+        diagnostic: fatalDiag,
         detail: fatalErr instanceof Error ? fatalErr.message : String(fatalErr),
       },
       { status: 500 }

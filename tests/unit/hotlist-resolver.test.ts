@@ -11,7 +11,9 @@ import {
   getHotlistRouteDependencies,
   setHotlistRouteDependencies,
 } from '../../src/lib/hotlist-route-wiring';
-import { GET as hotlistGET } from '../../src/app/api/hotlist/route';
+import { GET as rawHotlistGET } from '../../src/app/api/hotlist/route';
+
+const hotlistGET = (req?: Request) => rawHotlistGET(req ?? new Request('http://localhost:3000/api/hotlist'));
 import type { HotlistSnapshot, HotlistSnapshotStore } from '../../src/lib/db/hotlist-snapshot-store';
 import type { LiveHotlistProvider } from '../../src/lib/zhihu-retrieval';
 import type { HotlistItem } from '../../src/lib/hotlist-providers';

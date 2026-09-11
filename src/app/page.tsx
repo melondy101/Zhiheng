@@ -32,6 +32,7 @@ import SessionFeedbackCue from './components/SessionFeedbackCue';
 import { deriveFeedbackCueState } from '@/lib/feedback-cue-state';
 import UserNav from './components/UserNav';
 import ThemeToggle from './components/ThemeToggle';
+import type { ServiceDiagnostic } from '@/lib/service-diagnostics';
 
 const retrievalProvider = new FixtureRetrievalProvider();
 const storageProvider = new BrowserStorageProvider();
@@ -139,10 +140,17 @@ async function fetchServerSession(sessionId: string): Promise<Session | null> {
 async function reportApiError(response: Response): Promise<Error> {
   const fallback = `生成报告失败（HTTP ${response.status}）`;
   try {
-    const body = await response.json() as { error?: unknown; detail?: unknown };
-    const message = typeof body.error === 'string' ? body.error : fallback;
-    const detail = typeof body.detail === 'string' ? body.detail : '';
-    return new Error(detail ? `${message}：${detail}` : message);
+    const body = (await response.json()) as {
+      error?: unknown;
+      reason?: string;
+      reasonLabel?: string;
+      message?: string;
+      detail?: unknown;
+    };
+    const prefix = body.reasonLabel ? `[${body.reasonLabel}] ` : '';
+    const message = typeof body.message === 'string' ? body.message : typeof body.error === 'string' ? body.error : fallback;
+    const detail = typeof body.detail === 'string' && body.detail ? ` (${body.detail})` : '';
+    return new Error(`${prefix}${message}${detail}`);
   } catch {
     return new Error(fallback);
   }
@@ -368,6 +376,7 @@ export default function Home() {
   const [hotlistLoading, setHotlistLoading] = useState(true);
   // #18: honest live/cache/demo disclosure for the report panel.
   const [reportSourceState, setReportSourceState] = useState<ReportSourceState | null>(null);
+  const [reportDiagnostics, setReportDiagnostics] = useState<Record<string, ServiceDiagnostic> | null>(null);
   // #23: IDs of personal_history sources excluded by the user for the current report.
   const [excludedHistoryIds, setExcludedHistoryIds] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -423,7 +432,7 @@ export default function Home() {
       });
       if (!res.ok) throw await reportApiError(res);
 
-      const { sessionId, report, knowledgeGraph, sourceState, saved, storage } = (await res.json()) as {
+      const { sessionId, report, knowledgeGraph, sourceState, saved, storage, diagnostics } = (await res.json()) as {
         sessionId: string;
         report: Report;
         progress: { stage: string; message: string; timestamp: number }[];
@@ -431,6 +440,7 @@ export default function Home() {
         sourceState?: ReportSourceState;
         saved?: boolean;
         storage?: 'memory' | 'postgres' | 'unavailable';
+        diagnostics?: Record<string, ServiceDiagnostic>;
       };
 
       setStorageNotice(
@@ -439,6 +449,9 @@ export default function Home() {
       if (sourceState) {
         setReportSourceState(sourceState);
         saveReportSourceState(sessionId, sourceState);
+      }
+      if (diagnostics) {
+        setReportDiagnostics(diagnostics);
       }
 
       const newSession: Session = {
@@ -671,12 +684,71 @@ export default function Home() {
     void restore();
   }, []);
 
-  // Fetch hotlist on mount
+  // Fetch hotlist on mount & refresh support
+  const handleRefreshHotlist = useCallback(async (force = false) => {
+    try {
+      const url = force ? '/api/hotlist?refresh=true' : '/api/hotlist';
+      const res = await fetch(url, { headers: ownerHeaders() });
+      if (res.status === 429) {
+        const body = (await res.json().catch(() => ({}))) as {
+          message?: string;
+          reason?: string;
+          reasonLabel?: string;
+          detail?: string;
+        };
+        return {
+          ok: false,
+          limitExceeded: true,
+          reason: body.reason || 'rate_limit',
+          reasonLabel: body.reasonLabel || '达到频率限制 (Rate Limit)',
+          message: body.message || '已达到手动刷新上限，请等待下一个整点自动刷新。',
+          detail: body.detail,
+        };
+      }
+      if (res.ok) {
+        const data = await res.json();
+        setHotlist(data);
+        if (force && data.refreshError) {
+          return {
+            ok: false,
+            refreshError: data.refreshError,
+            reason: data.refreshError.reason,
+            reasonLabel: data.refreshError.reasonLabel,
+            message: data.refreshError.message,
+            detail: data.refreshError.detail,
+          };
+        }
+        return { ok: true };
+      }
+      const errBody = (await res.json().catch(() => ({}))) as {
+        reason?: string;
+        reasonLabel?: string;
+        message?: string;
+        detail?: string;
+      };
+      return {
+        ok: false,
+        reason: errBody.reason || 'server_error',
+        reasonLabel: errBody.reasonLabel || '服务异常',
+        message: errBody.message || '请求知乎热榜接口失败',
+        detail: errBody.detail,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        reason: 'other',
+        reasonLabel: '网络异常',
+        message: '网络连接异常，未能更新知乎热榜',
+        detail: String(err),
+      };
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/hotlist');
+        const res = await fetch('/api/hotlist', { headers: ownerHeaders() });
         if (!cancelled && res.ok) {
           const data = await res.json();
           setHotlist(data);
@@ -727,7 +799,7 @@ export default function Home() {
 
       if (!res.ok) throw await reportApiError(res);
 
-      const { sessionId, report, knowledgeGraph, sourceState, saved, storage } = (await res.json()) as {
+      const { sessionId, report, knowledgeGraph, sourceState, saved, storage, diagnostics } = (await res.json()) as {
         sessionId: string;
         report: Report;
         progress: { stage: string; message: string; timestamp: number }[];
@@ -735,6 +807,7 @@ export default function Home() {
         sourceState?: ReportSourceState;
         saved?: boolean;
         storage?: 'memory' | 'postgres' | 'unavailable';
+        diagnostics?: Record<string, ServiceDiagnostic>;
       };
 
       // #21: honest storage disclosure. saved === false (or an explicit
@@ -751,6 +824,12 @@ export default function Home() {
         saveReportSourceState(sessionId, sourceState);
       } else {
         setReportSourceState(null);
+      }
+
+      if (diagnostics) {
+        setReportDiagnostics(diagnostics);
+      } else {
+        setReportDiagnostics(null);
       }
 
       const newSession: Session = {
@@ -956,6 +1035,7 @@ export default function Home() {
         errorMessage={startError}
         recentSessions={recentSessions}
         onResumeSession={handleResumeSession}
+        onRefreshHotlist={handleRefreshHotlist}
       />
     );
   }
@@ -1012,6 +1092,7 @@ export default function Home() {
           question={session?.question}
           zhihuSourceState={reportSourceState?.zhihu}
           webSourceState={reportSourceState?.web}
+          diagnostics={reportDiagnostics}
           cacheUpdatedAt={cacheUpdatedAt}
           cacheStale={cacheStale}
           knowledgeGraph={session?.knowledgeGraph ?? null}

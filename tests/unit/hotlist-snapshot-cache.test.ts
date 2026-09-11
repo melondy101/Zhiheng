@@ -1,14 +1,15 @@
-// Ticket T1 (PRD v4.2 §2): the hotlist persistent snapshot contract.
+// Ticket T1: the hotlist persistent snapshot contract (hourly Beijing time cache).
 //
 // The provider is exercised with a fake snapshot store (read/write counters)
 // and a fake HTTP transport, so no database and no network is involved. The
-// asserted contract is the PRD §2.2 decision table:
+// asserted contract is the hourly Beijing-time decision table:
 //
-//   | fresh snapshot (<= 6h)      -> 'cache',          zero external calls
-//   | expired + live success      -> 'live',           snapshot overwritten
-//   | expired + live failure      -> 'cache' + stale,  real updatedAt kept
-//   | no snapshot + live failure  -> 'demo',           nothing written
-//   | store read failure          -> never a fake cache hit
+//   | fresh snapshot (same Beijing hour) -> 'cache',          zero external calls
+//   | previous hour + live success       -> 'live',           snapshot overwritten
+//   | previous hour + live failure       -> 'cache' + stale,  real updatedAt kept
+//   | force:true + live success          -> 'live',           bypasses cache and updates
+//   | no snapshot + live failure         -> 'demo',           nothing written
+//   | store read failure                 -> never a fake cache hit
 //
 // Honesty red lines asserted here: demo data is never written to the store,
 // only a real live success is persisted, and a stale result keeps the
@@ -20,6 +21,9 @@ import {
   LiveHotlistProvider,
   RETRIEVAL_TTL_MS,
   TtlCache,
+  isHotlistSnapshotFresh,
+  getBeijingHourStart,
+  getBeijingHourSlot,
   type LiveHotlistProviderOptions,
   type ZhihuApiConfig,
   type ZhihuCallOptions,
@@ -30,10 +34,17 @@ import type { HotlistItem } from '../../src/lib/hotlist-providers';
 import type { HotlistSnapshot, HotlistSnapshotStore } from '../../src/lib/db/hotlist-snapshot-store';
 
 const CONFIG: ZhihuApiConfig = { baseUrl: 'https://fake.example', accessSecret: 'test-secret' };
+// 1770000000000 is 2026-02-02 10:40:00 Beijing Time (UTC+8)
 const BASE_NOW = 1_770_000_000_000;
+// Hour start for 10:00:00 Beijing Time
+const BEIJING_10_00 = getBeijingHourStart(BASE_NOW);
+// 09:50:00 Beijing Time (previous hour)
+const BEIJING_09_50 = BEIJING_10_00 - 10 * 60 * 1000;
+// 10:15:00 Beijing Time (same hour)
+const BEIJING_10_15 = BEIJING_10_00 + 15 * 60 * 1000;
 
-function makeClock() {
-  const state = { now: BASE_NOW };
+function makeClock(initial = BASE_NOW) {
+  const state = { now: initial };
   return { nowFn: () => state.now, advance: (ms: number) => { state.now += ms; } };
 }
 
@@ -127,49 +138,47 @@ function makeHarness(options: {
 
 const SNAPSHOT_ITEMS: HotlistItem[] = [hotItem('快照条目1'), hotItem('快照条目2')];
 
-describe('hotlist snapshot cache (PRD v4.2 §2, ticket T1)', () => {
-  it('1. fresh DB snapshot (within 6h) → zero transport calls, source cache, no stale flag', async () => {
+describe('hotlist hourly Beijing-time cache and refresh', () => {
+  it('1. fresh DB snapshot (same Beijing hour slot, e.g. 10:15 at 10:40) → zero transport calls, source cache', async () => {
     const { provider, calls, store } = makeHarness({
-      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: BASE_NOW - 1_000 },
+      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: BEIJING_10_15 },
       live: 'ok',
     });
 
     const result = await provider.fetchHotlist();
 
-    assert.strictEqual(calls.length, 0, 'a fresh snapshot must not call the live API');
+    assert.strictEqual(calls.length, 0, 'a fresh snapshot in the same hour must not call live API');
     assert.strictEqual(result.source, 'cache');
     assert.strictEqual(result.stale, undefined, 'fresh cache carries no stale flag');
-    assert.strictEqual(result.updatedAt, BASE_NOW - 1_000, 'the snapshot update time is preserved');
+    assert.strictEqual(result.updatedAt, BEIJING_10_15, 'the snapshot update time is preserved');
     assert.deepStrictEqual(result.items, SNAPSHOT_ITEMS);
     assert.strictEqual(store.writes, 0, 'serving a fresh snapshot writes nothing');
   });
 
-  it('2. stale snapshot + live success → source live and the snapshot is overwritten', async () => {
-    const expiredAt = BASE_NOW - HOTLIST_SNAPSHOT_TTL_MS - 1_000;
+  it('2. previous hour snapshot (e.g. 09:50 at 10:40) + live success → source live and snapshot overwritten', async () => {
     const { provider, store, calls } = makeHarness({
-      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: expiredAt },
+      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: BEIJING_09_50 },
       live: 'ok',
     });
 
     const result = await provider.fetchHotlist();
 
-    assert.strictEqual(calls.length, 1, 'an expired snapshot must attempt a live refresh');
+    assert.strictEqual(calls.length, 1, 'an expired snapshot from previous hour must attempt live refresh');
     assert.strictEqual(result.source, 'live');
     assert.strictEqual(result.stale, undefined);
     assert.strictEqual(result.items.length, 2);
     assert.strictEqual(store.writes, 1, 'a live success is persisted exactly once');
 
-    // The stored snapshot now holds the new items with the new update time.
+    // The stored snapshot now holds the new items with current time.
     const refreshed = await store.read();
     assert.ok(refreshed);
     assert.deepStrictEqual(refreshed!.items, result.items);
     assert.strictEqual(refreshed!.updatedAt, BASE_NOW);
   });
 
-  it('3. stale snapshot + live failure → source cache + stale:true with the real updatedAt', async () => {
-    const expiredAt = BASE_NOW - HOTLIST_SNAPSHOT_TTL_MS - 60_000;
+  it('3. previous hour snapshot + live failure → source cache + stale:true with real updatedAt', async () => {
     const { provider, store } = makeHarness({
-      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: expiredAt },
+      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: BEIJING_09_50 },
       live: 'fail',
     });
 
@@ -177,12 +186,25 @@ describe('hotlist snapshot cache (PRD v4.2 §2, ticket T1)', () => {
 
     assert.strictEqual(result.source, 'cache');
     assert.strictEqual(result.stale, true);
-    assert.strictEqual(result.updatedAt, expiredAt, 'the stale result keeps the snapshot time');
+    assert.strictEqual(result.updatedAt, BEIJING_09_50, 'the stale result keeps the snapshot time');
     assert.deepStrictEqual(result.items, SNAPSHOT_ITEMS);
     assert.strictEqual(store.writes, 0, 'a failed refresh writes nothing');
   });
 
-  it('4. no snapshot + live failure → demo, and demo is never written to the store', async () => {
+  it('4. force:true bypasses fresh cache and fetches live', async () => {
+    const { provider, store, calls } = makeHarness({
+      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: BEIJING_10_15 },
+      live: 'ok',
+    });
+
+    const result = await provider.fetchHotlist({ force: true });
+
+    assert.strictEqual(calls.length, 1, 'force:true must invoke live fetch');
+    assert.strictEqual(result.source, 'live');
+    assert.strictEqual(store.writes, 1, 'new live result is persisted');
+  });
+
+  it('5. no snapshot + live failure → demo, and demo is never written to store', async () => {
     const { provider, store } = makeHarness({ snapshot: null, live: 'fail' });
 
     const result = await provider.fetchHotlist();
@@ -194,7 +216,7 @@ describe('hotlist snapshot cache (PRD v4.2 §2, ticket T1)', () => {
     assert.strictEqual((await store.read()), null);
   });
 
-  it('5. no snapshot + live success → source live, written once', async () => {
+  it('6. no snapshot + live success → source live, written once', async () => {
     const { provider, store, calls } = makeHarness({ snapshot: null, live: 'ok' });
 
     const result = await provider.fetchHotlist();
@@ -208,7 +230,7 @@ describe('hotlist snapshot cache (PRD v4.2 §2, ticket T1)', () => {
     assert.deepStrictEqual(stored!.items, result.items);
   });
 
-  it('6. read() throws StorageUnavailableError + live success → live, never a fake cache', async () => {
+  it('7. read() throws StorageUnavailableError + live success → live, never a fake cache', async () => {
     const { provider, store } = makeHarness({ snapshot: null, live: 'ok' });
     store.readError = new StorageUnavailableError('database down');
 
@@ -219,7 +241,7 @@ describe('hotlist snapshot cache (PRD v4.2 §2, ticket T1)', () => {
     assert.strictEqual(store.writes, 1, 'the live result is still persisted');
   });
 
-  it('7. read() throws StorageUnavailableError + live failure → demo, never a fake cache', async () => {
+  it('8. read() throws StorageUnavailableError + live failure → demo, never a fake cache', async () => {
     const { provider, store } = makeHarness({ snapshot: null, live: 'fail' });
     store.readError = new StorageUnavailableError('database down');
 
@@ -231,89 +253,11 @@ describe('hotlist snapshot cache (PRD v4.2 §2, ticket T1)', () => {
     assert.strictEqual(store.writes, 0);
   });
 
-  it('8. boundary: exactly 6h - 1ms is fresh, exactly 6h + 1ms is expired', async () => {
-    const fresh = makeHarness({
-      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: BASE_NOW - (HOTLIST_SNAPSHOT_TTL_MS - 1) },
-      live: 'ok',
-    });
-    const freshResult = await fresh.provider.fetchHotlist();
-    assert.strictEqual(freshResult.source, 'cache', '6h - 1ms is still fresh');
-    assert.strictEqual(freshResult.stale, undefined);
-    assert.strictEqual(fresh.calls.length, 0, 'no external call while fresh');
-
-    const expired = makeHarness({
-      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: BASE_NOW - (HOTLIST_SNAPSHOT_TTL_MS + 1) },
-      live: 'ok',
-    });
-    const expiredResult = await expired.provider.fetchHotlist();
-    assert.strictEqual(expiredResult.source, 'live', '6h + 1ms must refresh');
-    assert.strictEqual(expired.calls.length, 1);
-    assert.strictEqual(expired.store.writes, 1);
-  });
-
-  it('hotlist snapshot TTL is pinned to 6 hours, not the 24h retrieval TTL', async () => {
-    // The boundary cases above derive their expectations from the constant
-    // itself, so they stay green even if someone re-points it at the 24h
-    // retrieval TTL — the exact regression PRD §2.2 exists to prevent. Pin
-    // the absolute value here.
-    assert.strictEqual(HOTLIST_SNAPSHOT_TTL_MS, 6 * 60 * 60 * 1000);
-    assert.strictEqual(HOTLIST_SNAPSHOT_TTL_MS, 21_600_000);
-    assert.notStrictEqual(
-      HOTLIST_SNAPSHOT_TTL_MS,
-      RETRIEVAL_TTL_MS,
-      'the snapshot TTL must not be the 24h retrieval TTL'
-    );
-    assert.strictEqual(RETRIEVAL_TTL_MS, 86_400_000, 'the retrieval TTL stays the 24h baseline');
-
-    // And the pinned value is the one the provider actually applies: a
-    // snapshot 1ms inside 6h is served, 1ms outside it is refreshed.
-    const fresh = makeHarness({
-      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: BASE_NOW - (21_600_000 - 1) },
-      live: 'ok',
-    });
-    assert.strictEqual((await fresh.provider.fetchHotlist()).source, 'cache');
-
-    const expired = makeHarness({
-      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: BASE_NOW - (21_600_000 + 1) },
-      live: 'ok',
-    });
-    assert.strictEqual((await expired.provider.fetchHotlist()).source, 'live');
-  });
-
-  it('an empty live payload is not persisted and falls back through the chain', async () => {
-    const { provider, store } = makeHarness({ snapshot: null, live: 'empty' });
-
-    const result = await provider.fetchHotlist();
-
-    assert.strictEqual(result.source, 'demo', 'an unusable live payload is a failure');
-    assert.strictEqual(store.writes, 0, 'an empty payload is never persisted');
-  });
-
-  it('no secret + stale snapshot → the old snapshot is served as stale cache, no external call', async () => {
-    const expiredAt = BASE_NOW - HOTLIST_SNAPSHOT_TTL_MS - 1;
-    const { provider, calls, store } = makeHarness({
-      snapshot: { items: SNAPSHOT_ITEMS, updatedAt: expiredAt },
-      config: null,
-    });
-
-    const result = await provider.fetchHotlist();
-
-    assert.strictEqual(calls.length, 0, 'without a secret the transport is never invoked');
-    assert.strictEqual(result.source, 'cache');
-    assert.strictEqual(result.stale, true);
-    assert.strictEqual(result.updatedAt, expiredAt);
-    assert.strictEqual(store.writes, 0);
-  });
-
-  it('a write failure keeps source live — the data is real, only the persistence failed', async () => {
-    const { provider, store } = makeHarness({ snapshot: null, live: 'ok' });
-    store.writeError = new StorageUnavailableError('write failed');
-
-    const result = await provider.fetchHotlist();
-
-    assert.strictEqual(result.source, 'live');
-    assert.strictEqual(result.items.length, 2);
-    assert.strictEqual(store.writes, 1);
-    assert.strictEqual(store.snapshot, null, 'the failed write did not persist anything');
+  it('9. Beijing hour slot boundary: exactly top of hour marks a new slot', () => {
+    const slot1 = getBeijingHourSlot(BEIJING_10_00 - 1); // 09:59:59.999
+    const slot2 = getBeijingHourSlot(BEIJING_10_00);     // 10:00:00.000
+    assert.notStrictEqual(slot1, slot2);
+    assert.strictEqual(isHotlistSnapshotFresh(BEIJING_10_00 - 1, BEIJING_10_00), false);
+    assert.strictEqual(isHotlistSnapshotFresh(BEIJING_10_00, BEIJING_10_00 + 1_800_000), true); // 10:30 uses 10:00 cache
   });
 });

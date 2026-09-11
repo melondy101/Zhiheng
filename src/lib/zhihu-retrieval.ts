@@ -30,6 +30,15 @@ import type { HotlistItem } from './hotlist-providers';
 import type { HotlistSnapshot, HotlistSnapshotStore } from './db/hotlist-snapshot-store';
 import { logStartupPath } from './startup-log';
 import { logRequest, maskSensitiveHeaders, nowMs, previewBody, redactQuery } from './request-log';
+import {
+  isHotlistSnapshotFresh,
+  getBeijingHourSlot,
+  getBeijingHourStart,
+  getNextBeijingHourStart,
+  BEIJING_TIMEZONE_OFFSET_MS,
+  ONE_HOUR_MS,
+} from './hotlist-refresh-limiter';
+import { classifyZhihuError, type ServiceDiagnostic } from './service-diagnostics';
 
 // Log environment configuration on module load (once).
 logStartupPath();
@@ -37,9 +46,19 @@ logStartupPath();
 export const DEFAULT_ZHIHU_API_BASE_URL = 'https://developer.zhihu.com';
 export const RETRIEVAL_TTL_MS = 86_400_000; // 24 hours
 export const DEFAULT_LIVE_TIMEOUT_MS = 5_000;
-/** PRD v4.2 §2: the persisted hotlist snapshot is trusted for 6 hours. */
-export const HOTLIST_SNAPSHOT_TTL_MS = 6 * 60 * 60 * 1000;
+/** Hotlist hourly cache TTL: refreshed at the top of every hour (Beijing time). */
+export const HOTLIST_SNAPSHOT_TTL_MS = ONE_HOUR_MS;
 
+export {
+  isHotlistSnapshotFresh,
+  getBeijingHourSlot,
+  getBeijingHourStart,
+  getNextBeijingHourStart,
+  BEIJING_TIMEZONE_OFFSET_MS,
+  ONE_HOUR_MS,
+};
+
+export type { ServiceDiagnostic };
 export type RetrievalKind = 'zhihu_search' | 'global_search' | 'hot_list';
 
 // ---------------------------------------------------------------------------
@@ -259,6 +278,7 @@ export interface DegradedResult<T> {
   source: SourceState;
   stale?: boolean;
   updatedAt: number;
+  diagnostic?: ServiceDiagnostic;
 }
 
 interface DegradedCall<T> {
@@ -276,6 +296,7 @@ interface DegradedCall<T> {
 
 async function retrieveWithDegradation<T>(call: DegradedCall<T>): Promise<DegradedResult<T>> {
   const cached = call.cache.get(call.kind, call.query);
+  let liveError: unknown = null;
 
   // 1. live — always attempted when a secret is configured; fresh cache is a
   //     fallback used only after live has failed (never a default path).
@@ -284,10 +305,17 @@ async function retrieveWithDegradation<T>(call: DegradedCall<T>): Promise<Degrad
       const live = await call.fetchLive();
       if (call.isUsable(live)) {
         call.cache.set(call.kind, call.query, live);
-        return { value: live, source: 'live', updatedAt: call.now() };
+        return {
+          value: live,
+          source: 'live',
+          updatedAt: call.now(),
+          diagnostic: classifyZhihuError(call.kind as any, null),
+        };
       }
       // Unusable live payload — treated like any other external failure.
+      liveError = new Error('Zhihu API returned empty or unusable records');
     } catch (err) {
+      liveError = err;
       // #19 honest degradation: surface the real failure so we never silently
       // claim 'live' succeeded. Operators need to see 401/timeout/parse errors.
       console.warn(
@@ -295,7 +323,11 @@ async function retrieveWithDegradation<T>(call: DegradedCall<T>): Promise<Degrad
         err instanceof Error ? err.message : String(err)
       );
     }
+  } else if (!call.config) {
+    liveError = new Error('Zhihu API is not configured (ZHIHU_ACCESS_SECRET is missing)');
   }
+
+  const diagnostic = liveError ? classifyZhihuError(call.kind as any, liveError) : undefined;
 
   // 2. fresh or stale cache — updatedAt is preserved for honest display.
   if (cached) {
@@ -304,6 +336,7 @@ async function retrieveWithDegradation<T>(call: DegradedCall<T>): Promise<Degrad
       source: 'cache',
       stale: cached.stale ?? false,
       updatedAt: cached.updatedAt,
+      diagnostic,
     };
   }
 
@@ -312,9 +345,9 @@ async function retrieveWithDegradation<T>(call: DegradedCall<T>): Promise<Degrad
   // valid while citing placeholder URLs. Demo is reserved for unconfigured
   // local development only.
   if (call.config && call.allowDemoFallback !== true) {
-    return { value: [] as T, source: 'unavailable', updatedAt: call.now() };
+    return { value: [] as T, source: 'unavailable', updatedAt: call.now(), diagnostic };
   }
-  return { value: call.demo(), source: 'demo', updatedAt: call.now() };
+  return { value: call.demo(), source: 'demo', updatedAt: call.now(), diagnostic };
 }
 
 // ---------------------------------------------------------------------------
@@ -489,6 +522,7 @@ export interface RetrievalResult {
   source: SourceState;
   stale?: boolean;
   updatedAt: number;
+  diagnostic?: ServiceDiagnostic;
 }
 
 export interface LiveSearchProviderOptions {
@@ -565,6 +599,7 @@ export class LiveSearchProvider {
       source: outcome.source,
       ...(outcome.stale !== undefined ? { stale: outcome.stale } : {}),
       updatedAt: outcome.updatedAt,
+      diagnostic: outcome.diagnostic,
     };
   }
 }
@@ -578,6 +613,8 @@ export interface RetrievalHotlistResult {
   source: SourceState;
   stale?: boolean;
   updatedAt: number;
+  refreshError?: ServiceDiagnostic;
+  diagnostic?: ServiceDiagnostic;
 }
 
 export interface LiveHotlistProviderOptions {
@@ -635,34 +672,51 @@ export class LiveHotlistProvider {
   }
 
   /** Fetch the hotlist with the full degradation chain; never throws. */
-  async fetchHotlist(): Promise<RetrievalHotlistResult> {
+  async fetchHotlist(options?: { force?: boolean }): Promise<RetrievalHotlistResult> {
     // Two deliberate paths: with a persistent snapshot store the hotlist is
-    // cache-first (PRD v4.2 §2.2); without one (search, legacy hotlist tests)
+    // cache-first (hourly on-the-hour Beijing time); without one (search, legacy hotlist tests)
     // the #22 live-first chain stays untouched.
     if (this.snapshotStore) {
-      return this.fetchHotlistFromSnapshot(this.snapshotStore);
+      return this.fetchHotlistFromSnapshot(this.snapshotStore, options);
     }
     // No persistent DB snapshot: never use the in-memory TtlCache and never
     // claim source='cache'. Every request is a fresh live attempt (when a
     // secret is configured) or an honest demo fallback.
-    try {
-      const items = await this.fetchLiveItems();
-      return { items, source: 'live', updatedAt: this.now() };
-    } catch (err) {
-      // #19 honest degradation: surface the real failure so we never silently
-      // claim 'live' succeeded. Operators need to see 401/timeout/parse errors.
-      console.warn(
-        `[zhihu-retrieval] live hotlist failed — degrading to demo:`,
-        err instanceof Error ? err.message : String(err)
-      );
+    let liveError: unknown = null;
+    if (this.config) {
+      try {
+        const items = await this.fetchLiveItems();
+        return {
+          items,
+          source: 'live',
+          updatedAt: this.now(),
+          diagnostic: classifyZhihuError('zhihu_hotlist', null),
+        };
+      } catch (err) {
+        liveError = err;
+        // #19 honest degradation: surface the real failure so we never silently
+        // claim 'live' succeeded. Operators need to see 401/timeout/parse errors.
+        console.warn(
+          `[zhihu-retrieval] live hotlist failed — degrading to demo:`,
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    } else {
+      liveError = new Error('Zhihu API is not configured (ZHIHU_ACCESS_SECRET is missing)');
     }
+
+    const diagnostic = classifyZhihuError('zhihu_hotlist', liveError);
+    const refreshError = options?.force ? diagnostic : undefined;
+
     if (this.config && !this.allowDemoFallback) {
-      return { items: [], source: 'unavailable', updatedAt: this.now() };
+      return { items: [], source: 'unavailable', updatedAt: this.now(), refreshError, diagnostic };
     }
     return {
       items: DEMO_HOTLIST_ITEMS.map((item) => ({ ...item })),
       source: 'demo',
       updatedAt: this.now(),
+      refreshError,
+      diagnostic,
     };
   }
 
@@ -685,34 +739,46 @@ export class LiveHotlistProvider {
   }
 
   /**
-   * PRD v4.2 §2.2 decision order, used only when a snapshot store exists:
-   *   1. fresh snapshot (<= 6h)  → source 'cache', ZERO external calls;
-   *   2. missing/expired snapshot + live success → persist, source 'live';
+   * Hourly Beijing-time cache decision order, used when a snapshot store exists:
+   *   1. fresh snapshot (same Beijing hour slot) + !force → source 'cache', ZERO external calls;
+   *   2. missing/expired snapshot OR force:true + live success → persist, source 'live';
    *   3. live failure + any snapshot → source 'cache' + stale:true, the
    *      snapshot's REAL updatedAt is preserved;
    *   4. live failure + no snapshot → demo (never persisted);
    *   5. store failures are logged, never disguised as a cache hit.
    */
   private async fetchHotlistFromSnapshot(
-    store: HotlistSnapshotStore
+    store: HotlistSnapshotStore,
+    options?: { force?: boolean }
   ): Promise<RetrievalHotlistResult> {
     const startedAt = this.now();
     const snapshot = await this.readSnapshotSafely(store);
 
-    if (snapshot && startedAt - snapshot.updatedAt <= HOTLIST_SNAPSHOT_TTL_MS) {
-      // Fresh: return it without touching the live transport at all.
-      return { items: snapshot.items, source: 'cache', updatedAt: snapshot.updatedAt };
+    if (snapshot && !options?.force && isHotlistSnapshotFresh(snapshot.updatedAt, startedAt)) {
+      // Fresh within the same Beijing hour slot: return without touching external network.
+      return {
+        items: snapshot.items,
+        source: 'cache',
+        updatedAt: snapshot.updatedAt,
+        diagnostic: classifyZhihuError('zhihu_hotlist', null),
+      };
     }
 
     let liveItems: HotlistItem[] | null = null;
+    let liveError: unknown = null;
     if (this.config !== null) {
       try {
         const items = await this.fetchLiveItems();
         if (items.length > 0) liveItems = items;
-      } catch {
-        // Timeout / network / HTTP 4xx-5xx / invalid body / unusable payload —
-        // degrade, never throw.
+      } catch (err) {
+        liveError = err;
+        console.warn(
+          '[hotlist] live hotlist fetch failed — degrading:',
+          err instanceof Error ? err.message : String(err)
+        );
       }
+    } else {
+      liveError = new Error('Zhihu API is not configured (ZHIHU_ACCESS_SECRET is missing)');
     }
 
     if (liveItems) {
@@ -729,8 +795,16 @@ export class LiveHotlistProvider {
           err instanceof Error ? err.message : String(err)
         );
       }
-      return { items: liveItems, source: 'live', updatedAt };
+      return {
+        items: liveItems,
+        source: 'live',
+        updatedAt,
+        diagnostic: classifyZhihuError('zhihu_hotlist', null),
+      };
     }
+
+    const diagnostic = classifyZhihuError('zhihu_hotlist', liveError);
+    const refreshError = options?.force ? diagnostic : undefined;
 
     if (snapshot) {
       return {
@@ -738,6 +812,8 @@ export class LiveHotlistProvider {
         source: 'cache',
         stale: true,
         updatedAt: snapshot.updatedAt,
+        refreshError,
+        diagnostic,
       };
     }
 
@@ -745,6 +821,8 @@ export class LiveHotlistProvider {
       items: DEMO_HOTLIST_ITEMS.map(item => ({ ...item })),
       source: 'demo',
       updatedAt: this.now(),
+      refreshError,
+      diagnostic,
     };
   }
 

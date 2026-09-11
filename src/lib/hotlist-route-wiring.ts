@@ -51,9 +51,10 @@ export function getHotlistRouteDependencies(): HotlistRouteDependencies {
  */
 export async function loadHotlistForRoute(
   env: Record<string, string | undefined> = process.env,
-  deps: HotlistRouteDependencies = getHotlistRouteDependencies()
+  deps: HotlistRouteDependencies = getHotlistRouteDependencies(),
+  options?: { force?: boolean }
 ): Promise<RetrievalHotlistResult> {
   const snapshotStore = await deps.createSnapshotStore(env);
   const provider = deps.createProvider({ snapshotStore: snapshotStore ?? undefined });
-  return provider.fetchHotlist();
+  return provider.fetchHotlist(options);
 }

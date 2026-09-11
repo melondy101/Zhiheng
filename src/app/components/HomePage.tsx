@@ -1,11 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { hotlistBackground, makeHotlistCoreQuestion } from '@/lib/hotlist-question';
+import {
+  getClientRefreshStatus,
+  recordClientManualRefresh,
+  getMsUntilNextBeijingHour,
+  isHotlistSnapshotFresh,
+} from '@/lib/hotlist-refresh-limiter';
+import { ownerHeaders } from '@/lib/owner-id';
+import type { ServiceDiagnostic } from '@/lib/service-diagnostics';
 import SessionFeedbackCue from './SessionFeedbackCue';
 import UserNav from './UserNav';
 import ThemeToggle from './ThemeToggle';
-import { Compass, Sparkles, MessageSquare, Clock, ArrowRight, Flame } from 'lucide-react';
+import { Compass, Sparkles, MessageSquare, Clock, ArrowRight, Flame, RotateCw, AlertCircle, AlertTriangle, ShieldAlert } from 'lucide-react';
 
 interface HotlistItem {
   id: string;
@@ -21,6 +29,17 @@ interface HotlistResult {
   stale?: boolean;
 }
 
+export interface HotlistRefreshResponse {
+  ok: boolean;
+  limitExceeded?: boolean;
+  reason?: string;
+  reasonLabel?: string;
+  message?: string;
+  detail?: string;
+  error?: string;
+  refreshError?: ServiceDiagnostic;
+}
+
 interface HomePageProps {
   onStart: (question: string, initialOpinion: string | null) => void;
   hotlist?: HotlistResult | null;
@@ -29,6 +48,7 @@ interface HomePageProps {
   errorMessage?: string | null;
   recentSessions?: Array<{ id: string; question: string; updatedAt: number }>;
   onResumeSession?: (sessionId: string) => void;
+  onRefreshHotlist?: (force?: boolean) => Promise<HotlistRefreshResponse>;
 }
 
 function formatTime(ts: number): string {
@@ -56,11 +76,193 @@ export default function HomePage({
   errorMessage,
   recentSessions,
   onResumeSession,
+  onRefreshHotlist,
 }: HomePageProps) {
   const [question, setQuestion] = useState('');
   const [initialOpinion, setInitialOpinion] = useState('');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const [modalState, setModalState] = useState<{
+    open: boolean;
+    title: string;
+    reason?: string;
+    reasonLabel?: string;
+    message: string;
+    detail?: string;
+  }>({
+    open: false,
+    title: '',
+    message: '',
+  });
+
+  const doRefresh = useCallback(async (force = false): Promise<HotlistRefreshResponse> => {
+    if (onRefreshHotlist) {
+      return await onRefreshHotlist(force);
+    }
+    try {
+      const url = force ? '/api/hotlist?refresh=true' : '/api/hotlist';
+      const res = await fetch(url, { headers: ownerHeaders() });
+      if (res.status === 429) {
+        const body = (await res.json().catch(() => ({}))) as {
+          message?: string;
+          reason?: string;
+          reasonLabel?: string;
+          detail?: string;
+        };
+        return {
+          ok: false,
+          limitExceeded: true,
+          reason: body.reason || 'rate_limit',
+          reasonLabel: body.reasonLabel || '达到频率限制 (Rate Limit)',
+          message: body.message || '已达到手动刷新上限，请等待下一个整点自动刷新。',
+          detail: body.detail,
+        };
+      }
+      if (res.ok) {
+        const data = await res.json();
+        if (force && data.refreshError) {
+          return {
+            ok: false,
+            refreshError: data.refreshError,
+            reason: data.refreshError.reason,
+            reasonLabel: data.refreshError.reasonLabel,
+            message: data.refreshError.message,
+            detail: data.refreshError.detail,
+          };
+        }
+        return { ok: true };
+      }
+      const errBody = (await res.json().catch(() => ({}))) as {
+        reason?: string;
+        reasonLabel?: string;
+        message?: string;
+        detail?: string;
+      };
+      return {
+        ok: false,
+        reason: errBody.reason || 'server_error',
+        reasonLabel: errBody.reasonLabel || '服务异常',
+        message: errBody.message || '请求知乎热榜接口失败',
+        detail: errBody.detail,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        reason: 'other',
+        reasonLabel: '网络异常',
+        message: '网络连接异常，未能更新知乎热榜',
+        detail: String(err),
+      };
+    }
+  }, [onRefreshHotlist]);
+
+  // Hourly Beijing-time auto refresh timer (triggers automatically at the top of every hour :00:00)
+  useEffect(() => {
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const scheduleNextHourRefresh = () => {
+      const delayMs = getMsUntilNextBeijingHour(Date.now());
+      // Add +600ms padding to ensure the new Beijing hour has commenced
+      timerId = setTimeout(() => {
+        if (cancelled) return;
+        void doRefresh(false);
+        scheduleNextHourRefresh();
+      }, delayMs + 600);
+    };
+
+    scheduleNextHourRefresh();
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && hotlist?.updatedAt) {
+        if (!isHotlistSnapshotFresh(hotlist.updatedAt, Date.now())) {
+          void doRefresh(false);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [doRefresh, hotlist?.updatedAt]);
+
+  const handleManualRefresh = async () => {
+    if (isManualRefreshing || hotlistLoading) return;
+
+    // Check client-side quota limit
+    const clientLimit = getClientRefreshStatus();
+    if (!clientLimit.allowed) {
+      setModalState({
+        open: true,
+        title: '触发刷新频率限制',
+        reason: 'rate_limit',
+        reasonLabel: '达到频率限制 (Rate Limit)',
+        message: `当前小时手动刷新次数已达上限（${clientLimit.maxLimit}/${clientLimit.maxLimit} 次）。知乎热榜每隔一个小时整点（北京时间）会自动刷新，请等待下一个整点或稍后再试。`,
+        detail: '系统每小时整点 (:00) 自动从知乎获取最新热榜数据。',
+      });
+      return;
+    }
+
+    setIsManualRefreshing(true);
+    try {
+      const res = await doRefresh(true);
+      if (res?.limitExceeded || res?.reason === 'rate_limit' || res?.refreshError?.reason === 'rate_limit') {
+        setModalState({
+          open: true,
+          title: '触发刷新频率限制',
+          reason: 'rate_limit',
+          reasonLabel: res.reasonLabel || '达到频率限制 (Rate Limit)',
+          message: res.message || res.refreshError?.message || '当前小时手动刷新次数已达上限。知乎热榜每隔一个小时整点（北京时间）会自动刷新，请等待下一个整点。',
+          detail: res.detail || res.refreshError?.detail,
+        });
+      } else if (res?.reason === 'daily_quota' || res?.refreshError?.reason === 'daily_quota') {
+        setModalState({
+          open: true,
+          title: '已达今日调用上限',
+          reason: 'daily_quota',
+          reasonLabel: '达到今日上限 (Daily Quota)',
+          message: res.message || res.refreshError?.message || '知乎热榜 API 今日调用配额已用尽（Daily Quota Exceeded）。已保留当前有效缓存数据，请等待明日配额重置。',
+          detail: res.detail || res.refreshError?.detail,
+        });
+      } else if (res?.reason === 'unconfigured' || res?.refreshError?.reason === 'unconfigured') {
+        setModalState({
+          open: true,
+          title: '未配置知乎 API 秘钥',
+          reason: 'unconfigured',
+          reasonLabel: '未配置秘钥',
+          message: res.message || res.refreshError?.message || '未配置知乎开放平台访问秘钥 (ZHIHU_ACCESS_SECRET)，当前使用内置演示/缓存数据。',
+          detail: res.detail || res.refreshError?.detail,
+        });
+      } else if (res?.reason === 'auth_failed' || res?.refreshError?.reason === 'auth_failed') {
+        setModalState({
+          open: true,
+          title: '知乎 API 鉴权认证失败',
+          reason: 'auth_failed',
+          reasonLabel: res.reasonLabel || '鉴权失败 (Authorization Failed - 20001)',
+          message: res.message || res.refreshError?.message || '知乎 API 鉴权未通过（Code: 20001），请检查环境变量中的 ZHIHU_ACCESS_SECRET 是否有效且未过期。',
+          detail: res.detail || res.refreshError?.detail || '提示：ZHIHU_ACCESS_SECRET 需为知乎开放平台颁发的 Access Secret，请确认未误填为 App ID 或 OAuth App Key。',
+        });
+      } else if (!res?.ok && res?.reason) {
+        setModalState({
+          open: true,
+          title: '未能更新实时热榜',
+          reason: res.reason,
+          reasonLabel: res.reasonLabel || '更新失败',
+          message: res.message || res.refreshError?.message || '知乎热榜接口调用未能成功返回新数据，已自动保留当前缓存。',
+          detail: res.detail || res.refreshError?.detail || res.error,
+        });
+      } else if (res?.ok) {
+        recordClientManualRefresh();
+      }
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  };
 
   const handleHotlistClick = (title: string) => {
     const coreQuestion = makeHotlistCoreQuestion(title);
@@ -283,11 +485,16 @@ export default function HomePage({
           {/* Core Input Card */}
           <div className="bg-surface-elevated rounded-2xl shadow-sm border border-line p-6 sm:p-8 transition-all hover:shadow-md">
             {errorMessage && (
-              <div className="mb-4 p-3 bg-semantic-error-light border border-semantic-error/30 text-semantic-error text-xs rounded-lg flex items-start gap-2">
-                <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span>{errorMessage}</span>
+              <div
+                role="alert"
+                data-testid="report-error-alert"
+                className="mb-4 p-3.5 bg-semantic-error-light border border-semantic-error/30 text-semantic-error text-xs rounded-xl flex items-start gap-2.5 shadow-xs"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-semantic-error" />
+                <div className="space-y-1">
+                  <p className="font-semibold">研报生成提示</p>
+                  <p className="leading-relaxed opacity-90">{errorMessage}</p>
+                </div>
               </div>
             )}
 
@@ -346,21 +553,35 @@ export default function HomePage({
 
           {/* Zhihu Hotlist Card */}
           <div className="bg-surface-elevated rounded-2xl shadow-xs border border-line p-5 space-y-3">
-            <div className="flex items-center justify-between pb-1 border-b border-line">
+            <div className="flex items-center justify-between pb-1 border-b border-line flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <Flame className="w-4 h-4 text-accent animate-pulse" />
                 <h2 className="text-sm font-semibold text-content-primary font-serif">知乎热榜灵感</h2>
                 <span className="text-xs text-content-tertiary">（点击生成单一核心问题）</span>
               </div>
-              {hotlist && (
-                <span
-                  className="text-xs text-content-secondary font-mono bg-surface-subtle px-2 py-0.5 rounded border border-line"
-                  data-testid="hotlist-source-state"
-                  suppressHydrationWarning
+              <div className="flex items-center gap-2">
+                {hotlist && (
+                  <span
+                    className="text-xs text-content-secondary font-mono bg-surface-subtle px-2 py-0.5 rounded border border-line"
+                    data-testid="hotlist-source-state"
+                    suppressHydrationWarning
+                  >
+                    {sourceLabel(hotlist.source, hotlist.updatedAt, hotlist.stale)}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  id="hotlist-refresh-button"
+                  data-testid="hotlist-refresh-button"
+                  onClick={handleManualRefresh}
+                  disabled={isManualRefreshing || hotlistLoading}
+                  title="手动刷新知乎热榜（每小时整点自动刷新）"
+                  aria-label="手动刷新知乎热榜"
+                  className="p-1 rounded-lg border border-line bg-surface text-content-secondary hover:text-brand hover:border-brand-subtle hover:bg-surface-subtle transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center cursor-pointer"
                 >
-                  {sourceLabel(hotlist.source, hotlist.updatedAt, hotlist.stale)}
-                </span>
-              )}
+                  <RotateCw className={`w-3.5 h-3.5 ${isManualRefreshing || hotlistLoading ? 'animate-spin text-brand' : ''}`} />
+                </button>
+              </div>
             </div>
 
             {hotlistLoading && (
@@ -398,6 +619,96 @@ export default function HomePage({
           </div>
         </div>
       </main>
+
+      {/* Manual Refresh / API Limit Modal */}
+      {modalState.open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-xs animate-in fade-in duration-200"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="hotlist-limit-title"
+          data-testid="hotlist-limit-modal"
+          onClick={() => setModalState(prev => ({ ...prev, open: false }))}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-line bg-surface-elevated p-6 shadow-xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className={`p-2.5 rounded-xl shrink-0 border ${
+                  modalState.reason === 'daily_quota'
+                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                    : modalState.reason === 'rate_limit'
+                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                    : 'bg-accent-light text-accent border-accent-subtle'
+                }`}
+              >
+                {modalState.reason === 'daily_quota' ? (
+                  <ShieldAlert className="w-5 h-5" />
+                ) : modalState.reason === 'rate_limit' ? (
+                  <Clock className="w-5 h-5" />
+                ) : (
+                  <AlertCircle className="w-5 h-5" />
+                )}
+              </div>
+              <div className="space-y-1.5 min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3
+                    id="hotlist-limit-title"
+                    className="text-base font-semibold text-content-primary font-serif"
+                  >
+                    {modalState.title || '刷新提示'}
+                  </h3>
+                  {modalState.reasonLabel && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-medium ${
+                        modalState.reason === 'daily_quota'
+                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                          : modalState.reason === 'rate_limit'
+                          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                          : 'bg-surface-subtle text-content-secondary'
+                      }`}
+                    >
+                      {modalState.reasonLabel}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-content-secondary leading-relaxed">
+                  {modalState.message || '知乎热榜每隔一个小时整点（北京时间）会自动刷新，请稍候再试。'}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-surface-subtle rounded-xl border border-line text-[11px] text-content-tertiary space-y-1.5">
+              <div className="flex justify-between items-center">
+                <span>自动刷新机制</span>
+                <span className="font-mono text-content-secondary">北京时间每小时整点 (:00)</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>缓存降级策略</span>
+                <span className="text-content-secondary">未到整点或异常时使用缓存</span>
+              </div>
+              {modalState.detail && (
+                <div className="pt-1 border-t border-line text-[10px] text-content-tertiary break-all">
+                  原因说明：{modalState.detail}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setModalState(prev => ({ ...prev, open: false }))}
+                data-testid="hotlist-limit-modal-close"
+                className="w-full py-2.5 px-4 bg-brand hover:bg-brand-hover text-content-inverse text-xs font-medium rounded-xl transition-all shadow-xs active:scale-[0.98] cursor-pointer"
+              >
+                知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

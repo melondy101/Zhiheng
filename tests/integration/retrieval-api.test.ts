@@ -10,7 +10,9 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { POST as reportPOST } from '../../src/app/api/report/route';
-import { GET as hotlistGET } from '../../src/app/api/hotlist/route';
+import { GET as rawHotlistGET } from '../../src/app/api/hotlist/route';
+
+const hotlistGET = (req?: Request) => rawHotlistGET(req ?? new Request('http://localhost:3000/api/hotlist'));
 import { llmProvider } from '../../src/lib/server-providers';
 import type { Report, SourceState } from '../../src/lib/providers';
 

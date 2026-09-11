@@ -15,6 +15,7 @@ import {
   isSynthesisUsable,
   toSynthesisSources,
 } from './report-synthesis';
+import { classifyLLMError, type ServiceDiagnostic } from './service-diagnostics';
 
 export interface ReportBuilderOptions {
   question: string;
@@ -38,6 +39,7 @@ export interface ReportBuilderOptions {
 export interface ReportBuildResult {
   report: Report;
   progress: ReportProgress[];
+  synthesisDiagnostic?: ServiceDiagnostic;
 }
 
 const emit =
@@ -186,29 +188,91 @@ async function buildSynthesis(
   question: string,
   grouped: Source[],
   llmProvider?: LLMProvider | null
-): Promise<ReportSynthesis | null> {
-  // Keep the full grouped list in the report for citations, but keep the
-  // synthesis request to one batch. Multiple batches trigger several slow LLM
-  // calls plus a final merge, which made the retrieval spinner look stuck.
+): Promise<{ synthesis: ReportSynthesis | null; diagnostic: ServiceDiagnostic }> {
   const request = { question, sources: toSynthesisSources(grouped).slice(0, 5) };
-  if (request.sources.length === 0) return null;
-
-  if (llmProvider === undefined) {
-    return buildDeterministicSynthesis(grouped);
+  if (request.sources.length === 0) {
+    return {
+      synthesis: null,
+      diagnostic: {
+        service: 'ai_synthesis',
+        serviceName: 'AI 研报多观点提炼',
+        success: false,
+        reason: 'empty_result',
+        reasonLabel: '未找到匹配结果',
+        message: '无可引用检索材料，未能进行 AI 观点提炼',
+        timestamp: Date.now(),
+      },
+    };
   }
 
-  if (!llmProvider?.generateSynthesis) return null;
+  if (llmProvider === undefined) {
+    return {
+      synthesis: buildDeterministicSynthesis(grouped),
+      diagnostic: {
+        service: 'ai_synthesis',
+        serviceName: 'AI 研报多观点提炼',
+        success: true,
+        reason: 'ok',
+        reasonLabel: '正常',
+        message: '测试模式下生成确定性观点',
+        timestamp: Date.now(),
+      },
+    };
+  }
+
+  if (!llmProvider?.generateSynthesis) {
+    return {
+      synthesis: null,
+      diagnostic: {
+        service: 'ai_synthesis',
+        serviceName: 'AI 研报多观点提炼',
+        success: false,
+        reason: 'unconfigured',
+        reasonLabel: '未配置秘钥',
+        message: '未配置大模型 API 秘钥 (LLM_API_KEY / LLM_MODEL)，未能生成 AI 综合观点',
+        timestamp: Date.now(),
+      },
+    };
+  }
 
   try {
     const synthesis = await llmProvider.generateSynthesis(request);
-    if (synthesis && isSynthesisUsable(synthesis, request.sources, question)) return synthesis;
+    if (synthesis && isSynthesisUsable(synthesis, request.sources, question)) {
+      return {
+        synthesis,
+        diagnostic: {
+          service: 'ai_synthesis',
+          serviceName: 'AI 研报多观点提炼',
+          success: true,
+          reason: 'ok',
+          reasonLabel: '正常',
+          message: 'AI 综合观点提炼成功',
+          timestamp: Date.now(),
+        },
+      };
+    }
+    return {
+      synthesis: null,
+      diagnostic: {
+        service: 'ai_synthesis',
+        serviceName: 'AI 研报多观点提炼',
+        success: false,
+        reason: 'invalid_response',
+        reasonLabel: '数据格式异常',
+        message: 'AI 服务返回内容格式不符合要求或缺少有效论据出处',
+        timestamp: Date.now(),
+      },
+    };
   } catch (err) {
     console.warn(
       '[report] LLM synthesis failed — omitting AI-generated viewpoints:',
       err instanceof Error ? err.message : String(err)
     );
+    return {
+      synthesis: null,
+      diagnostic: classifyLLMError('ai_synthesis', err),
+    };
   }
-  return null;
 }
 
 function extractCoreTopic(q: string): string {
@@ -340,7 +404,7 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
   const content = buildContent(options.question, grouped);
   const title = buildTitle(options.question);
   const knowledgePoints = buildKnowledgePoints(grouped);
-  const synthesis = await buildSynthesis(options.question, grouped, options.llmProvider);
+  const { synthesis, diagnostic: synthesisDiagnostic } = await buildSynthesis(options.question, grouped, options.llmProvider);
   const viewpoints = buildViewpoints(synthesis);
   const structuredViewpoints = buildStructuredViewpoints(options.question, grouped, synthesis);
 
@@ -361,5 +425,5 @@ export async function buildReport(options: ReportBuilderOptions): Promise<Report
     ...(synthesis ? { synthesis } : {}),
   };
 
-  return { report, progress: progressLog };
+  return { report, progress: progressLog, synthesisDiagnostic };
 }

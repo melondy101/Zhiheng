@@ -284,4 +284,36 @@ describe('buildReport synthesis wiring (PRD v4.2 §3)', () => {
     });
     assert.strictEqual(fallback.report.synthesis, undefined);
   });
+
+  it('API returns diagnostics bundle reflecting service degradation causes', async () => {
+    const res = await reportPOST(
+      new Request('http://localhost:3000/api/report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-zhiyan-owner': TEST_OWNER,
+        },
+        body: JSON.stringify({
+          question: 'AI 是否会替代人类？',
+        }),
+      })
+    );
+
+    assert.strictEqual(res.status, 200);
+    const body = (await res.json()) as {
+      sessionId: string;
+      report: Report;
+      diagnostics?: {
+        zhihuSearch?: { service: string; reason: string; success: boolean };
+        webSearch?: { service: string; reason: string; success: boolean };
+        aiSynthesis?: { service: string; reason: string; success: boolean };
+        aiGraph?: { service: string; reason: string; success: boolean };
+      };
+    };
+
+    assert.ok(body.diagnostics, 'diagnostics object must be returned in response');
+    assert.ok(body.diagnostics.zhihuSearch, 'zhihuSearch diagnostic must exist');
+    assert.ok(body.diagnostics.webSearch, 'webSearch diagnostic must exist');
+    assert.ok(body.diagnostics.aiSynthesis, 'aiSynthesis diagnostic must exist');
+  });
 });
