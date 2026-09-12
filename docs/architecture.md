@@ -279,7 +279,7 @@ interface GraphEdge {
 
 - **ModeConfig** (`quick` / `deep` / `fun` / `galgame`) — `strategy-engine` 接受配置化的 `allowedStrategies`
 - **完整用户画像** — `lifecycle.ts` 已有骨架，加更多 `field` 类型
-- **ZhihuOAuthProvider** — `IdentityProvider` 接口预留
+- **ZhihuOAuthProvider** — `src/lib/zhihu-oauth.ts` 提供 server-side OAuth 骨架：`state` 绑定当前会话、10 分钟有效且一次性消费；Token 只保存在进程内会话。`/api/auth/zhihu/start`、`callback`、`status` 与显式 `POST /data` 路由保留邮箱登录；创作、关注、收藏仅在授权用户主动请求时读取，且需要 `ZHIHU_ACCESS_SECRET`。
 - **Neon 存储** — `StorageProvider` 接口已稳定
 
 ## 8. 测试结构
