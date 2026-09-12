@@ -279,7 +279,7 @@ interface GraphEdge {
 
 - **ModeConfig** (`quick` / `deep` / `fun` / `galgame`) — `strategy-engine` 接受配置化的 `allowedStrategies`
 - **完整用户画像** — `lifecycle.ts` 已有骨架，加更多 `field` 类型
-- **ZhihuOAuthProvider** — `src/lib/zhihu-oauth.ts` 提供 server-side OAuth 骨架：`state` 绑定当前会话、10 分钟有效且一次性消费；Token 只保存在进程内会话。`/api/auth/zhihu/start`、`callback`、`status` 与显式 `POST /data` 路由保留邮箱登录；创作、关注、收藏仅在授权用户主动请求时读取，且需要 `ZHIHU_ACCESS_SECRET`。读取 `favorite_contents` 时还必须由用户提交已选收藏夹的数字 `favlistUrlToken`。`GET /api/zhihu/quota` 仅查询 `creator` 与 `question_answers` 两组额度，用于讨论结束后的问题推荐与回答摘要的可用性披露。
+- **ZhihuOAuthProvider** — `src/lib/zhihu-oauth.ts` 提供 server-side OAuth 骨架：`state` 绑定当前会话、10 分钟有效且一次性消费；Token 只保存在进程内会话。`/api/auth/zhihu/start`、`callback`、`status` 与显式 `POST /data` 路由保留邮箱登录；创作、关注、收藏仅在授权用户主动请求时读取，且需要 `ZHIHU_ACCESS_SECRET`。读取 `favorite_contents` 时还必须由用户提交已选收藏夹的数字 `favlistUrlToken`。`GET /api/zhihu/quota` 仅查询 `creator` 与 `question_answers` 两组额度，用于讨论结束后的问题推荐与回答摘要的可用性披露。 `POST /api/recommendations/questions/profile` 仅在当前会话已绑定知乎 OAuth 后由用户主动调用：它暂时读取创作、关注、收藏列表，在内存中提炼主题，再调用主题问题推荐；不持久化原始数据，也不向问题推荐 API 转发 OAuth Token。
 - **Neon 存储** — `StorageProvider` 接口已稳定
 
 ## 8. 测试结构
