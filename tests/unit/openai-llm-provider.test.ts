@@ -454,6 +454,36 @@ describe('OpenAICompatibleLLMProvider: batched report synthesis', () => {
     kindLabel: '外部检索材料',
   }));
 
+  it('requests JSON mode and disables thinking for machine-parsed synthesis', async () => {
+    const { provider, calls } = makeProvider(
+      () => jsonResponse(chatResponse(JSON.stringify({
+        viewpoints: [{
+          conclusion: '材料显示自动化会改变岗位结构，而非必然减少岗位总量。',
+          evidence: [{ summary: '历史数据指出自动化会改变岗位结构，总量未必下降。', citationIds: [1] }],
+        }],
+      }))),
+      { baseUrl: 'https://api.deepseek.com/v1' }
+    );
+
+    const synthesis = await provider.generateSynthesis({
+      question: '自动化会减少岗位吗？',
+      sources: [{
+        citationId: 1,
+        title: '自动化对岗位的影响',
+        excerpt: '历史数据指出自动化会改变岗位结构，总量未必下降。',
+        kindLabel: '外部检索材料',
+      }],
+    });
+
+    assert.ok(synthesis);
+    const body = JSON.parse(calls[0]!.options.body) as {
+      response_format?: { type?: string };
+      thinking?: { type?: string };
+    };
+    assert.deepStrictEqual(body.response_format, { type: 'json_object' });
+    assert.deepStrictEqual(body.thinking, { type: 'disabled' });
+  });
+
   it('runs first-pass batches and then makes one final cited synthesis request', async () => {
     const { provider, calls } = makeProvider((_url, options) => {
       const body = JSON.parse(options.body) as { messages: Array<{ content: string }> };

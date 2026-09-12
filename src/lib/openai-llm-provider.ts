@@ -391,11 +391,17 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     validationSources: SynthesisSource[],
     question: string
   ): Promise<ReportSynthesis> {
+    const isDeepSeek = new URL(this.config.baseUrl).hostname.endsWith('deepseek.com');
     const body = await this.postChatCompletion(
       JSON.stringify({
         model: this.config.model,
         messages,
         temperature: 0.3,
+        // DeepSeek's JSON mode is enforced server-side. The prompt alone is
+        // insufficient for strict downstream parsing, especially when the
+        // provider's thinking mode is enabled by default.
+        response_format: { type: 'json_object' },
+        ...(isDeepSeek ? { thinking: { type: 'disabled' } } : {}),
         // The report schema is compact. A large output budget makes the
         // reasoning model spend tens of seconds on unnecessary verbosity.
         max_tokens: 1536,
