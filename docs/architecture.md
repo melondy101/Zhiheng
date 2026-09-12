@@ -77,6 +77,8 @@ stale cache ┘            ← stale cache 携带原始 updatedAt 与 `stale: tr
 demo fixture ┘
 ```
 
+**相关推荐请求节流**：`/api/recommendations` 在报告面板渲染后，先检索一个相关话题，再按顺序检索至多三位已引用作者；不得用并发批量请求这四个站内搜索，以免触发知乎短时限流。该侧栏是非关键补充，不阻塞报告展示。
+
 每次调用都会标记 `source: 'live' | 'cache' | 'demo'`，UI 显示。
 #22 进一步要求：fresh / stale cache 回退路径下的 `Source.stale` 必须显式为 `false` / `true`，不得为 `undefined`（实现见 `src/lib/search-providers.ts`）。
 

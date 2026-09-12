@@ -78,7 +78,7 @@ npm run check       # 全量门禁
 | POST | `/api/interrogate` | 诘问（策略引擎 + LLM fallback） |
 | GET/POST | `/api/session` | 会话加载/保存 |
 | GET | `/api/share/[id]` | 公开分享（无需登录） |
-| GET | `/api/recommendations` | 推荐问题列表 |
+| POST | `/api/recommendations` | 基于报告引用生成相关推荐；站内搜索按顺序执行，避免短时限流 |
 
 ## Provider 边界
 
