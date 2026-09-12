@@ -228,6 +228,28 @@ interface Source {
   excerpt: string | null;
   sourceSessionId?: string;
 }
+
+interface GraphNode {
+  id: string;
+  label: string;
+  type: 'topic' | 'concept' | 'claim' | 'actor';
+  description: string;
+  associationProfile?: string; // 实体关联简介（拓扑承接、前置依赖或实证支撑定位）
+  sourceCitations?: number[];
+}
+
+interface GraphEdge {
+  id: string;
+  from: string;
+  to: string;
+  subject: string;
+  predicate: '支持' | '反驳' | '导致' | '依赖' | '影响' | '对比' | '构成' | '主张' | '相关';
+  object: string;
+  label: string;
+  type: 'supported' | 'inferred' | 'user_claimed';
+  citationId?: number;
+  description?: string;
+}
 ```
 
 ## 5. 成果卡 6 段
@@ -293,7 +315,8 @@ tests/
 - 尽量 15 秒内完成报告正文 ✓（fixture 延迟 200-500ms + 50ms 构建）
 - 20 秒仍未完成 → 缓存降级 ✓（searchWithTimeout 5s）
 - LLM 失败 → 重试一次 + 策略模板；UI 按失败类别披露 ✓（`withFallback`）
-- 图谱节点经标签清洗：过滤口语填充、过短标签和昵称式尾缀；LLM 与确定性 fallback 共用规则 ✓
+- 图谱节点经标签清洗与黑名单过滤：基于正则与语义黑名单，剔除“邓煜等菲奖得主”等集合性修饰/代称、“观点 3”等占位/序号枚举、“刚刚/突发”等时效修饰副词、以及编务口语噪声；LLM 与确定性 fallback 共用规则 ✓
+- 实体关联简介生成：图谱节点通过 `associationProfile` 动态合成结构化定位（核心议题枢纽、前置依赖、实证支撑与下游影响），并在详情面板与无障碍模式中展示 ✓
 - 综合观点的每条证据必须能与其引用材料做词面追溯，且结论不能复述原问题 ✓
 - 知识图谱允许正文后异步完成 ✓（API 路由 try/catch 包装）
 

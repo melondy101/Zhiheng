@@ -12,7 +12,11 @@ import type {
   GraphNodeType,
   KnowledgeGraph,
 } from './knowledge-graph';
-import { sanitizeGraphLabel, validateGraph } from './knowledge-graph';
+import {
+  enrichGraphWithAssociationProfiles,
+  sanitizeGraphLabel,
+  validateGraph,
+} from './knowledge-graph';
 
 export const VALID_PREDICATES: ControlledPredicate[] = [
   '支持',
@@ -45,14 +49,18 @@ export const GRAPH_EXTRACTION_SYSTEM_PROMPT = `你是「知研」专业知识图
 1. 实体准入标准：
    - 必须是具有独立研报学术/思辨语义的完整短语、专业机制、客观指标或论点判断（长度通常为 2-18 字，核心议题可至 24 字）。
    - 严禁提取口语化短语、残缺动宾搭配、过渡词、提问句式或截断片段（如“已无法避免”、“能做的只有”、“这是否意味着”、“一文读懂”、“做空”、“大家怎么看”等一律禁止）。
+   - 严禁提取序号与占位噪声（如“观点 3”、“观点3”、“观点一”、“论点 2”、“知识点 1”等纯序号占位）。
+   - 严禁提取集合性列举或代称噪声（如“邓煜等菲奖得主”、“陶哲轩等学者”等包含“等...”的复合代称；如需提取必须提炼为原子实体如“邓煜”或“菲尔兹奖”）。
+   - 严禁提取时效修饰副词或新闻提示词（如“刚刚”、“刚才”、“突发”、“重磅”、“最新消息”等）。
 2. 实体分类规范（type）：
    - 'topic': 核心研讨议题（固定且唯一，id 必须为 'n0'）。
    - 'concept': 核心专业概念、机理/模型、客观指标或技术路径（如“1.5℃温控阈值”、“超额升温机制 (Overshoot)”、“碳配额定价机制”）。
    - 'claim': 报告与材料中的核心论断、理论假说或对立观点（如“短时超温存在滞后恢复窗口”、“过度依赖将造成认知外包风险”）。
    - 'actor': 提出观点、进行实证研究或制定规则的关键组织/学术机构/代表性主体（如“联合国气候组织 (UNFCCC)”、“清华大学教育团队”）。
-3. 实体解释质量（description 必须实质详实）：
+3. 实体解释质量与关联简介（description 必须实质详实，可附 associationProfile）：
    - 每个节点的 description 必须提供 15-60 字的具体解释，清晰阐述该实体在本次议题中的具体定义、运作机理、论断依据或争议焦点。
    - 严禁输出毫无信息增量的敷衍模板（严禁输出如“某某相关论述”、“这是关键概念”等空洞套话）。
+   - 节点可包含 associationProfile（实体关联简介）：精炼概述该实体在图谱中的拓扑承接关系、前置依赖或实证支撑定位。
 
 【二、关系类型与逻辑受控规范】
 1. 谓词严格受控：关系谓词（predicate）仅限使用以下 9 种思辨关系之一：
@@ -252,11 +260,17 @@ export function parseGraphExtractionResponse(
       }
     }
 
+    const associationProfile =
+      typeof nodeObj.associationProfile === 'string' && nodeObj.associationProfile.trim().length >= 8
+        ? nodeObj.associationProfile.trim()
+        : undefined;
+
     nodeMap.set(rawId, {
       id: rawId,
       label: cleanedLabel.slice(0, 24),
       type: rawType,
       description,
+      ...(associationProfile ? { associationProfile } : {}),
       ...(sourceCitations ? { sourceCitations } : {}),
     });
   }
@@ -369,11 +383,13 @@ export function parseGraphExtractionResponse(
     }
   }
 
-  const graph: KnowledgeGraph = {
+  const rawGraph: KnowledgeGraph = {
     nodes,
     edges,
     isFallback: false,
   };
+
+  const graph = enrichGraphWithAssociationProfiles(rawGraph, report);
 
   const validation = validateGraph(graph, report);
   if (!validation.valid) {

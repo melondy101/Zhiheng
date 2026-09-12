@@ -553,6 +553,16 @@ export default function KnowledgeGraphView({
 
                   <p className="text-xs text-gray-600 mb-2">{node.description}</p>
 
+                  {node.associationProfile && (
+                    <div
+                      className="text-xs text-purple-900 bg-purple-50/60 rounded px-2 py-1 mb-2 border border-purple-100"
+                      data-testid={`text-node-profile-${node.id}`}
+                    >
+                      <span className="font-semibold text-purple-950 mr-1">关联简介:</span>
+                      <span>{node.associationProfile}</span>
+                    </div>
+                  )}
+
                   {/* Connected edges list */}
                   {outgoing.length > 0 && (
                     <div className="text-xs space-y-1 mt-2 pl-2 border-l-2 border-gray-200">
@@ -624,6 +634,19 @@ export default function KnowledgeGraphView({
                 </div>
                 <p className="text-xs text-gray-600 leading-relaxed">{selectedNode.description}</p>
               </div>
+
+              {/* Entity Association Profile / 实体关联简介 */}
+              {selectedNode.associationProfile && (
+                <div
+                  className="bg-purple-50/70 border border-purple-100/90 rounded-lg p-2.5 text-xs"
+                  data-testid="node-association-profile"
+                >
+                  <span className="font-semibold text-purple-900 block mb-1 flex items-center gap-1.5">
+                    <span>🔗</span> 实体关联简介
+                  </span>
+                  <p className="text-purple-950/85 leading-relaxed">{selectedNode.associationProfile}</p>
+                </div>
+              )}
 
               {/* Citations */}
               {selectedNode.sourceCitations && selectedNode.sourceCitations.length > 0 && (

@@ -7,6 +7,11 @@ import {
   buildFallbackGraph,
   safeBuildGraph,
   safeBuildGraphAsync,
+  sanitizeGraphLabel,
+  isBlacklistedEntityLabel,
+  isEntityNoise,
+  generateEntityAssociationProfile,
+  enrichGraphWithAssociationProfiles,
   type KnowledgeGraph,
   type GraphNodeType,
 } from '../../src/lib/knowledge-graph';
@@ -429,6 +434,217 @@ describe('Knowledge Graph Contract (KG-01, KG-02, KG-03)', () => {
       const g2 = await safeBuildGraphAsync(report, sources, mockThrowingLLM);
       assert.ok(g2);
       assert.strictEqual(g2.nodes[0].id, 'n0');
+    });
+  });
+
+  describe('KG-05: Blacklist Filter for Entity Noise Removal', () => {
+    it('correctly detects collective composite mentions as noise', () => {
+      const compositeExamples = [
+        '邓煜等菲奖得主',
+        '陶哲轩等学者',
+        '张三等专家',
+        '李四等3人',
+        '某学者等院士',
+        '等菲奖得主',
+      ];
+      for (const item of compositeExamples) {
+        const check = isBlacklistedEntityLabel(item);
+        assert.strictEqual(check.isNoise, true, `Expected "${item}" to be flagged as noise`);
+        assert.strictEqual(check.category, 'collective');
+        assert.strictEqual(isEntityNoise(item), true);
+        assert.strictEqual(sanitizeGraphLabel(item), null, `sanitizeGraphLabel should reject "${item}"`);
+      }
+    });
+
+    it('correctly detects outline enumeration and placeholder labels as noise', () => {
+      const enumExamples = [
+        '观点 3',
+        '观点3',
+        '观点一',
+        '观点 A',
+        '论点 1',
+        '核心观点 2',
+        '分论点 3',
+        '知识点 1',
+        '论据 2',
+        '证据 1',
+        '第1点',
+      ];
+      for (const item of enumExamples) {
+        const check = isBlacklistedEntityLabel(item);
+        assert.strictEqual(check.isNoise, true, `Expected "${item}" to be flagged as noise`);
+        assert.strictEqual(check.category, 'enumeration');
+        assert.strictEqual(isEntityNoise(item), true);
+        assert.strictEqual(sanitizeGraphLabel(item), null, `sanitizeGraphLabel should reject "${item}"`);
+      }
+    });
+
+    it('correctly detects temporal news urgency adverbs as noise', () => {
+      const temporalExamples = [
+        '刚刚',
+        '刚才',
+        '日前',
+        '近日',
+        '突发',
+        '重磅',
+        '最新消息',
+        '最新',
+      ];
+      for (const item of temporalExamples) {
+        const check = isBlacklistedEntityLabel(item);
+        assert.strictEqual(check.isNoise, true, `Expected "${item}" to be flagged as noise`);
+        assert.strictEqual(check.category, 'temporal');
+        assert.strictEqual(isEntityNoise(item), true);
+        assert.strictEqual(sanitizeGraphLabel(item), null, `sanitizeGraphLabel should reject "${item}"`);
+      }
+    });
+
+    it('correctly detects editorial and publishing boilerplate as noise', () => {
+      const editorialExamples = [
+        '全文完',
+        '责任编辑',
+        '参考资料',
+        '相关阅读',
+        '延伸阅读',
+        '版权所有',
+      ];
+      for (const item of editorialExamples) {
+        const check = isBlacklistedEntityLabel(item);
+        assert.strictEqual(check.isNoise, true, `Expected "${item}" to be flagged as noise`);
+        assert.strictEqual(check.category, 'editorial');
+        assert.strictEqual(isEntityNoise(item), true);
+      }
+    });
+
+    it('allows valid domain entities to pass through cleanly', () => {
+      const validEntities = [
+        '邓煜',
+        '菲尔兹奖',
+        '自适应学习系统',
+        '清华大学教育团队',
+        '认知外包风险',
+        '人工智能意识涌现',
+        '高等教育',
+      ];
+      for (const entity of validEntities) {
+        assert.strictEqual(isEntityNoise(entity), false, `Expected "${entity}" NOT to be noise`);
+        const sanitized = sanitizeGraphLabel(entity);
+        assert.ok(sanitized, `Expected "${entity}" to pass sanitizeGraphLabel, got ${sanitized}`);
+      }
+    });
+
+    it('filters out noise entities when parsing LLM response', () => {
+      const report = makeReport([], '核心议题：AI与教育');
+      const mockLLMJson = JSON.stringify({
+        nodes: [
+          { id: 'n0', label: 'AI与教育', type: 'topic', description: '核心议题' },
+          { id: 'n1', label: '邓煜等菲奖得主', type: 'actor', description: '菲奖得主集体' },
+          { id: 'n2', label: '观点 3', type: 'claim', description: '第三个观点' },
+          { id: 'n3', label: '刚刚', type: 'concept', description: '时效修饰词' },
+          { id: 'n4', label: '自适应学习系统', type: 'concept', description: '专业概念' },
+          { id: 'n5', label: '清华大学团队', type: 'actor', description: '实证研究团队' },
+        ],
+        edges: [
+          { id: 'e1', from: 'n0', to: 'n4', predicate: '依赖', type: 'inferred', description: '依赖机理' },
+          { id: 'e2', from: 'n5', to: 'n4', predicate: '主张', type: 'inferred', description: '团队主张' },
+        ],
+      });
+
+      const parsed = parseGraphExtractionResponse(mockLLMJson, report);
+      assert.ok(parsed);
+      const labels = parsed.nodes.map((n) => n.label);
+      assert.ok(!labels.includes('邓煜等菲奖得主'), 'Must not include 邓煜等菲奖得主');
+      assert.ok(!labels.includes('观点 3'), 'Must not include 观点 3');
+      assert.ok(!labels.includes('刚刚'), 'Must not include 刚刚');
+      assert.ok(labels.includes('自适应学习系统'), 'Must keep valid concept 自适应学习系统');
+      assert.ok(labels.includes('清华大学团队'), 'Must keep valid actor 清华大学团队');
+    });
+  });
+
+  describe('KG-06: Entity Association Profile Generation', () => {
+    it('generates rich associationProfile for topic, actor, concept, and claim nodes', () => {
+      const sources = [
+        makeSource('s1', 'zhihu', '自适应教育系统实证研究', '研究表明算法导致个性化掌握度提升，文献支撑丰富', '清华大学研究团队'),
+        makeSource('s2', 'web', '认知外包争议剖析', '讨论长期依赖算法所带来的认知钝化与自主性下降'),
+      ];
+      const report = makeReport(sources, 'AI是否会改变教育？');
+      const graph = buildGraph(report, sources);
+
+      // Verify all nodes have associationProfile populated
+      assert.ok(graph.nodes.length >= 3);
+      for (const node of graph.nodes) {
+        assert.ok(
+          typeof node.associationProfile === 'string' && node.associationProfile.length > 10,
+          `Node ${node.id} (${node.label}) should have a meaningful associationProfile, got: ${node.associationProfile}`
+        );
+      }
+
+      // Verify topic node association profile highlights hub nature and citations
+      const topicNode = graph.nodes.find((n) => n.id === 'n0');
+      assert.ok(topicNode);
+      assert.ok(topicNode.associationProfile?.includes('核心议题枢纽'));
+      assert.ok(topicNode.associationProfile?.includes('思辨论证网络'));
+
+      // Verify actor node or concept node reflects relational semantics
+      const nonTopicNodes = graph.nodes.filter((n) => n.id !== 'n0');
+      for (const node of nonTopicNodes) {
+        assert.ok(
+          node.associationProfile?.startsWith('【'),
+          `associationProfile should start with type bracket: ${node.associationProfile}`
+        );
+        assert.ok(
+          node.associationProfile?.includes('拓扑') || node.associationProfile?.includes('关联'),
+          `associationProfile should mention topology or relation: ${node.associationProfile}`
+        );
+      }
+    });
+
+    it('preserves existing custom associationProfile or enriches it dynamically', () => {
+      const nodes = [
+        { id: 'n0', label: '核心议题', type: 'topic' as const, description: '议题' },
+        {
+          id: 'n1',
+          label: '自适应算法',
+          type: 'concept' as const,
+          description: '算法',
+          associationProfile: '已有专业关联分析：作为基底机制驱动全流程。',
+        },
+        { id: 'n2', label: '认知风险', type: 'claim' as const, description: '风险论断' },
+      ];
+      const edges = [
+        {
+          id: 'e1',
+          from: 'n0',
+          to: 'n1',
+          predicate: '依赖' as const,
+          label: '依赖',
+          type: 'supported' as const,
+          citationId: 1,
+          description: '议题依赖算法',
+        },
+        {
+          id: 'e2',
+          from: 'n1',
+          to: 'n2',
+          predicate: '导致' as const,
+          label: '导致',
+          type: 'inferred' as const,
+          description: '算法导致风险',
+        },
+      ];
+      const inputGraph = { nodes, edges };
+      const enriched = enrichGraphWithAssociationProfiles(inputGraph);
+
+      // n1 should keep its existing custom profile
+      assert.strictEqual(
+        enriched.nodes[1].associationProfile,
+        '已有专业关联分析：作为基底机制驱动全流程。'
+      );
+
+      // n2 should have a freshly synthesized profile
+      assert.ok(enriched.nodes[2].associationProfile);
+      assert.ok(enriched.nodes[2].associationProfile.includes('研报核心观点'));
+      assert.ok(enriched.nodes[2].associationProfile.includes('自适应算法'));
     });
   });
 });

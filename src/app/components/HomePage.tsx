@@ -432,8 +432,7 @@ export default function HomePage({
         )}
 
         {/* Sidebar Footer */}
-        <div className={`border-t border-line bg-surface-subtle/50 p-3 ${isSidebarCollapsed ? 'flex justify-center p-2' : 'flex items-center justify-between'}`}>
-          {!isSidebarCollapsed && <ThemeToggle />}
+        <div className={`border-t border-line bg-surface-subtle/50 p-3 ${isSidebarCollapsed ? 'flex justify-center p-2' : 'flex items-center justify-start'}`}>
           <UserNav compact={isSidebarCollapsed} />
         </div>
       </aside>
