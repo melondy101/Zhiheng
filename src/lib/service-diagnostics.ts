@@ -8,6 +8,7 @@ export type DiagnosticReason =
   | 'unconfigured'      // 未配置 API Key / Secret
   | 'auth_failed'       // 鉴权失败 / Key 无效 (401 / 20001)
   | 'timeout'           // 请求超时
+  | 'network_error'     // DNS、连接或 TLS 失败
   | 'server_error'      // 服务端异常 (5xx)
   | 'invalid_response'  // 返回非预期格式 / JSON解析异常
   | 'empty_result'      // 返回空可用数据
@@ -33,6 +34,7 @@ export const REASON_LABELS: Record<DiagnosticReason, string> = {
   unconfigured: '未配置秘钥',
   auth_failed: '鉴权认证失败',
   timeout: '请求超时',
+  network_error: '网络连接异常',
   server_error: '服务提供商异常',
   invalid_response: '数据格式异常',
   empty_result: '未找到匹配结果',
@@ -162,6 +164,21 @@ export function classifyZhihuError(
     };
   }
 
+  // An upstream request that completed without usable records is not a transport or format failure.
+  if (combined.includes('empty or unusable records') || combined.includes('empty result')) {
+    return {
+      service,
+      serviceName,
+      success: false,
+      reason: 'empty_result',
+      reasonLabel: REASON_LABELS.empty_result,
+      message: `${serviceName} 未返回可用内容`,
+      detail: errMsg,
+      statusCode: status,
+      timestamp: now,
+    };
+  }
+
   // Timeout
   if (combined.includes('timeout') || combined.includes('aborted') || status === 504) {
     return {
@@ -173,6 +190,23 @@ export function classifyZhihuError(
       message: `${serviceName} 请求超时，上游接口未在限定时间内响应`,
       detail: errMsg,
       statusCode: status,
+      timestamp: now,
+    };
+  }
+
+  // Connection failures occur before the upstream can return an HTTP response.
+  if (
+    !status &&
+    (combined.includes('fetch failed') || combined.includes('network error') || combined.includes('enotfound') || combined.includes('econnrefused') || combined.includes('econnreset') || combined.includes('certificate') || combined.includes('tls'))
+  ) {
+    return {
+      service,
+      serviceName,
+      success: false,
+      reason: 'network_error',
+      reasonLabel: REASON_LABELS.network_error,
+      message: `${serviceName} 网络连接异常，未能连接到上游服务`,
+      detail: errMsg,
       timestamp: now,
     };
   }

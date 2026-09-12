@@ -46,6 +46,22 @@ test('classifyZhihuError correctly identifies timeout and server errors', () => 
   assert.equal(diag500.reason, 'server_error');
 });
 
+test('classifyZhihuError distinguishes a network failure from an upstream failure', () => {
+  const diag = classifyZhihuError('zhihu_search', new TypeError('fetch failed: getaddrinfo ENOTFOUND developer.zhihu.com'));
+
+  assert.equal(diag.success, false);
+  assert.equal(diag.reason, 'network_error');
+  assert.equal(diag.reasonLabel, REASON_LABELS.network_error);
+});
+
+test('classifyZhihuError identifies a successful call with no usable records', () => {
+  const diag = classifyZhihuError('zhihu_hotlist', new Error('Zhihu API returned empty or unusable records'));
+
+  assert.equal(diag.success, false);
+  assert.equal(diag.reason, 'empty_result');
+  assert.equal(diag.reasonLabel, REASON_LABELS.empty_result);
+});
+
 test('classifyLLMError correctly classifies AI service states', () => {
   const okDiag = classifyLLMError('ai_synthesis', null);
   assert.equal(okDiag.success, true);
