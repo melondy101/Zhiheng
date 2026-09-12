@@ -29,6 +29,7 @@ interface ReportPanelProps {
   cacheUpdatedAt?: number | null;
   /** #19: true when a cached channel is past its TTL. */
   cacheStale?: boolean;
+  discussionCompleted?: boolean;
 }
 
 const SOURCE_STATE_LABELS: Record<SourceState, string> = {
@@ -103,7 +104,11 @@ export default function ReportPanel({
   knowledgeGraph,
   cacheUpdatedAt = null,
   cacheStale = false,
+  discussionCompleted = false,
 }: ReportPanelProps) {
+  const [questionRecommendations, setQuestionRecommendations] = useState<{ title: string; url: string }[]>([]);
+  const [answerSummaries, setAnswerSummaries] = useState<{ summary: string; url: string | null }[]>([]);
+  const [selectedQuestionUrl, setSelectedQuestionUrl] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<{ author: Source[]; topics: Source[] }>({ author: [], topics: [] });
   const [showDiagnosticsDetail, setShowDiagnosticsDetail] = useState(false);
   const grouped = groupByType(report.references);
@@ -127,6 +132,29 @@ export default function ReportPanel({
       .catch(() => undefined);
     return () => controller.abort();
   }, [question, report.references]);
+
+  useEffect(() => {
+    if (!discussionCompleted || !question) return;
+    const controller = new AbortController();
+    void fetch('/api/recommendations/questions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: question }),
+      signal: controller.signal,
+    }).then((response) => response.ok ? response.json() : null)
+      .then((data) => setQuestionRecommendations(Array.isArray(data?.questions) ? data.questions : []))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [discussionCompleted, question]);
+
+  const showAnswerSummaries = (url: string) => {
+    setSelectedQuestionUrl(url);
+    setAnswerSummaries([]);
+    void fetch(`/api/questions/answers?url=${encodeURIComponent(url)}`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => setAnswerSummaries(Array.isArray(data?.answers) ? data.answers : []))
+      .catch(() => undefined);
+  };
 
   // Determine overall worst-case source state for badge display
   const overallState: SourceState | null =
@@ -467,6 +495,33 @@ export default function ReportPanel({
             <p className="text-xs italic text-content-tertiary py-2">暂无任何引用材料</p>
           )}
         </section>
+
+        {discussionCompleted && questionRecommendations.length > 0 && (
+          <section className="rounded-2xl border border-line bg-surface-elevated p-5 shadow-xs" data-testid="question-exploration">
+            <h3 className="text-sm sm:text-base font-bold text-brand font-serif flex items-center gap-2 mb-3">
+              <Sparkles className="w-4 h-4 text-accent" />
+              <span>继续探索的问题</span>
+            </h3>
+            <div className="space-y-2">
+              {questionRecommendations.map((item) => (
+                <button key={item.url} type="button" onClick={() => showAnswerSummaries(item.url)} className="w-full text-left rounded-xl border border-line bg-surface p-3 hover:bg-surface-subtle">
+                  <span className="text-xs font-medium text-content-primary">{item.title}</span>
+                </button>
+              ))}
+            </div>
+            {selectedQuestionUrl && (
+              <div className="mt-4 space-y-2 border-t border-line pt-3" data-testid="question-answer-summaries">
+                <p className="text-[11px] font-semibold text-content-secondary">知乎回答摘要</p>
+                {answerSummaries.map((item, index) => (
+                  <div key={`${item.url ?? 'summary'}-${index}`} className="rounded-lg bg-surface p-3 text-xs text-content-secondary">
+                    <p>{item.summary}</p>
+                    {item.url && <a className="mt-1 block text-[10px] text-accent" href={item.url} target="_blank" rel="noopener noreferrer">查看原回答</a>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         {/* 3. 相关推荐 */}
         {(recommendations.author.length > 0 || recommendations.topics.length > 0) && (

@@ -1095,6 +1095,7 @@ export default function Home() {
           diagnostics={reportDiagnostics}
           cacheUpdatedAt={cacheUpdatedAt}
           cacheStale={cacheStale}
+          discussionCompleted={completed}
           knowledgeGraph={session?.knowledgeGraph ?? null}
           sessionId={session?.id}
           excludedHistoryIds={excludedHistoryIds}
