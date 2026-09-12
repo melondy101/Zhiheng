@@ -332,6 +332,10 @@ tests/
 
 知识库的语义检索是该门禁的首个适用场景：在启用 Neon `pgvector`、embedding 供应商或 Vercel 服务端检索前，先提供上述清单和执行顺序；未获确认不得操作外部平台或生产数据库。
 
+### CloudBase 云托管运行时
+
+CloudBase 云托管与 Vercel 是并列的部署目标，不迁移或替换任何 Provider。根目录 `Dockerfile` 从 Next.js standalone 输出启动 `server.js`，并显式携带 `public/` 与 `.next/static/`，以保证静态资源与样式可用；服务监听 `0.0.0.0:3000`。CloudBase 的环境变量名称、首次部署操作和真实 Provider 的受控验收边界见 [cloudbase-cloudrun.md](cloudbase-cloudrun.md)。`vercel.json` 与 Vercel 的原有构建流程保持不变。
+
 ## 11. 已知技术债
 
 - `next` + `react` types 在某些 tsc 调用中报 `JSX.IntrinsicElements` 警告 — 预存

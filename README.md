@@ -35,6 +35,10 @@ npm run check       # 全量门禁
 > **端口说明**：默认 3000。系统若被占用，使用 `--port 3001`。Playwright 配置 (playwright.config.js) 也使用 3001。
 > **凭据**：`.env.local` 须包含 `ZHIHU_ACCESS_SECRET` + `LLM_API_KEY`+`LLM_MODEL` 才走真实 Provider；缺失时自动降级到 fixture，且 UI/源标签绝不标 live。`DATABASE_URL` 缺失则降级 localStorage。分享功能需要 `SINK_API_KEY` + `SHARE_BASE_URL`。认证功能需要 `RESEND_API_KEY` + `RESEND_FROM_EMAIL`。
 
+## 部署
+
+现有 Vercel 部署流程与 [`vercel.json`](vercel.json) 保持不变。CloudBase 云托管（CloudRun）部署使用根目录 [`Dockerfile`](Dockerfile)，容器监听 `3000`；首次部署、变量清单和受控验收边界见 [CloudBase 云托管部署说明](docs/cloudbase-cloudrun.md)。
+
 ## 演示路径
 
 启动 dev server 后，浏览器打开 `http://localhost:3001`，按以下任一路径走完：
