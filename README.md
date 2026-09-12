@@ -74,6 +74,8 @@ npm run check       # 全量门禁
 |------|------|------|
 | GET  | `/api/health` | 健康检查 |
 | GET  | `/api/hotlist` | 知乎热榜 Top 10（含 live/cache/demo 状态） |
+| GET | `/api/zhihu/quota` | 当前讨论后问题推荐与回答摘要所需的知乎额度（未配置时明确不可用） |
+| GET/POST | `/api/auth/zhihu/*` | OAuth 绑定状态与仅由用户主动发起的创作、关注、收藏读取；收藏内容必须点选收藏夹 |
 | POST | `/api/report` | 生成研究报告（并行搜索 + 知识图谱） |
 | POST | `/api/interrogate` | 诘问（策略引擎 + LLM fallback） |
 | GET/POST | `/api/session` | 会话加载/保存 |
