@@ -153,16 +153,20 @@ export class ZhihuOAuthProvider {
     return this.sessions.get(ownerId)?.accessToken ?? null;
   }
 
-  async readUserData(ownerId: string, resource: 'contents' | 'followees' | 'favorites' | 'recent_favorites'): Promise<{ ok: true; data: unknown } | { ok: false; reason: 'not_authorized' | 'access_secret_missing' | 'upstream_error' }> {
+  async readUserData(ownerId: string, resource: 'contents' | 'followees' | 'favorites' | 'recent_favorites' | 'favorite_contents', favlistUrlToken?: string): Promise<{ ok: true; data: unknown } | { ok: false; reason: 'not_authorized' | 'access_secret_missing' | 'invalid_favlist' | 'upstream_error' }> {
     const session = this.sessions.get(ownerId);
     if (!session) return { ok: false, reason: 'not_authorized' };
     const accessSecret = process.env.ZHIHU_ACCESS_SECRET?.trim();
     if (!accessSecret) return { ok: false, reason: 'access_secret_missing' };
+    if (resource === 'favorite_contents' && !/^\d+$/.test(favlistUrlToken ?? '')) {
+      return { ok: false, reason: 'invalid_favlist' };
+    }
     const paths = {
       contents: '/api/v1/user/contents?ContentType=all&Limit=20',
       followees: '/api/v1/user/followees?Limit=20',
       favorites: '/api/v1/user/favlists?Limit=20',
       recent_favorites: '/api/v1/user/collections?Limit=20',
+      favorite_contents: `/api/v1/user/favlist_contents?FavlistUrlToken=${favlistUrlToken}&Limit=20`,
     } as const;
     const response = await fetch(`https://developer.zhihu.com${paths[resource]}`, {
       headers: {
@@ -189,3 +193,4 @@ export function getZhihuOAuthProvider(): ZhihuOAuthProvider {
 export function resetZhihuOAuthProvider(): void {
   sharedProvider = null;
 }
+
