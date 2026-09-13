@@ -17,5 +17,5 @@ export async function GET(request: Request) {
   const profile = await provider.fetchProfile(token.accessToken);
   if (!profile) return NextResponse.json({ error: 'ZHIHU_OAUTH_PROFILE_FAILED' }, { status: 502 });
   provider.bindAuthorizedUser(session.userId, token.accessToken, profile);
-  return NextResponse.redirect(new URL('/', request.url));
+  return NextResponse.redirect(new URL('/?zhihu=connected', request.url));
 }

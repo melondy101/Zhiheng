@@ -28,6 +28,24 @@ test('authorization state is bound to one owner and can only be consumed once', 
   assert.equal(provider.consumeAuthorization(started.state, 'owner-a').ok, true);
   assert.equal(provider.consumeAuthorization(started.state, 'owner-a').ok, false);
 });
+
+test('authorized status exposes only the safe Zhihu profile, never the access token', () => {
+  const provider = new ZhihuOAuthProvider({
+    env: {
+      ZHIHU_OAUTH_APP_ID: '123',
+      ZHIHU_OAUTH_APP_KEY: 'app-key',
+      ZHIHU_OAUTH_REDIRECT_URI: 'https://zhiyan.example/api/auth/zhihu/callback',
+    },
+  });
+  provider.bindAuthorizedUser('owner-a', 'oauth-token-that-must-stay-server-side', {
+    id: 'zhihu-user', name: '知乎用户', avatarUrl: null, headline: '保持思考',
+  });
+
+  const status = provider.getStatus('owner-a');
+  assert.equal(status.authorized, true);
+  assert.deepEqual(status.profile, { id: 'zhihu-user', name: '知乎用户', avatarUrl: null, headline: '保持思考' });
+  assert.equal(JSON.stringify(status).includes('oauth-token-that-must-stay-server-side'), false);
+});
 test('favorite content read requires an authorized user-selected favorite folder', async () => {
   const originalSecret = process.env.ZHIHU_ACCESS_SECRET;
   const originalFetch = globalThis.fetch;
