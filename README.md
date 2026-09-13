@@ -7,7 +7,7 @@
 > 独立开发、已部署的原型：AI 提供证据与追问结构，但不替用户裁决观点；真实服务不可用时，界面会诚实区分缓存、fixture 与本地降级。<br>
 > *An independently built thinking companion that helps people examine ideas without deciding for them.*
 
-[在线体验](https://zhiheng-4yvv7zg1f-2014596548-3040s-projects.vercel.app) · [产品设计](./docs/prd/2026-09-02-zhiyan-design-v4.2.md) · [架构说明](docs/architecture.md)
+[在线体验](https://zhiheng-4yvv7zg1f-2014596548-3040s-projects.vercel.app) · [产品设计](./docs/prd/2026-09-13-zhiyan-design-v5.0.md) · [架构说明](docs/architecture.md)
 
 ---
 
@@ -50,7 +50,7 @@ npm run check       # 全量门禁
 5. **温和自适应思辨** → 意图分流（用户提问时先直接回答+温和追问；用户作答时先承接+策略追问）→ 每 3 轮出现继续/总结选择；LLM 在配置有效时按真实模型出题，否则稳定走策略模板（不替用户裁决）
 6. **成果卡** → 6 段可追溯（初始表达/起始立场/新增证据/观点修正/你最后表达的观点/未解决问题）；它不把用户原话伪装成 AI 总结
 7. **刷新页面** → 重新打开成果卡（localStorage 或 Neon 跨设备恢复，owner header 隔离）
-8. **公开分享** → 分享按钮生成链接；打开 `/share/[id]` 无需登录即可查看（报告 + 成果卡）
+8. **公开分享** → 分享按钮生成链接；打开 `/share/[id]` 无需登录即可查看成果卡。当前已生成用于分享的 Markdown 内容；Markdown 文件和知识图谱 PNG 的下载入口、PDF 导出仍未接入成果卡界面。
 
 **三个预置主题**（可在 `src/lib/demo-sources.ts` 找到，fixture 降级时强制使用）：
 - `AI是否会取代人类创造力`（AI/技术）
@@ -84,7 +84,8 @@ npm run check       # 全量门禁
 | POST | `/api/report` | 生成研究报告（并行搜索 + 知识图谱） |
 | POST | `/api/interrogate` | 诘问（策略引擎 + LLM fallback） |
 | GET/POST | `/api/session` | 会话加载/保存 |
-| GET | `/api/share/[id]` | 公开分享（无需登录） |
+| POST | `/api/share` | 保存成果 Markdown 并生成公开分享链接 |
+| GET | `/api/share?id={shareId}` | 读取公开分享内容（无需登录） |
 | POST | `/api/recommendations` | 基于报告引用生成相关推荐；站内搜索按顺序执行，避免短时限流 |
 
 ## Provider 边界
@@ -125,7 +126,7 @@ docs/
 
 ## 文档导航
 
-- [产品设计 v4.2](./docs/prd/2026-09-02-zhiyan-design-v4.2.md) — 当前产品设计基线
+- [产品设计 v5.0](./docs/prd/2026-09-13-zhiyan-design-v5.0.md) — 当前产品设计基线与实现边界
 - [v4.2 实现说明](./docs/implementation-v4.2.md) — PRD 逐项实现映射与已知偏差
 - [M1 交付 Backlog](docs/prd/2026-09-01-zhiyan-m1-delivery-backlog.md) — 历史交付映射与依赖
 - [架构说明](docs/architecture.md) — Provider 合约、数据流、状态机

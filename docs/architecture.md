@@ -37,7 +37,7 @@
 - `/report` — 报告生成（检索链）
 - `/interrogate` — 诘问引擎
 - `/session` — 会话持久化
-- `/share/[id]` — 公开分享（无需认证）
+- `/share` — `POST` 保存公开 Markdown 并生成链接；`GET ?id={shareId}` 读取公开内容（无需认证）。展示页为 `/share/[id]`。
 - `/recommendations` — 推荐问题列表
 - `/profile` — 用户画像
 - `/auth/*` — 邮箱认证（login/register/logout/me/send-code）
@@ -86,7 +86,6 @@ demo fixture ┘
 
 ```typescript
 interface LLMProvider {
-  generateQuestion(session: Session): Promise<string>;
   generateStrategyQuestion(strategy: StrategyId, session: Session): Promise<string>;
 }
 ```
@@ -183,9 +182,14 @@ Round 6+: 旋转选择 (M1/M2/M4/M6)，不立即重复
 `_strategyHistory` 仅在读取时兼容，新的记录绝不写入该运行时属性。
 `recordStrategy()` 是不可变更新，调用方必须接收其返回的 session。
 
-诘问强度依据最近三条有效用户回答作保守判断：一次低投入回答仅增加
-中性脚手架；连续两次低投入回答才会把 M4/M6/M8 等挑战型策略降为
-M7/M3/M1。该机制只会降低压力，永不自动升级，也不向用户展示诊断标签。
+诘问强度是会话状态 `questioningIntensity: gentle | standard | challenging`：新会话
+一律从 `gentle` 起步；连续两轮具体、展开且不重复的回答才逐级升高；任何回避、
+重复或长度骤降都会立即降低一级。一次低投入回答增加中性脚手架；连续两次低投入
+回答仍会把 M4/M6/M8 等挑战型策略降为 M7/M3/M1。诊断标签不向用户展示，也不写入成果卡或用户画像。
+
+交互追问的 LLM prompt（system + user）硬限制为 400 字符：仅携带策略、当前强度、
+立场、最新回答及至多一条证据。`[req:llm_chat]` 日志对每次调用记录脱敏请求信息、
+HTTP 状态码、耗时与响应摘要；不会记录 API key。
 **用户主动退出任何时候可用** — `handleCompleteNow()`。
 
 ## 4. 数据模型（核心字段）
@@ -205,6 +209,7 @@ interface Session {
   updatedAt: number;
   excludedHistoryIds?: string[];
   strategyHistory?: StrategyId[];
+  questioningIntensity?: 'gentle' | 'standard' | 'challenging';
   interrogationIntensityLog?: Array<{ round: number; from: StrategyId; to: StrategyId; mode: 'scaffolded' | 'deescalated'; reasons: string[] }>;
   reportSourceState?: { zhihu: SourceState; web: SourceState; zhihuUpdatedAt?: number; webUpdatedAt?: number; zhihuStale?: boolean; webStale?: boolean };
 }
