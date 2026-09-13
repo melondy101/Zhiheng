@@ -33,7 +33,7 @@ async function seedReportAndStart(page: import('@playwright/test').Page) {
 test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
   test('scenario 1: a user question gets a direct answer + a follow-up and the round does not advance', async ({ page }) => {
     await seedReportAndStart(page);
-    const input = page.getByPlaceholder('输入你的回答...');
+    const input = page.getByTestId('answer-input');
     await input.fill('什么是缓存？');
     const messagesBefore = await page.locator('[data-testid="qa-panel"] li').count();
     await page.getByRole('button', { name: /发送/ }).click();
@@ -61,7 +61,7 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
       await route.continue();
     });
 
-    await page.getByPlaceholder('输入你的回答...').fill('发送期间不应卸载整个对话页面。');
+    await page.getByTestId('answer-input').fill('发送期间不应卸载整个对话页面。');
     await page.getByRole('button', { name: /发送/ }).click();
     await requestStarted;
     try {
@@ -75,7 +75,7 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
 
   test('scenario 2: three substantive answers open the decision gate (3/6/9 summary gate)', async ({ page }) => {
     await seedReportAndStart(page);
-    const input = page.getByPlaceholder('输入你的回答...');
+    const input = page.getByTestId('answer-input');
     for (const answer of [
       '我认为缓存能减少外部 API 调用。',
       '因为数据库查询快且一致。',
@@ -91,7 +91,7 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
 
   test('scenario 3: 继续聊 is a legal 200 transition and a fresh question appears', async ({ page }) => {
     await seedReportAndStart(page);
-    const input = page.getByPlaceholder('输入你的回答...');
+    const input = page.getByTestId('answer-input');
     for (const answer of [
       '我看好缓存优先。',
       '它能改善断网体验。',
@@ -109,7 +109,7 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
 
   test('scenario 4: 生成总结 completes the session and shows the result card', async ({ page }) => {
     await seedReportAndStart(page);
-    const input = page.getByPlaceholder('输入你的回答...');
+    const input = page.getByTestId('answer-input');
     for (const answer of [
       '缓存优先能减少外部调用。',
       '它能改善断网体验。',
@@ -127,7 +127,7 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
 
   test('scenario 5: reload restores full history and the open summary gate', async ({ page }) => {
     await seedReportAndStart(page);
-    const input = page.getByPlaceholder('输入你的回答...');
+    const input = page.getByTestId('answer-input');
     for (const answer of [
       '缓存优先能减少外部调用。',
       '它能改善断网体验。',
@@ -149,7 +149,7 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
     await seedReportAndStart(page);
     const cue = page.getByTestId('session-feedback-cue');
     await expect(cue).toBeVisible();
-    const input = page.getByPlaceholder('输入你的回答...');
+    const input = page.getByTestId('answer-input');
     await input.fill('什么是缓存？');
     await page.getByRole('button', { name: /发送/ }).click();
     // The cue is server-state driven: the request is in flight, then done.

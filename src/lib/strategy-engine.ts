@@ -260,11 +260,48 @@ export function pickNextStrategy(session: Session, directiveRound?: number): Str
         ]
       : ['M1_evidence', 'M2_premise', 'M4_steelman', 'M6_reversal', 'M5_system2'];
 
-  const last = history[history.length - 1];
-  for (const s of fallbackOrder) {
-    if (s !== last) return s;
-  }
-  return 'M1_evidence';
+  return pickFromRotation(fallbackOrder, history, session);
+}
+
+/**
+ * D-2: pick the next strategy from a rotation pool by least-recent use.
+ *
+ * The previous rule only skipped the immediately preceding strategy, so after
+ * the opening plan the rotation oscillated between the first two entries
+ * forever (ABAB) and never reached the tail of the pool — the frameworks wired
+ * to those strategies (罗尔斯无知之幕 / 意外后果法则) became unreachable in long
+ * sessions.
+ *
+ * Choosing the candidate whose last use is furthest back (never-used counts as
+ * furthest) yields a full round-robin: every strategy is revisited, and the gap
+ * between two uses of the same strategy is at least the pool size.
+ *
+ * `isApplicable` is consulted for real here. When every candidate declines, the
+ * least-recently-used entry of the original order is returned so the caller
+ * always receives a usable strategy instead of throwing.
+ */
+export function pickFromRotation(
+  order: StrategyId[],
+  history: StrategyId[],
+  session: Session
+): StrategyId {
+  const leastRecentlyUsed = (candidates: StrategyId[]): StrategyId | undefined => {
+    let best: StrategyId | undefined;
+    let bestSeenAt = Number.POSITIVE_INFINITY;
+    for (const id of candidates) {
+      // -1 (never used) sorts before any real index.
+      const seenAt = history.lastIndexOf(id);
+      const rank = seenAt === -1 ? -1 : seenAt;
+      if (rank < bestSeenAt) {
+        bestSeenAt = rank;
+        best = id;
+      }
+    }
+    return best;
+  };
+
+  const applicable = order.filter((id) => STRATEGIES[id].isApplicable(session, history));
+  return leastRecentlyUsed(applicable) ?? leastRecentlyUsed(order) ?? 'M1_evidence';
 }
 
 export const STRATEGIES: Record<StrategyId, Strategy> = {

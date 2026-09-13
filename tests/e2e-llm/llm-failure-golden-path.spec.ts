@@ -25,14 +25,14 @@ test('LLM failure degrades to the strategy template and preserves the round', as
   // retrieval path is unaffected by the LLM env).
   await page.click('summary:has-text("补充我的初步看法（可选）")');
   await page.fill('textarea#question', '大模型幻觉问题有多严重？');
-  await page.fill('textarea[placeholder="你目前的看法是什么？"]', '我认为大模型幻觉被夸大了');
+  await page.fill('[data-testid="initial-opinion-input"]', '我认为大模型幻觉被夸大了');
   await page.click('button[type="submit"]');
   await expect(page).toHaveURL(/session=\w+/);
   await expect(page.getByTestId('report-viewpoints-heading')).toBeVisible({ timeout: 15000 });
   await page.waitForLoadState('networkidle');
 
   // Select a stance -> the round 1 question is generated (LLM fails twice).
-  const viewpoints = page.locator('.space-y-2 button');
+  const viewpoints = page.getByTestId('stance-option');
   await expect(viewpoints.first()).toBeVisible();
   await viewpoints.first().click();
 
@@ -51,8 +51,8 @@ test('LLM failure degrades to the strategy template and preserves the round', as
 
   // (c) Answer one round: the answer is kept, the round advances, and the
   //     round 2 question (前提追问) is template-degraded again.
-  await page.fill('input[placeholder="输入你的回答..."]', ANSWER_1);
-  await page.click('button:has-text("发送")');
+  await page.fill('[data-testid="answer-input"]', ANSWER_1);
+  await page.getByTestId('send-answer-button').click();
   await expect(page.getByText(ANSWER_1).first()).toBeVisible();
   await expect(page.getByText('第 2 轮').first()).toBeVisible();
   await expect(page.getByText('【策略模板降级】').first()).toBeVisible();

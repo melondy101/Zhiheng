@@ -18,7 +18,7 @@ for (const fixture of DEMO_FIXTURES) {
 
       await page.click('summary:has-text("补充我的初步看法（可选）")');
       await page.fill('textarea#question', fixture.topic);
-      await page.fill('textarea[placeholder="你目前的看法是什么？"]', '我的初步看法');
+      await page.fill('[data-testid="initial-opinion-input"]', '我的初步看法');
       await page.click('button[type="submit"]');
       await expect(page).toHaveURL(/session=\w+/);
 
@@ -37,8 +37,8 @@ for (const fixture of DEMO_FIXTURES) {
       // Three substantive answers open the 3-round summary gate.
       const answers = [1, 2, 3].map(roundAnswer);
       for (let i = 0; i < 3; i++) {
-        await page.fill('input[placeholder="输入你的回答..."]', answers[i]!);
-        await page.click('button:has-text("发送")');
+        await page.fill('[data-testid="answer-input"]', answers[i]!);
+        await page.getByTestId('send-answer-button').click();
         await page.waitForTimeout(300);
       }
       await expect(page.getByTestId('summary-gate')).toBeVisible({ timeout: 30_000 });

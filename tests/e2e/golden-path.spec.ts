@@ -26,7 +26,7 @@ async function startSession(page: Page, question: string, opinion: string) {
 
   await page.click('summary:has-text("补充我的初步看法（可选）")');
   await page.fill('textarea#question', question);
-  await page.fill('textarea[placeholder="你目前的看法是什么？"]', opinion);
+  await page.fill('[data-testid="initial-opinion-input"]', opinion);
   await page.click('button[type="submit"]');
   await expect(page).toHaveURL(/session=\w+/);
 
@@ -39,18 +39,74 @@ async function startSession(page: Page, question: string, opinion: string) {
 }
 
 async function answer(page: Page, text: string) {
-  await page.fill('input[placeholder="输入你的回答..."]', text);
-  await page.click('button:has-text("发送")');
+  await page.fill('[data-testid="answer-input"]', text);
+  await page.getByTestId('send-answer-button').click();
 }
 
 test.describe('Golden Path: gentle adaptive interrogation (PRD v4.2 §5)', () => {
   test('report follows the vertical evidence structure without a standalone verdict', async ({ page }) => {
+    // The E2E webServer pins the LLM env empty, so FixtureLLMProvider returns
+    // no synthesis by design (a fixture excerpt must never masquerade as an
+    // AI-generated viewpoint). This test is about the RENDERING contract, so
+    // it supplies a report that actually carries a synthesis.
+    await page.route('**/api/report', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessionId: 's_e2e_synthesis',
+          report: {
+            question: QUESTION,
+            title: QUESTION,
+            knowledgePoints: ['核心知识点：演示用'],
+            content: '演示报告内容',
+            viewpoints: ['观点 1：技术扩张了表达空间'],
+            synthesis: {
+              viewpoints: [
+                {
+                  id: 'vp_1',
+                  conclusion: '工具替代的是执行环节，而非创造意图本身。',
+                  evidence: [
+                    { summary: '摄影术普及后绘画转向了新的表达形式。', citationIds: [1] },
+                  ],
+                },
+              ],
+            },
+            references: [
+              {
+                id: 'src_1',
+                type: 'zhihu',
+                title: '摄影术与绘画的百年之争',
+                excerpt: '新工具出现后，旧媒介往往转向它更擅长的表达。',
+                author: '社区用户',
+                url: 'https://www.zhihu.com/question/1',
+              },
+            ],
+            citations: {
+              1: {
+                id: 'src_1',
+                type: 'zhihu',
+                title: '摄影术与绘画的百年之争',
+                excerpt: '新工具出现后，旧媒介往往转向它更擅长的表达。',
+                author: '社区用户',
+                url: 'https://www.zhihu.com/question/1',
+              },
+            },
+          },
+          knowledgeGraph: null,
+        }),
+      })
+    );
+
     await startSession(page, QUESTION, INITIAL_OPINION);
 
     const report = page.getByTestId('report-synthesis');
     await expect(report).toBeVisible();
-    await expect(report.getByTestId('report-viewpoints-heading')).toHaveText('核心观点');
-    await expect(report.getByText('📖 主要内容').first()).toBeVisible();
+    // b9914e1 (UI 重设计) 后：标题为「核心观点提炼」，每个观点下方以
+    // 「论据出处与摘要」纵向承载证据，取代了旧的「📖 主要内容」段落。
+    await expect(report.getByTestId('report-viewpoints-heading')).toContainText('核心观点');
+    await expect(report.getByTestId('report-viewpoint-evidence').first()).toBeVisible();
+    await expect(report.getByText('论据出处与摘要').first()).toBeVisible();
     await expect(page.getByTestId('report-synthesis-heading')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: '🕸️ 知识图谱' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '引用来源' })).toBeVisible();
@@ -87,7 +143,8 @@ test.describe('Golden Path: gentle adaptive interrogation (PRD v4.2 §5)', () =>
     await expect(page.getByTestId('summary-gate')).toBeVisible({ timeout: 30_000 });
     await page.getByTestId('summary-gate-complete').click();
     await expect(page.locator('h3:has-text("思辨成果卡")')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('h4:has-text("最终观点")')).toBeVisible();
+    // b9914e1 后成果卡分节改名：「最终观点」→「5. 你最后表达的观点」。
+    await expect(page.locator('h4:has-text("你最后表达的观点")')).toBeVisible();
     await expect(page.getByText(INITIAL_OPINION).first()).toBeVisible();
   });
 
@@ -104,7 +161,7 @@ test.describe('Golden Path: gentle adaptive interrogation (PRD v4.2 §5)', () =>
     // remains interactive.
     await expect(page.getByTestId('qa-panel')).toBeVisible();
     // A fresh question is now displayed (the user can answer again).
-    await expect(page.locator('input[placeholder="输入你的回答..."]')).toBeVisible();
+    await expect(page.getByTestId('answer-input')).toBeVisible();
   });
 
   test('reload mid-session restores the history and the pending round', async ({ page }) => {
@@ -225,8 +282,8 @@ test.describe('Uncertainty loop and explicit completion', () => {
   const UNCERTAIN = ['不知道', '我不清楚', '不确定'];
 
   async function answerUncertain(page: Page, text: string) {
-    await page.fill('input[placeholder="输入你的回答..."]', text);
-    await page.click('button:has-text("发送")');
+    await page.fill('[data-testid="answer-input"]', text);
+    await page.getByTestId('send-answer-button').click();
   }
 
   test('three uncertain answers stay in round 1, keep every input, and offer an explicit choice', async ({ page }) => {

@@ -513,6 +513,7 @@ export default function QAPanel({
           <div className="flex gap-2 items-center">
             <input
               type="text"
+              data-testid="answer-input"
               value={answer}
               onChange={(e) => onAnswerChange(e.target.value)}
               placeholder={formLoading ? '正在发送...' : '输入你的观点或论述...'}

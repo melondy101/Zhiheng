@@ -28,6 +28,68 @@ function clean(str: string): string {
 }
 
 /**
+ * O-3: extract a JSON object payload out of a raw model response.
+ *
+ * Real providers wrap the payload in markdown fences, prose ("好的，以下是结果："),
+ * reasoning tags (`<think>…</think>`), or trailing pleasantries; some also emit a
+ * trailing comma. `JSON.parse` rejects all of those, so the caller silently fell
+ * back to the local heuristic after paying for the request.
+ *
+ * This strips packaging ONLY. It never invents or repairs meaning: input with no
+ * balanced object, or an object that still fails `JSON.parse`, returns null so the
+ * caller degrades honestly.
+ */
+export function extractJsonObject(rawText: string): string | null {
+  if (typeof rawText !== 'string') return null;
+
+  // Drop reasoning blocks and markdown fences before scanning.
+  const cleaned = rawText
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/```(?:json)?/gi, '');
+
+  // Scan for the first balanced object, honouring string literals and escapes
+  // so braces inside values (e.g. "含{符号}的标题") never break the balance.
+  for (let start = cleaned.indexOf('{'); start !== -1; start = cleaned.indexOf('{', start + 1)) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < cleaned.length; i++) {
+      const char = cleaned[i]!;
+
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+
+      if (char === '"') inString = true;
+      else if (char === '{') depth++;
+      else if (char === '}') {
+        depth--;
+        if (depth === 0) {
+          const candidate = cleaned.slice(start, i + 1);
+          // Tolerate a trailing comma before a closing brace/bracket.
+          const normalized = candidate.replace(/,(\s*[}\]])/g, '$1');
+          try {
+            const parsed: unknown = JSON.parse(normalized);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              return normalized;
+            }
+          } catch {
+            // Not a valid payload — keep scanning from the next '{'.
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Deterministic heuristic question rewriter & subtitle generator.
  * Used when LLM is offline, unavailable, or in unit tests.
  */
@@ -235,9 +297,11 @@ export function parseQuestionRewriteResponse(
   preferredVersion: 'v1' | 'v2' = 'v2'
 ): QuestionRewriteResult {
   try {
-    let cleanJson = rawText.trim();
-    if (cleanJson.startsWith('```')) {
-      cleanJson = cleanJson.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    // O-3: tolerate prose, reasoning tags, fences and trailing commas around
+    // the payload. Unparseable input still throws and degrades honestly below.
+    const cleanJson = extractJsonObject(rawText);
+    if (cleanJson === null) {
+      throw new Error('No JSON object found in the model response');
     }
 
     const parsed = JSON.parse(cleanJson);

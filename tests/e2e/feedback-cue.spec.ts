@@ -24,17 +24,20 @@ async function startSession(page: Page) {
   await expect(page.locator('h1')).toContainText('知研');
   await page.click('summary:has-text("补充我的初步看法（可选）")');
   await page.fill('textarea#question', QUESTION);
-  await page.fill('textarea[placeholder="你目前的看法是什么？"]', INITIAL_OPINION);
+  await page.fill('[data-testid="initial-opinion-input"]', INITIAL_OPINION);
   await page.click('button[type="submit"]');
   await expect(page).toHaveURL(/session=\w+/);
-  await expect(page.getByTestId('report-viewpoints-heading')).toBeVisible({ timeout: 15000 });
-  await page.locator('.space-y-2 button').first().click();
+  // 无密钥的 E2E 环境下 FixtureLLMProvider 按设计不产出综合观点，
+  // report-viewpoints-heading 不会渲染；用 stance-selector 作为
+  // 「报告已就绪」的锚点，它正是下一步操作的前提。
+  await expect(page.getByTestId('stance-selector')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('stance-option').first().click();
 }
 
 async function answerRound(page: Page, round: number, text: string) {
   await expect(page.getByText(`第 ${round} 轮`).first()).toBeVisible();
-  await page.fill('input[placeholder="输入你的回答..."]', text);
-  await page.click('button:has-text("发送")');
+  await page.fill('[data-testid="answer-input"]', text);
+  await page.getByTestId('send-answer-button').click();
 }
 
 test.describe('Feedback cue Golden Path: four derived states (#48)', () => {
@@ -50,7 +53,7 @@ test.describe('Feedback cue Golden Path: four derived states (#48)', () => {
     await expect(page.locator('h1')).toContainText('知研');
     await page.click('summary:has-text("补充我的初步看法（可选）")');
     await page.fill('textarea#question', QUESTION);
-    await page.fill('textarea[placeholder="你目前的看法是什么？"]', INITIAL_OPINION);
+    await page.fill('[data-testid="initial-opinion-input"]', INITIAL_OPINION);
     await page.click('button[type="submit"]');
 
     // 1) retrieving — visible while the report request is in flight.
@@ -59,9 +62,9 @@ test.describe('Feedback cue Golden Path: four derived states (#48)', () => {
     await expect(page).toHaveURL(/session=\w+/);
 
     // No cue during stance selection (before a viewpoint is chosen).
-    await expect(page.getByTestId('report-viewpoints-heading')).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('stance-selector')).toBeVisible({ timeout: 30_000 });
     await expect(cue(page)).toHaveCount(0);
-    await page.locator('.space-y-2 button').first().click();
+    await page.getByTestId('stance-option').first().click();
 
     // 2) questioning — round 1 M1 evidence.
     await expect(cue(page)).toHaveAttribute('data-cue-state', 'questioning');

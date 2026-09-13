@@ -321,9 +321,9 @@ export default function HomePage({
             <>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xl font-bold text-brand font-serif tracking-wide">
+                  <h1 className="text-xl font-bold text-brand font-serif tracking-wide">
                     知研
-                  </span>
+                  </h1>
                   <span className="px-2 py-0.5 text-[10px] font-medium bg-brand-light text-brand rounded border border-brand-subtle">
                     MVP
                   </span>
@@ -520,6 +520,8 @@ export default function HomePage({
                 </summary>
                 <div className="mt-2.5">
                   <textarea
+                    id="initial-opinion"
+                    data-testid="initial-opinion-input"
                     value={initialOpinion}
                     onChange={(e) => setInitialOpinion(e.target.value)}
                     placeholder="你目前的看法或倾向是什么？系统将针对你的观点展开定制化追问。"

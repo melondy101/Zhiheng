@@ -391,7 +391,6 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     validationSources: SynthesisSource[],
     question: string
   ): Promise<ReportSynthesis> {
-    const isDeepSeek = new URL(this.config.baseUrl).hostname.endsWith('deepseek.com');
     const body = await this.postChatCompletion(
       JSON.stringify({
         model: this.config.model,
@@ -401,7 +400,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         // insufficient for strict downstream parsing, especially when the
         // provider's thinking mode is enabled by default.
         response_format: { type: 'json_object' },
-        ...(isDeepSeek ? { thinking: { type: 'disabled' } } : {}),
+        ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
         // The report schema is compact. A large output budget makes the
         // reasoning model spend tens of seconds on unnecessary verbosity.
         max_tokens: 1536,
@@ -467,6 +466,12 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         model: this.config.model,
         messages,
         temperature: 0.3,
+        // O-3: this response is machine-parsed by parseQuestionRewriteResponse.
+        // Prompt wording alone does not stop prose/reasoning wrappers, so the
+        // JSON mode is requested server-side as the first line of defence;
+        // extractJsonObject remains the client-side safety net.
+        response_format: { type: 'json_object' },
+        ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
         max_tokens: 1024,
       }),
       timeoutMs
@@ -481,7 +486,24 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
   }
 
   /**
+   * True when the configured base URL points at DeepSeek, whose reasoning
+   * ("thinking") mode is on by default and otherwise leaks chain-of-thought
+   * prose into a response the caller parses as JSON.
+   */
+  private isDeepSeekEndpoint(): boolean {
+    try {
+      return new URL(this.config.baseUrl).hostname.endsWith('deepseek.com');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Generic completion helper for custom prompt messages.
+   *
+   * O-3: every current caller feeds the result to JSON.parse, so the JSON mode
+   * is requested server-side here too. `extractJsonObject` still guards the
+   * parse, because not every provider honours response_format.
    */
   async generateCustomCompletion(
     messages: Array<{ role: string; content: string }>,
@@ -492,6 +514,8 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         model: this.config.model,
         messages,
         temperature: 0.3,
+        response_format: { type: 'json_object' },
+        ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
         max_tokens: 2048,
       }),
       timeoutMs
