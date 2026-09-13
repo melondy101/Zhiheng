@@ -27,7 +27,12 @@ import { actionAfterAnswer, pickNextStrategy, recordStrategy } from './strategy-
 import type { StrategyId } from './strategy-engine';
 import { isUncertainAnswer, uncertainResponse, withFallback } from './llm-fallback';
 import { buildNarrowedQuestion, selectRoundSources } from './interrogation-context';
-import { adaptiveGuidance, detectEngagement, resolveAdaptiveStrategy } from './engagement-signal';
+import {
+  adaptiveGuidance,
+  detectEngagement,
+  nextQuestioningIntensity,
+  resolveAdaptiveStrategy,
+} from './engagement-signal';
 import { buildSimpleResultCard } from './result-card-builder';
 import {
   classifyIntent,
@@ -217,6 +222,11 @@ async function planNextRound(
   generateQuestion: HandleInterrogateInput['generateQuestion'],
   uncertainStreak: number
 ): Promise<Session> {
+  const questioningIntensity = nextQuestioningIntensity(
+    session.questioningIntensity,
+    session.messages.filter((message) => message.role === 'user').map((message) => message.text)
+  );
+  session = { ...session, questioningIntensity };
   const isFirstRound = answeredRounds(session) === 0;
   const strategy = pickNextStrategy(session);
   let questionText: string;
@@ -251,6 +261,7 @@ async function planNextRound(
     ...(fallbackReason ? { fallbackReason } : {}),
     pendingCheckpoint: false,
     uncertainStreak,
+    questioningIntensity,
   };
   return {
     ...session,
@@ -689,17 +700,25 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
 
   // #5: for questions, the AI replies directly and provides a follow-up;
   // for substantive responses, the AI acknowledges and asks a strategy question.
-  const plannedStrategy = pickNextStrategy(withAnswer, nextDirectiveRound);
-  const recentSubstantiveAnswers = withAnswer.messages
+  const recentUserAnswers = withAnswer.messages
+    .filter((message) => message.role === 'user')
+    .map((message) => message.text);
+  const questioningIntensity = nextQuestioningIntensity(
+    withAnswer.questioningIntensity,
+    recentUserAnswers
+  );
+  const withIntensity = { ...withAnswer, questioningIntensity };
+  const plannedStrategy = pickNextStrategy(withIntensity, nextDirectiveRound);
+  const recentSubstantiveAnswers = withIntensity.messages
     .filter((message) => message.role === 'user' && message.uncertain !== true)
     .map((message) => message.text);
   const engagement = detectEngagement(recentSubstantiveAnswers);
   const adaptive = resolveAdaptiveStrategy(plannedStrategy, engagement);
   const nextStrategy = adaptive.strategy;
-  const fb = await withFallback(nextStrategy, withAnswer, () =>
-    generateQuestion(nextStrategy, withAnswer)
+  const fb = await withFallback(nextStrategy, withIntensity, () =>
+    generateQuestion(nextStrategy, withIntensity)
   );
-  const withRecordedStrategy = recordStrategy(withAnswer, nextStrategy);
+  const withRecordedStrategy = recordStrategy(withIntensity, nextStrategy);
   const guidance = adaptiveGuidance(adaptive.mode);
   const adaptiveLog = adaptive.mode !== 'deescalated'
     ? withRecordedStrategy.interrogationIntensityLog
@@ -745,6 +764,7 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
       directiveRound: nextDirectiveRound,
       lastIntent: userIntent,
       adaptiveMode: adaptive.mode,
+      questioningIntensity,
     },
     updatedAt: Date.now(),
   };

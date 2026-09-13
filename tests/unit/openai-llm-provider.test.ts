@@ -21,6 +21,7 @@ import {
   EVIDENCE_EXCERPT_MAX_CHARS,
   EVIDENCE_TITLE_MAX_CHARS,
   MAX_QUESTION_CHARS,
+  QUESTION_PROMPT_MAX_CHARS,
   OpenAICompatibleLLMProvider,
   assertNonJudgingQuestion,
   buildStrategyQuestionMessages,
@@ -388,11 +389,15 @@ describe('buildStrategyQuestionMessages: request boundary', () => {
         citations: { 1: makeSource({ title: longTitle, excerpt: longExcerpt }) },
       },
     });
-    const { content } = buildStrategyQuestionMessages('M1_evidence', session)[1]!;
+    const messages = buildStrategyQuestionMessages('M1_evidence', session);
+    const { content } = messages[1]!;
     assert.ok(content.includes('标'.repeat(EVIDENCE_TITLE_MAX_CHARS)));
     assert.ok(!content.includes(longTitle), 'the full overlong title must not be sent');
-    assert.ok(content.includes('摘'.repeat(EVIDENCE_EXCERPT_MAX_CHARS)));
     assert.ok(!content.includes(longExcerpt), 'the full overlong excerpt must not be sent');
+    assert.ok(
+      messages.reduce((total, message) => total + message.content.length, 0) <= QUESTION_PROMPT_MAX_CHARS,
+      'the global prompt ceiling takes precedence over any individual evidence fragment budget'
+    );
   });
 
   it('handles a session without stance, answers or usable citations', () => {
@@ -482,6 +487,15 @@ describe('OpenAICompatibleLLMProvider: batched report synthesis', () => {
     };
     assert.deepStrictEqual(body.response_format, { type: 'json_object' });
     assert.deepStrictEqual(body.thinking, { type: 'disabled' });
+  });
+
+  it('keeps an intensity-aware strategy prompt within 400 characters', () => {
+    const messages = buildStrategyQuestionMessages('M4_steelman', makeSession({
+      questioningIntensity: 'gentle',
+    }));
+    const promptChars = messages.reduce((total, message) => total + message.content.length, 0);
+    assert.ok(promptChars <= QUESTION_PROMPT_MAX_CHARS, `prompt too long: ${promptChars}`);
+    assert.ok(messages[0]!.content.includes('低强度'));
   });
 
   it('runs first-pass batches and then makes one final cited synthesis request', async () => {

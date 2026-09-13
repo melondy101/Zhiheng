@@ -694,6 +694,46 @@ describe('POST /api/interrogate: explicit complete action (#17)', () => {
 });
 
 describe('POST /api/interrogate: adaptive questioning intensity', () => {
+  it('starts gentle, raises intensity only after sustained detail, and lowers it on hesitation', async () => {
+    const session = seedSession();
+    await scope.sessions.saveSession(session);
+    const started = await startSession(session);
+    assert.strictEqual(started.session?.questioningIntensity, 'gentle');
+    assert.strictEqual(started.session?.interrogation?.questioningIntensity, 'gentle');
+
+    const first = await postInterrogate({
+      sessionId: session.id,
+      action: 'answer',
+      answer: '我会比较短期效率、长期组织学习和执行成本，不能只看其中一个指标。',
+    });
+    assert.strictEqual(first.status, 200);
+    assert.strictEqual(first.body.session?.questioningIntensity, 'gentle');
+
+    const second = await postInterrogate({
+      sessionId: session.id,
+      action: 'answer',
+      answer: '还应收集不同团队规模的案例，并检验沟通成本是否会改变这个判断。',
+    });
+    assert.strictEqual(second.status, 200);
+    assert.strictEqual(second.body.session?.questioningIntensity, 'standard');
+
+    const third = await postInterrogate({
+      sessionId: session.id,
+      action: 'answer',
+      answer: '我会补充一个反例，并说明它是否足以推翻原来的结论。',
+    });
+    assert.strictEqual(third.status, 200);
+    assert.strictEqual(third.body.session?.questioningIntensity, 'challenging');
+
+    const hesitant = await postInterrogate({
+      sessionId: session.id,
+      action: 'answer',
+      answer: '暂时说不出更多依据',
+    });
+    assert.strictEqual(hesitant.status, 200);
+    assert.strictEqual(hesitant.body.session?.questioningIntensity, 'standard');
+  });
+
   it('de-escalates the next steelman question after two low-engagement substantive answers', async () => {
     const session = seedSession();
     await scope.sessions.saveSession(session);

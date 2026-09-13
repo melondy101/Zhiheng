@@ -176,6 +176,8 @@ export interface Session {
    * treated as having no recorded history.
    */
   strategyHistory?: import('./strategy-engine').StrategyId[];
+  /** Current session-level questioning pressure; omitted legacy sessions start gentle. */
+  questioningIntensity?: import('./engagement-signal').QuestioningIntensity;
   /** Conservative adaptations applied to questioning pressure; never a user score. */
   interrogationIntensityLog?: Array<{
     round: number;
@@ -271,6 +273,7 @@ export interface InterrogationState {
   storyRun?: import('./story-run').StoryRun | null;
   /** How the current question was adapted, if at all. */
   adaptiveMode?: import('./engagement-signal').AdaptiveQuestionMode;
+  questioningIntensity?: import('./engagement-signal').QuestioningIntensity;
 }
 
 /** Actions accepted by the interrogation orchestration API (#15, #17, #Q-02). */

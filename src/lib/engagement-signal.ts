@@ -2,6 +2,8 @@ import type { StrategyId } from './strategy-engine';
 
 export type EngagementLevel = 'engaged' | 'wavering' | 'disengaged';
 export type AdaptiveQuestionMode = 'standard' | 'scaffolded' | 'deescalated';
+/** Session-level questioning pressure. New sessions always begin gently. */
+export type QuestioningIntensity = 'gentle' | 'standard' | 'challenging';
 
 export interface EngagementSignal {
   level: EngagementLevel;
@@ -23,6 +25,34 @@ function normalized(text: string): string {
 function weakAnswer(text: string): boolean {
   const clean = normalized(text);
   return clean.length < 20 && AVOIDANCE.test(clean);
+}
+
+function detailedAnswer(text: string): boolean {
+  const clean = normalized(text);
+  return clean.length >= 24 && !AVOIDANCE.test(clean);
+}
+
+const INTENSITY_ORDER: QuestioningIntensity[] = ['gentle', 'standard', 'challenging'];
+
+/**
+ * Advance one session-level intensity step at most. It is deliberately local
+ * and conservative: two concrete answers are required to raise pressure,
+ * while any detected hesitation immediately lowers it by one step.
+ */
+export function nextQuestioningIntensity(
+  current: QuestioningIntensity | undefined,
+  recentAnswers: string[]
+): QuestioningIntensity {
+  const intensity = current ?? 'gentle';
+  const signal = detectEngagement(recentAnswers);
+  const index = INTENSITY_ORDER.indexOf(intensity);
+  if (signal.level !== 'engaged') return INTENSITY_ORDER[Math.max(0, index - 1)]!;
+
+  const recent = recentAnswers.map(normalized).filter(Boolean).slice(-2);
+  if (recent.length === 2 && recent.every(detailedAnswer)) {
+    return INTENSITY_ORDER[Math.min(INTENSITY_ORDER.length - 1, index + 1)]!;
+  }
+  return intensity;
 }
 
 /**

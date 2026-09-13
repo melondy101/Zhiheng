@@ -36,7 +36,6 @@ import { STRATEGIES, type StrategyId } from './strategy-engine';
 import { buildInterrogationContext, selectRoundSources } from './interrogation-context';
 import { getKnowledgeBaseItemForStrategy } from './knowledge-base/provider';
 import { logRequest, maskSensitiveHeaders, previewBody } from './request-log';
-import { getCharacter, getCharacterPromptGuidance } from './character';
 import {
   buildFinalSynthesisMessages,
   buildSynthesisMessages,
@@ -72,6 +71,8 @@ export const EVIDENCE_TITLE_MAX_CHARS = 60;
 export const EVIDENCE_EXCERPT_MAX_CHARS = 160;
 export const STANCE_MAX_CHARS = 200;
 export const LAST_ANSWER_MAX_CHARS = 400;
+/** Hard ceiling for one interactive strategy-question prompt (system + user). */
+export const QUESTION_PROMPT_MAX_CHARS = 400;
 
 export interface OpenAILLMConfig {
   baseUrl: string;
@@ -130,16 +131,17 @@ export interface LLMChatMessage {
  * Safety constraints embedded into every request: the model only asks, it
  * never answers for the user, never judges, and outputs exactly one question.
  */
-const SAFETY_CONSTRAINTS =
-  '安全约束：只提问，不回答；不替用户作答或表态；不输出观点裁决、正确性判断或评分；' +
-  '优先使用“请描述、你如何判断、什么会改变你的看法”等开放式问法，给用户充分作答空间；' +
-  '只输出一个以问号结尾的单个问题，不要任何解释、前缀、引号或额外内容。';
+const SAFETY_CONSTRAINTS = '只提一个开放式问题（问号结尾）；不替用户作答；不输出观点裁决、正确性判断或评分。';
 
-const SYSTEM_PREAMBLE =
-  '你是"知研"诘问引擎的问题生成器。你的唯一任务：针对下面给定的追问策略，生成一个追问问题。';
+const INTENSITY_GUIDANCE = {
+  gentle: '低强度：从一个具体例子或直觉切入，不要求完整论证。',
+  standard: '中强度：检查依据、前提或边界条件。',
+  challenging: '高强度：可检验反例、对立观点或推理张力。',
+} as const;
 
 /** Truncate a text fragment to `max` characters (never invent content). */
 function truncate(text: string, max: number): string {
+  if (max <= 1) return text.slice(0, Math.max(0, max));
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
@@ -157,31 +159,16 @@ export function buildStrategyQuestionMessages(
   const context = buildInterrogationContext(session, strategy);
   const strategyInfo = STRATEGIES[strategy];
   const kbItem = context.kbFramework ?? getKnowledgeBaseItemForStrategy(strategy);
+  const intensity = session.questioningIntensity ?? 'gentle';
+  const system = [
+    '你是知研追问助手。',
+    `当前追问策略：${strategyInfo.name}（${truncate(strategyInfo.description, 48)}）。`,
+    kbItem ? `方法：【${truncate(kbItem.topic, 48)}】。` : '',
+    `追问导向：${INTENSITY_GUIDANCE[intensity]}`,
+    SAFETY_CONSTRAINTS,
+  ].join('');
 
-  const systemParts = [
-    SYSTEM_PREAMBLE,
-    `当前追问策略：${strategyInfo.name}（${strategyInfo.description}）。`,
-  ];
-
-  if (kbItem) {
-    systemParts.push(
-      `方法论依据与追问范式：【${kbItem.topic}】${kbItem.summary}`,
-      `追问导向：参考${kbItem.category === 'logic' ? '逻辑谬误辨析' : kbItem.category === 'philosophy' ? '苏格拉底反诘法' : '经典辩论攻防模型'}，针对观点的深层假设、反例检验或对抗论据深入推演。`
-    );
-  }
-
-  if (session.mode === 'fun' && session.character) {
-    systemParts.push(getCharacterPromptGuidance(session.character));
-  } else if (session.phase === 'orientation') {
-    systemParts.push(
-      '【阶段说明：当前处于定向引导阶段】请以温和启发、引导思考为主，帮助用户梳理核心关切与事实支撑，避免生硬或压迫性的诘问。'
-    );
-  }
-
-  systemParts.push(SAFETY_CONSTRAINTS);
-  const system = systemParts.join('\n');
-
-  const evidenceLines = selectRoundSources(session).map(({ index, source }) => {
+  const evidenceLines = selectRoundSources(session).slice(0, 1).map(({ index, source }) => {
     const title = truncate(source.title ?? '', EVIDENCE_TITLE_MAX_CHARS) || '（无标题）';
     const excerpt = truncate(source.excerpt ?? '', EVIDENCE_EXCERPT_MAX_CHARS) || '（无摘要）';
     return `${index}. ${title}：${excerpt}`;
@@ -195,12 +182,16 @@ export function buildStrategyQuestionMessages(
       ? truncate(context.lastAnswer, LAST_ANSWER_MAX_CHARS)
       : '（尚未回答）';
 
-  const user = [
+  const userDraft = [
     `用户选择的立场：${stance}`,
     `用户最新回答：${lastAnswer}`,
-    '可参考的报告证据（来自报告真实引用，最多三条）：',
+    '可参考证据（最多一条）：',
     evidenceLines.length > 0 ? evidenceLines.join('\n') : '（无）',
   ].join('\n');
+  // Keep the complete interactive prompt small even when a client submits
+  // unusually long stance/answer/evidence fields.
+  const userBudget = QUESTION_PROMPT_MAX_CHARS - system.length;
+  const user = userBudget > 1 ? truncate(userDraft, userBudget - 1) : '';
 
   return [
     { role: 'system', content: system },
