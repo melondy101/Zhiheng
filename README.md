@@ -33,7 +33,7 @@ npm run check       # 全量门禁
 ```
 
 > **端口说明**：默认 3000。系统若被占用，使用 `--port 3001`。Playwright 配置 (playwright.config.js) 也使用 3001。
-> **凭据**：`.env.local` 须包含 `ZHIHU_ACCESS_SECRET` + `LLM_API_KEY`+`LLM_MODEL` 才走真实 Provider；缺失时自动降级到 fixture，且 UI/源标签绝不标 live。`DATABASE_URL` 缺失则降级 localStorage。分享功能需要 `SINK_API_KEY` + `SHARE_BASE_URL`。认证功能需要 `RESEND_API_KEY` + `RESEND_FROM_EMAIL`。
+> **凭据**：`.env.local` 须包含 `ZHIHU_ACCESS_SECRET` + `LLM_API_KEY` + `LLM_MODEL` 才走真实 Provider；缺失时自动降级到 fixture，且 UI/源标签绝不标 live。`DATABASE_URL` 缺失则降级 localStorage。短链分享需要 `SINK_BASE_URL` + `SINK_API_KEY` + `SHARE_BASE_URL`；不配 Sink 仍可生成普通分享长链接。邮件认证可任选 SMTP（至少 `SMTP_USER` + `SMTP_PASS`）或 Resend（`RESEND_API_KEY` + `RESEND_FROM_EMAIL`）；两者同时配置时 SMTP 优先。
 
 ## 部署
 
