@@ -26,7 +26,7 @@
 // Secrets are read from the server environment only. No NEXT_PUBLIC_ variable
 // is used anywhere in this module, so nothing here can reach the browser.
 
-import type { LLMProvider, ReportSynthesis, Session, Report, Source } from './providers';
+import type { LLMProvider, ReportSynthesis, ResultCardAISummary, Session, Report, Source } from './providers';
 import type { KnowledgeGraph } from './knowledge-graph';
 import {
   buildGraphExtractionMessages,
@@ -50,6 +50,7 @@ import {
 } from './question-rewriter';
 import { logStartupPath } from './startup-log';
 import { LLMRequestError } from './llm-fallback';
+import { buildSummaryMessages, parseSummaryResponse, type SummaryAnswerInput } from './result-card-summary';
 
 // Log environment configuration on module load (once).
 logStartupPath();
@@ -326,8 +327,8 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         model: this.config.model,
         messages,
         temperature: 0.7,
-        max_tokens: 1024,
         ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
+        max_tokens: 1024,
       })
     );
     const content = extractChoiceContent(body);
@@ -428,9 +429,9 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         model: this.config.model,
         messages,
         temperature: 0.3,
-        max_tokens: 1536,
         response_format: { type: 'json_object' },
         ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
+        max_tokens: 1536,
       }),
       this.config.synthesisTimeoutMs
     );
@@ -477,6 +478,43 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     }
 
     return parseQuestionRewriteResponse(content, question);
+  }
+
+  /**
+   * Summarize the user's initial and final positions via LLM (result-card
+   * AI summary). Unlike the question path there is no template to degrade
+   * into: a non-conforming or unparseable response throws, and the caller
+   * (withFallback-style wiring in the orchestrator) leaves the summary
+   * absent rather than publishing an ungrounded guess.
+   */
+  async summarizeUserPositions(args: {
+    initialOpinion: string | null;
+    answers: SummaryAnswerInput[];
+  }): Promise<ResultCardAISummary | null> {
+    if (!args.initialOpinion?.trim() && args.answers.length === 0) return null;
+
+    const messages = buildSummaryMessages(args.initialOpinion, args.answers);
+    const body = await this.postChatCompletion(
+      JSON.stringify({
+        model: this.config.model,
+        messages,
+        temperature: 0.3,
+        response_format: { type: 'json_object' },
+        ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
+        max_tokens: 768,
+      })
+    );
+
+    const content = extractChoiceContent(body);
+    if (content === null) {
+      throw new Error('LLM API returned an unexpected response shape for result-card summary');
+    }
+
+    const summary = parseSummaryResponse(content, args.initialOpinion, args.answers);
+    if (!summary) {
+      throw new Error('LLM result-card summary response was not parseable JSON');
+    }
+    return summary;
   }
 
   /**

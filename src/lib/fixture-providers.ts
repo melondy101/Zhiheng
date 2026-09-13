@@ -64,6 +64,15 @@ export class FixtureLLMProvider implements LLMProvider {
   async generateSynthesis(): Promise<null> {
     return null;
   }
+
+  /**
+   * The fixture has no model and therefore cannot summarize the user's
+   * positions. Returning null leaves the result card without an AI summary
+   * section, rather than passing fixture text off as a real model summary.
+   */
+  async summarizeUserPositions(): Promise<null> {
+    return null;
+  }
 }
 
 export class AnonymousIdentityProvider implements IdentityProvider {

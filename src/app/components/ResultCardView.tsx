@@ -35,6 +35,45 @@ function TraceLink({ id }: { id: string }) {
   );
 }
 
+function AISummaryBadge() {
+  return (
+    <span className="inline-block px-2 py-0.5 text-[10px] rounded-md bg-accent-light text-accent border border-accent/20 font-mono">
+      AI 总结
+    </span>
+  );
+}
+
+function AISummaryBlock({ label, item }: { label: string; item: { text: string; sourceMessageIds: string[] } }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <section className="mb-4">
+      <h4 className="text-xs font-semibold text-content-secondary mb-1.5 uppercase tracking-wider">{label}</h4>
+      <div className="text-xs sm:text-sm bg-surface p-3.5 rounded-xl border border-line leading-relaxed font-serif">
+        {item.text}
+      </div>
+      <div className="flex items-center gap-2 mt-1.5">
+        <AISummaryBadge />
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="text-[10px] text-content-tertiary hover:text-content-secondary font-mono"
+        >
+          {expanded ? '收起依据 ▾' : `依据 ${item.sourceMessageIds.length} 条消息 ▸`}
+        </button>
+      </div>
+      {expanded && (
+        <ul className="mt-1.5 space-y-1">
+          {item.sourceMessageIds.map((id) => (
+            <li key={id} className="text-[10px] text-content-tertiary font-mono">
+              [{id.slice(0, 12)}]
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 async function copyToClipboard(value: string): Promise<boolean> {
   if (navigator.clipboard?.writeText) {
     try {
@@ -149,6 +188,10 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
         </section>
       )}
 
+      {card.aiSummary?.initial && (
+        <AISummaryBlock label="AI 总结：初始观点" item={card.aiSummary.initial} />
+      )}
+
       {card.startingStance && (
         <section className="mb-4">
           <h4 className="text-xs font-semibold text-content-secondary mb-1.5 uppercase tracking-wider">2. 起始立场</h4>
@@ -198,6 +241,10 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
             <TraceLink id={card.finalPosition.messageId} />
           </div>
         </section>
+      )}
+
+      {card.aiSummary?.final && (
+        <AISummaryBlock label="AI 总结：最终观点" item={card.aiSummary.final} />
       )}
 
       {card.uncertainAnswers.length > 0 && (

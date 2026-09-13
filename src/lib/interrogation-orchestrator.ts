@@ -18,6 +18,7 @@ import type {
   InterrogateResponseBody,
   InterrogationState,
   Message,
+  ResultCardAISummary,
   Session,
   StorageProvider,
   Viewpoint,
@@ -106,6 +107,16 @@ export interface HandleInterrogateInput {
   storage: StorageProvider;
   /** Question-text generator (wired to the server LLM provider by the route). */
   generateQuestion: (strategy: StrategyId, session: Session) => Promise<string>;
+  /**
+   * Optional AI initial/final position summarizer (wired to the server LLM
+   * provider by the route). Absent, throwing, or returning null all degrade
+   * the same way: the session completes with no `resultCardAISummary` —
+   * completion is never blocked or failed because the summary is unavailable.
+   */
+  summarizeUserPositions?: (args: {
+    initialOpinion: string | null;
+    answers: Array<{ id: string; text: string }>;
+  }) => Promise<ResultCardAISummary | null>;
 }
 
 export type InterrogateResult =
@@ -282,8 +293,28 @@ function sanitizeSnapshot(raw: unknown, sessionId: string): Session | null {
  * The one interrogation entry point: load (or rehydrate) the session, apply
  * the requested action, persist everything, and return the full state.
  */
+/**
+ * Best-effort AI initial/final position summary for the result card. Any
+ * failure (no callback wired, provider throws, provider returns null)
+ * degrades to `undefined` — the summary section is simply absent, exactly
+ * like the LLM fallback path for strategy questions never blocks a round.
+ */
+async function computeResultCardAISummary(
+  session: Session,
+  summarizeUserPositions: HandleInterrogateInput['summarizeUserPositions']
+): Promise<ResultCardAISummary | undefined> {
+  if (!summarizeUserPositions) return undefined;
+  try {
+    const answers = session.messages.filter(isRoundAnswer).map((m) => ({ id: m.id, text: m.text }));
+    const summary = await summarizeUserPositions({ initialOpinion: session.initialOpinion, answers });
+    return summary ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function handleInterrogate(input: HandleInterrogateInput): Promise<InterrogateResult> {
-  const { sessionId, action, storage, generateQuestion } = input;
+  const { sessionId, action, storage, generateQuestion, summarizeUserPositions } = input;
 
   let session = await storage.loadSession(sessionId);
   if (!session) {
@@ -306,10 +337,12 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     }
     try {
       const card = buildSimpleResultCard(session);
+      const aiSummary = await computeResultCardAISummary(session, summarizeUserPositions);
       const completedSession: Session = {
         ...session,
         completed: true,
         resultCard: card,
+        ...(aiSummary ? { resultCardAISummary: aiSummary } : {}),
         updatedAt: Date.now(),
       };
       await storage.saveSession(completedSession);
@@ -407,10 +440,12 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     }
     const updatedStory = completeStory(session.storyRun);
     const card = buildSimpleResultCard(session);
+    const aiSummary = await computeResultCardAISummary(session, summarizeUserPositions);
     const updated: Session = {
       ...session,
       completed: true,
       resultCard: card,
+      ...(aiSummary ? { resultCardAISummary: aiSummary } : {}),
       storyRun: updatedStory,
       updatedAt: Date.now(),
     };

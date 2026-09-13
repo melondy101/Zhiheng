@@ -164,6 +164,7 @@ home ──[handleStart]──→ session (loading=false, report set)
 - 任何时刻只有一个 report 状态
 - session 持久化在每次 `setSession` 之后立即 `saveSession`
 - URL 携带 `?session=<id>`，刷新时从 BrowserStorageProvider 恢复
+- 回答提交先显示本地 `pending` 消息；`/api/interrogate` 客户端在 55 秒中止请求，任何未获会话响应的失败都会将该消息改为 `failed` 并提供重试，不能永久停在“发送中”。
 
 ### 3.2 诘问引擎（strategy-engine.ts）
 
@@ -265,19 +266,29 @@ interface GraphEdge {
 }
 ```
 
-## 5. 成果卡 6 段
+## 5. 成果卡
 
-`buildDetailedResultCard(session)` 严格从 `session.messages.filter(m => m.role === 'user')` 派生：
+`buildDetailedResultCard(session)` 严格从 `session.messages.filter(m => m.role === 'user')` 派生 6 段可追溯内容：
 
 1. **初始表达** — `session.initialOpinion`（用户在报告前输入）
 2. **起始立场** — `session.selectedViewpoint`（AI 建议被选 / 用户自写）
 3. **新增证据** — 中间轮的 user message
 4. **观点修正** — 相邻 user message 文本不同 → 修正对
 5. **你最后表达的观点** — 最后一个实质性 user message；它是可追溯的用户原话，不是 AI 自动总结
-6. **未解决问题** — 当前为空数组（未来由 LLM 提取）
+6. **未解决问题** — 会话完成时仍待回答的 `interrogation.assistantQuestion`（无则为空数组）
 
 每段都有可追溯的 `messageId`（点击可定位原消息）。
 **强约束**：assistant 消息**绝不**出现在 user 字段（构建器只过滤 `role === 'user'`）。
+
+### 5.1 AI 总结（可选，独立于上述 6 段）
+
+会话 `complete` / `story_complete` 时，`interrogation-orchestrator.ts` 额外调用一次 `LLMProvider.summarizeUserPositions()`（prompt 构建与校验在 `src/lib/result-card-summary.ts`），对用户的初始观点与最终观点各生成一句 AI 总结，写入 `session.resultCardAISummary: ResultCardAISummary | null`，与 `resultCard` 一起持久化——只生成一次，所有消费者（`ResultCardViewFromSession`、`session-export.ts`）复用同一份，不重复调用模型。
+
+**非伪造校验**（与 `report-synthesis.ts` 的 `asCitationIds`/`isLiftedFromMaterial` 同一原则）：每条总结的 `sourceMessageIds` 必须全部落在合法消息 id 集合内（round-answer id ∪ `initial_opinion` 占位 id），任何越界或伪造引用都使该条整体丢弃为 `null`，不做部分采信；`initial`/`final` 独立校验，一条失败不影响另一条。
+
+**优雅降级**：未配置 LLM（`FixtureLLMProvider`）、调用超时/异常、或模型返回 `null`，都不会阻塞会话完成，只是 `resultCardAISummary` 保持 `undefined`——UI 对应区块不渲染，绝不显示占位或伪造内容。
+
+UI（`ResultCardView.tsx`）把 AI 总结渲染为独立区块，明确标注"AI 总结"徽标，与用户原话区块（第 1、5 段）并列但视觉区分，点击可展开引用的原始消息 id。
 
 ## 6. 简化画像
 
@@ -299,7 +310,7 @@ interface GraphEdge {
 
 ```
 tests/
-├── unit/providers.test.ts         # 113 tests, 29 suites
+├── unit/providers.test.ts         # 125 tests, 32 suites
 │   - FixtureRetrievalProvider
 │   - FixtureLLMProvider
 │   - BrowserStorageProvider
@@ -328,7 +339,7 @@ tests/
 - 尽量 15 秒内完成报告正文 ✓（fixture 延迟 200-500ms + 50ms 构建）
 - 20 秒仍未完成 → 缓存降级 ✓（searchWithTimeout 5s）
 - LLM 失败 → 重试一次 + 策略模板；UI 按失败类别披露 ✓（`withFallback`）
-- 图谱节点经标签清洗与黑名单过滤：基于正则与语义黑名单，剔除“邓煜等菲奖得主”等集合性修饰/代称、“观点 3”等占位/序号枚举、“刚刚/突发”等时效修饰副词、以及编务口语噪声；LLM 与确定性 fallback 共用规则 ✓
+- 图谱节点经标签清洗与黑名单过滤：基于正则与语义黑名单，剔除“邓煜等菲奖得主”等集合性修饰/代称、“观点 3”等占位/序号枚举、“刚刚/突发”等时效修饰副词、疑问/转折残片及编务口语噪声；普通来源作者只作 provenance，不入图，机构作者才作为 actor；LLM 与确定性 fallback 共用规则 ✓
 - 实体关联简介生成：图谱节点通过 `associationProfile` 动态合成结构化定位（核心议题枢纽、前置依赖、实证支撑与下游影响），并在详情面板与无障碍模式中展示 ✓
 - 综合观点的每条证据必须能与其引用材料做词面追溯，且结论不能复述原问题 ✓
 - 知识图谱允许正文后异步完成 ✓（API 路由 try/catch 包装）

@@ -165,6 +165,14 @@ export interface Session {
   selectedViewpoint: Viewpoint | null;
   messages: Message[];
   resultCard: ResultCard | null;
+  /**
+   * AI-generated initial/final position summary, built once when the session
+   * completes (alongside `resultCard`) and persisted so every consumer
+   * (result card view, markdown export) renders the same summary without a
+   * second model call. Absent on legacy sessions, incomplete sessions, or
+   * when the model output failed validation — never backfilled with a guess.
+   */
+  resultCardAISummary?: ResultCardAISummary | null;
   completed: boolean;
   createdAt: number;
   updatedAt: number;
@@ -378,6 +386,31 @@ export interface ResultCard {
   messageIds: string[];
 }
 
+/**
+ * One AI-authored summary sentence over the user's own messages. `text` is
+ * always AI-generated prose — never a verbatim user quote — and must be
+ * displayed labeled as an AI summary, never attributed to the user. Every
+ * item traces back to the real messages it was built from so a user can
+ * verify the summary against what they actually said; `sourceMessageIds` is
+ * never empty (an ungrounded summary is discarded, not published).
+ */
+export interface AISummaryItem {
+  text: string;
+  sourceMessageIds: string[];
+}
+
+/**
+ * AI-generated summary of the user's initial and final positions across the
+ * conversation (independent of `ResultCard.initialStance`/`finalPosition`,
+ * which are always verbatim user text). Either half may be null when the
+ * model's output failed validation — the UI must then omit that section
+ * rather than show empty or fabricated content.
+ */
+export interface ResultCardAISummary {
+  initial: AISummaryItem | null;
+  final: AISummaryItem | null;
+}
+
 export interface Identity {
   type: 'anonymous';
   id: string;
@@ -444,6 +477,17 @@ export interface LLMProvider {
     messages: Array<{ role: string; content: string }>,
     timeoutMs?: number
   ): Promise<string | null>;
+  /**
+   * Summarize the user's initial and final positions across the
+   * conversation into AI-authored prose (PRD result-card AI summary).
+   * Optional because the fixture LLM provider declines to summarize —
+   * returning null leaves the result card without an AI summary section
+   * rather than labeling fixture text as a real model response.
+   */
+  summarizeUserPositions?(args: {
+    initialOpinion: string | null;
+    answers: Array<{ id: string; text: string }>;
+  }): Promise<ResultCardAISummary | null>;
 }
 
 export interface StorageProvider {

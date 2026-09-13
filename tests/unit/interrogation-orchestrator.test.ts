@@ -179,3 +179,72 @@ describe('handleInterrogate: complete action (#17)', () => {
     assert.strictEqual(stored.resultCard, null);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Result-card AI summary: best-effort, never blocks completion.
+// ---------------------------------------------------------------------------
+
+describe('handleInterrogate: complete action AI summary wiring', () => {
+  it('stores resultCardAISummary when the summarizer resolves a valid summary', async () => {
+    const session = completeFixtureSession();
+    const { storage } = makeStorage(session);
+    const result = await handleInterrogate({
+      sessionId: session.id,
+      action: 'complete',
+      storage,
+      generateQuestion: noopGenerate,
+      summarizeUserPositions: async () => ({
+        initial: null,
+        final: { text: 'AI 总结的最终观点', sourceMessageIds: ['u0'] },
+      }),
+    });
+    assert.ok(result.ok);
+    assert.ok(result.body.session.resultCardAISummary);
+    assert.strictEqual(result.body.session.resultCardAISummary!.final?.text, 'AI 总结的最终观点');
+  });
+
+  it('completes without resultCardAISummary when no summarizer is wired', async () => {
+    const session = completeFixtureSession();
+    const { storage } = makeStorage(session);
+    const result = await handleInterrogate({
+      sessionId: session.id,
+      action: 'complete',
+      storage,
+      generateQuestion: noopGenerate,
+    });
+    assert.ok(result.ok);
+    assert.strictEqual(result.body.session.resultCardAISummary, undefined);
+  });
+
+  it('completes without resultCardAISummary when the summarizer throws', async () => {
+    const session = completeFixtureSession();
+    const { storage } = makeStorage(session);
+    const result = await handleInterrogate({
+      sessionId: session.id,
+      action: 'complete',
+      storage,
+      generateQuestion: noopGenerate,
+      summarizeUserPositions: async () => {
+        throw new Error('LLM timeout');
+      },
+    });
+    assert.ok(result.ok);
+    assert.strictEqual(result.body.completed, true);
+    assert.ok(result.body.session.resultCard);
+    assert.strictEqual(result.body.session.resultCardAISummary, undefined);
+  });
+
+  it('completes without resultCardAISummary when the summarizer resolves null', async () => {
+    const session = completeFixtureSession();
+    const { storage } = makeStorage(session);
+    const result = await handleInterrogate({
+      sessionId: session.id,
+      action: 'complete',
+      storage,
+      generateQuestion: noopGenerate,
+      summarizeUserPositions: async () => null,
+    });
+    assert.ok(result.ok);
+    assert.strictEqual(result.body.session.resultCardAISummary, undefined);
+  });
+});

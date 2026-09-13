@@ -110,6 +110,9 @@ export async function POST(request: Request) {
       storage: scope.sessions,
       generateQuestion: (strategy, session) =>
         llmProvider.generateStrategyQuestion(strategy, session),
+      summarizeUserPositions: llmProvider.summarizeUserPositions
+        ? (args) => llmProvider.summarizeUserPositions!(args)
+        : undefined,
     });
   } catch (err) {
     if (err instanceof StorageUnavailableError) {

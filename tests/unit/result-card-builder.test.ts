@@ -168,6 +168,26 @@ describe('buildDetailedResultCard (#17 honest emptiness)', () => {
   });
 });
 
+describe('buildDetailedResultCard (AI summary pass-through)', () => {
+  it('passes session.resultCardAISummary through verbatim when present', () => {
+    const summary = {
+      initial: { text: 'AI 总结的初始观点', sourceMessageIds: ['initial_opinion'] },
+      final: { text: 'AI 总结的最终观点', sourceMessageIds: ['u_1'] },
+    };
+    const session = makeSession({
+      messages: [userMessage('第一个实质性回答，包含具体数据。', 1)],
+      resultCardAISummary: summary,
+    });
+    const card = buildDetailedResultCard(session);
+    assert.deepStrictEqual(card.aiSummary, summary);
+  });
+
+  it('reports aiSummary as null when the session has no AI summary', () => {
+    const card = buildDetailedResultCard(makeSession());
+    assert.strictEqual(card.aiSummary, null);
+  });
+});
+
 describe('buildSimpleResultCard (#17 server-side complete shape)', () => {
   it('projects the detailed card onto the persisted ResultCard shape', () => {
     const session = makeSession({
