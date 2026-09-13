@@ -146,3 +146,17 @@ test('开局计划序列保持不变（不因轮换改动而回归）', () => {
     'M5_restate',
   ]);
 });
+
+test('recordStrategy returns an immutable, serializable strategy history', () => {
+  const original = makeSession();
+  const afterFirst = recordStrategy(original, 'M1_evidence');
+  const afterSecond = recordStrategy(afterFirst, 'M2_premise');
+
+  assert.equal(original.strategyHistory, undefined, 'recordStrategy must not mutate its input session');
+  assert.deepEqual(afterFirst.strategyHistory, ['M1_evidence']);
+  assert.deepEqual(afterSecond.strategyHistory, ['M1_evidence', 'M2_premise']);
+
+  const restored = JSON.parse(JSON.stringify(afterSecond)) as Session;
+  assert.deepEqual(restored.strategyHistory, ['M1_evidence', 'M2_premise']);
+  assert.equal(pickNextStrategy(restored, 5), 'M4_steelman');
+});

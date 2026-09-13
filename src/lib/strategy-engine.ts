@@ -200,9 +200,11 @@ const roundCount = (session: Session): number =>
   session.messages.filter(isRoundAnswer).length;
 
 const strategyHistory = (session: Session): StrategyId[] => {
-  // For MVP, use session messages to derive strategy history if not stored
-  // (a real implementation would persist each strategy id in the message metadata)
-  return ((session as unknown as { _strategyHistory?: StrategyId[] })._strategyHistory) ?? [];
+  // `_strategyHistory` existed in early persisted sessions. Keep this read-only
+  // compatibility path for recovery, but all new writes use Session's explicit
+  // strategyHistory contract below.
+  const legacy = (session as unknown as { _strategyHistory?: StrategyId[] })._strategyHistory;
+  return session.strategyHistory ?? legacy ?? [];
 };
 
 /** Pure: pick the next strategy based on round number, mode, target, and history. */
@@ -426,11 +428,7 @@ export function resumePlan(session: Session): ResumePlan {
 /** Record a strategy on the session for future picks. */
 export function recordStrategy(session: Session, strategy: StrategyId): Session {
   const history = strategyHistory(session);
-  (session as unknown as { _strategyHistory?: StrategyId[] })._strategyHistory = [
-    ...history,
-    strategy,
-  ];
-  return session;
+  return { ...session, strategyHistory: [...history, strategy] };
 }
 
 // Ticket #18 dead-code cleanup: `InterrogationResult` and `planNextRound`

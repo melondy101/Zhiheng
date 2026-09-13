@@ -692,3 +692,38 @@ describe('POST /api/interrogate: explicit complete action (#17)', () => {
     assert.strictEqual(stored.resultCard, null);
   });
 });
+
+describe('POST /api/interrogate: adaptive questioning intensity', () => {
+  it('de-escalates the next steelman question after two low-engagement substantive answers', async () => {
+    const session = seedSession();
+    await scope.sessions.saveSession(session);
+    await startSession(session);
+
+    const first = await postInterrogate({
+      sessionId: session.id,
+      action: 'answer',
+      answer: '暂时说不出更多依据',
+    });
+    assert.strictEqual(first.status, 200);
+    assert.strictEqual(first.body.strategy, 'M2_premise');
+    assert.strictEqual(first.body.session?.interrogation?.adaptiveMode, 'scaffolded');
+    assert.ok(first.body.hint?.message.includes('先说一个'));
+
+    const second = await postInterrogate({
+      sessionId: session.id,
+      action: 'answer',
+      answer: '我先不展开了',
+    });
+    assert.strictEqual(second.status, 200);
+    assert.strictEqual(second.body.strategy, 'M7_metacognition');
+    assert.ok(second.body.hint?.message.includes('更容易进入'));
+    assert.strictEqual(second.body.session?.interrogation?.adaptiveMode, 'deescalated');
+    assert.deepStrictEqual(second.body.session?.interrogationIntensityLog, [{
+      round: 3,
+      from: 'M4_steelman',
+      to: 'M7_metacognition',
+      mode: 'deescalated',
+      reasons: ['avoidance'],
+    }]);
+  });
+});

@@ -170,6 +170,20 @@ export interface Session {
   updatedAt: number;
   /** Session IDs to exclude from history search results */
   excludedHistoryIds?: string[];
+  /**
+   * Strategies already presented in this session, in order. This is persisted
+   * state used by the rotation algorithm; legacy sessions may omit it and are
+   * treated as having no recorded history.
+   */
+  strategyHistory?: import('./strategy-engine').StrategyId[];
+  /** Conservative adaptations applied to questioning pressure; never a user score. */
+  interrogationIntensityLog?: Array<{
+    round: number;
+    from: import('./strategy-engine').StrategyId;
+    to: import('./strategy-engine').StrategyId;
+    mode: import('./engagement-signal').AdaptiveQuestionMode;
+    reasons: string[];
+  }>;
   /** #Q-01 / #D-03: Session mode ('quick' | 'deep' | 'fun' | 'story'). */
   mode?: import('./mode-config').SessionMode;
   /** #Q-01 / #Q-02: Interrogation phase ('orientation' | 'transitionChoice' | 'interrogation' | 'completed'). */
@@ -255,6 +269,8 @@ export interface InterrogationState {
   transitionChoice?: import('./mode-config').TransitionActionId | null;
   character?: import('./character').CharacterId | null;
   storyRun?: import('./story-run').StoryRun | null;
+  /** How the current question was adapted, if at all. */
+  adaptiveMode?: import('./engagement-signal').AdaptiveQuestionMode;
 }
 
 /** Actions accepted by the interrogation orchestration API (#15, #17, #Q-02). */

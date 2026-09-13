@@ -179,7 +179,13 @@ Round 6+: 旋转选择 (M1/M2/M4/M6)，不立即重复
        └─每 3 轮 checkpoint (5, 8, 11, 14…)
 ```
 
-策略历史持久化在 `session._strategyHistory`（运行时属性）。
+策略历史持久化在显式契约字段 `session.strategyHistory`；旧会话中的
+`_strategyHistory` 仅在读取时兼容，新的记录绝不写入该运行时属性。
+`recordStrategy()` 是不可变更新，调用方必须接收其返回的 session。
+
+诘问强度依据最近三条有效用户回答作保守判断：一次低投入回答仅增加
+中性脚手架；连续两次低投入回答才会把 M4/M6/M8 等挑战型策略降为
+M7/M3/M1。该机制只会降低压力，永不自动升级，也不向用户展示诊断标签。
 **用户主动退出任何时候可用** — `handleCompleteNow()`。
 
 ## 4. 数据模型（核心字段）
@@ -198,6 +204,8 @@ interface Session {
   createdAt: number;
   updatedAt: number;
   excludedHistoryIds?: string[];
+  strategyHistory?: StrategyId[];
+  interrogationIntensityLog?: Array<{ round: number; from: StrategyId; to: StrategyId; mode: 'scaffolded' | 'deescalated'; reasons: string[] }>;
   reportSourceState?: { zhihu: SourceState; web: SourceState; zhihuUpdatedAt?: number; webUpdatedAt?: number; zhihuStale?: boolean; webStale?: boolean };
 }
 

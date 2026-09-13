@@ -27,6 +27,7 @@ import { actionAfterAnswer, pickNextStrategy, recordStrategy } from './strategy-
 import type { StrategyId } from './strategy-engine';
 import { isUncertainAnswer, uncertainResponse, withFallback } from './llm-fallback';
 import { buildNarrowedQuestion, selectRoundSources } from './interrogation-context';
+import { adaptiveGuidance, detectEngagement, resolveAdaptiveStrategy } from './engagement-signal';
 import { buildSimpleResultCard } from './result-card-builder';
 import {
   classifyIntent,
@@ -229,10 +230,10 @@ async function planNextRound(
       session.selectedViewpoint.text,
       session.target
     );
-    recordStrategy(session, strategy);
+    session = recordStrategy(session, strategy);
   } else {
     const fb = await withFallback(strategy, session, () => generateQuestion(strategy, session));
-    recordStrategy(session, strategy);
+    session = recordStrategy(session, strategy);
     questionText = fb.question;
     usedFallback = fb.usedFallback;
     fallbackReason = fb.failureReason;
@@ -567,7 +568,6 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
 
   // #5: classify user intent and generate gentle response
   const userIntent: UserIntent = classifyIntent(answer);
-  const currentDirectiveRound = completedDirectiveRounds(currentSession);
   const currentStrategy = state.strategy ?? 'M1_evidence';
   const gentle = generateGentleResponse(answer, currentSession, currentStrategy, true);
   const nextDirectiveRound = gentle.directiveRound;
@@ -689,11 +689,30 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
 
   // #5: for questions, the AI replies directly and provides a follow-up;
   // for substantive responses, the AI acknowledges and asks a strategy question.
-  const nextStrategy = pickNextStrategy(withAnswer, nextDirectiveRound);
+  const plannedStrategy = pickNextStrategy(withAnswer, nextDirectiveRound);
+  const recentSubstantiveAnswers = withAnswer.messages
+    .filter((message) => message.role === 'user' && message.uncertain !== true)
+    .map((message) => message.text);
+  const engagement = detectEngagement(recentSubstantiveAnswers);
+  const adaptive = resolveAdaptiveStrategy(plannedStrategy, engagement);
+  const nextStrategy = adaptive.strategy;
   const fb = await withFallback(nextStrategy, withAnswer, () =>
     generateQuestion(nextStrategy, withAnswer)
   );
-  recordStrategy(withAnswer, nextStrategy);
+  const withRecordedStrategy = recordStrategy(withAnswer, nextStrategy);
+  const guidance = adaptiveGuidance(adaptive.mode);
+  const adaptiveLog = adaptive.mode !== 'deescalated'
+    ? withRecordedStrategy.interrogationIntensityLog
+    : [
+        ...(withRecordedStrategy.interrogationIntensityLog ?? []),
+        {
+          round: state.round + 1,
+          from: plannedStrategy,
+          to: nextStrategy,
+          mode: adaptive.mode,
+          reasons: adaptive.signal.reasons,
+        },
+      ];
 
   // #26/R3: PRD v4.2 §4.1 — the AI's direct answer and the gentle follow-up
   // MUST be persisted as a single assistant message. Saving them as two
@@ -712,8 +731,9 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
   }
 
   const planned = {
-    ...withAnswer,
-    messages: [...withAnswer.messages, ...gentleMessages],
+    ...withRecordedStrategy,
+    ...(adaptiveLog ? { interrogationIntensityLog: adaptiveLog } : {}),
+    messages: [...withRecordedStrategy.messages, ...gentleMessages],
     interrogation: {
       round: state.round + 1,
       strategy: nextStrategy,
@@ -724,11 +744,12 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
       uncertainStreak: streak,
       directiveRound: nextDirectiveRound,
       lastIntent: userIntent,
+      adaptiveMode: adaptive.mode,
     },
     updatedAt: Date.now(),
   };
   await storage.saveSession(planned);
-  return { ok: true, body: toResponseBody(planned, hint, false, {
+  return { ok: true, body: toResponseBody(planned, guidance ? { message: guidance } : hint, false, {
     directiveRound: nextDirectiveRound,
     suggestSummary: gentle.suggestSummary,
     aiReply: gentle.aiReply,
