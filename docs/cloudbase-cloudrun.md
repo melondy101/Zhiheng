@@ -4,7 +4,7 @@
 
 ## 环境变量
 
-在 CloudBase 控制台的云托管服务详情中打开**环境变量**，逐项添加下列变量名及对应的私密值；或在本机已登录 CloudBase CLI 后，使用 CLI 的环境变量参数/控制台配置完成注入。不要把值写入 Dockerfile、Git、镜像构建参数或文档。变量缺失时，应用保持既有的 fixture、localStorage 或功能不可用降级语义。
+在 CloudBase 控制台的云托管服务详情中打开**环境变量**，逐项添加下列变量名及对应的私密值；或在本机已登录 CloudBase CLI 后，使用 CLI 的环境变量参数/控制台配置完成注入。不要把值写入 Dockerfile、Git、镜像构建参数或文档。变量缺失时，应用保持既有的 fixture、localStorage 或功能不可用降级语义。短链需同时配置 `SINK_BASE_URL`、`SINK_API_KEY` 与 `SHARE_BASE_URL`；SMTP 与 Resend 是替代关系，二者同时存在时 SMTP 优先。
 
 | 变量名 | 用途 |
 | --- | --- |
@@ -42,7 +42,7 @@ CloudBase 会提供容器端口映射；本镜像已固定监听 `PORT=3000`。�
 1. 在 CloudBase 创建或选择环境，并在云托管中创建服务。
 2. 选择从代码仓库或本地源码构建，构建文件指定为仓库根目录的 `Dockerfile`。
 3. 配置上一节所需的环境变量。生产环境至少按实际启用的 Provider 配置；未启用的 Provider 可以留空以沿用应用降级行为。
-4. 将服务端口设置为 `3000`。使用 CLI 时，以 `tcb cloudrun deploy --port 3000` 为准，并按团队的 CloudBase CLI 认证与服务名参数补全命令。
+4. 将服务端口设置为 `3000`。使用 CLI 时，以 `tcb cloudrun deploy --port 3000` 为准，并按团队的 CloudBase CLI 认证与服务名参数补全命令。保存运行时变量会触发新版本部署，待服务恢复“正常”后再验证。
 5. 为 CloudBase 分配的公网 HTTPS 域名或自定义域名更新 `SHARE_BASE_URL`；若启用知乎 OAuth，同步在知乎开放平台登记该域名下与 `ZHIHU_OAUTH_REDIRECT_URI` 完全一致的回调地址。
 6. 部署后访问 `/api/health`，再按 README 的演示路径验证应用和已启用的外部 Provider。真实 Provider 验收应在受控环境单独记录。
 
