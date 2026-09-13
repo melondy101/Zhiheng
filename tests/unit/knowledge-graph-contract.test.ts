@@ -202,6 +202,29 @@ describe('Knowledge Graph Contract (KG-01, KG-02, KG-03)', () => {
       assert.strictEqual(val.valid, true);
     });
 
+    it('keeps narrative news fragments out of the deterministic fallback graph', () => {
+      const report: Report = {
+        question: 'AI 大模型是否应放缓迭代？',
+        title: 'AI 大模型是否应放缓迭代？',
+        knowledgePoints: ['模型迭代治理', 'AI 安全评估'],
+        content: '报告正文',
+        viewpoints: [
+          'Anthropic 掌门人呼吁放缓 AI 模型迭代',
+          '公司和其从业者隔一段时间就出来发什么信号',
+        ],
+        references: [],
+        citations: {},
+      };
+
+      const fallback = buildFallbackGraph(report, 'LLM validation failed');
+      const labels = fallback.nodes.map((node) => node.label);
+
+      assert.ok(labels.includes('模型迭代治理'));
+      assert.ok(labels.includes('AI 安全评估'));
+      assert.ok(!labels.some((label) => label.includes('掌门人呼吁')));
+      assert.ok(!labels.some((label) => label.includes('隔一段时间')));
+    });
+
     it('safeBuildGraph degrades gracefully instead of throwing when inputs are corrupted', () => {
       const corruptedReport = {
         question: '测试议题',
@@ -435,6 +458,35 @@ describe('Knowledge Graph Contract (KG-01, KG-02, KG-03)', () => {
       assert.ok(g2);
       assert.strictEqual(g2.nodes[0].id, 'n0');
       assert.strictEqual(g2.isFallback, true, 'a graph built after LLM failure must disclose degradation');
+    });
+
+    it('retries one failed LLM extraction before exposing a fallback graph', async () => {
+      const sources = [makeSource('s1', 'zhihu', '材料1', '内容1')];
+      const report = makeReport(sources, '测试议题');
+      let attempts = 0;
+      const flakyLLM = {
+        generateStrategyQuestion: async () => '问题？',
+        generateKnowledgeGraph: async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error('LLM knowledge graph extraction failed validation');
+          return {
+            nodes: [
+              { id: 'n0', label: '测试议题', type: 'topic' as const, description: '核心测试议题' },
+              { id: 'n1', label: '有效实体', type: 'concept' as const, description: '通过第二次提取取得的有效概念' },
+            ],
+            edges: [
+              { id: 'e1', from: 'n0', to: 'n1', predicate: '相关' as const, label: '相关', type: 'inferred' as const, description: '议题和概念相关' },
+            ],
+            isFallback: false,
+          };
+        },
+      };
+
+      const graph = await safeBuildGraphAsync(report, sources, flakyLLM);
+
+      assert.strictEqual(attempts, 2);
+      assert.strictEqual(graph.isFallback, false);
+      assert.strictEqual(graph.nodes[1]?.label, '有效实体');
     });
   });
 

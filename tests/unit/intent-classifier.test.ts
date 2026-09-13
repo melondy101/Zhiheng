@@ -201,6 +201,29 @@ describe('generateGentleResponse', () => {
     assert.strictEqual(result.suggestSummary, false);
   });
 
+  it('varies substantive acknowledgments across rounds instead of repeating a template prefix', () => {
+    const first = generateGentleResponse(
+      '我认为缓存可以减少API调用，因为可以复用已经验证过的结果。',
+      buildSession({ selectedViewpoint: buildViewpoint('Test stance') }),
+      strategy,
+      true
+    );
+    const second = generateGentleResponse(
+      '另一个角度是缓存过期时会带来陈旧数据的风险，需要明确失效策略。',
+      buildSession({
+        selectedViewpoint: buildViewpoint('Test stance'),
+        interrogation: buildInterrogation({ directiveRound: 1 }),
+      }),
+      strategy,
+      true
+    );
+
+    assert.ok(first.aiReply && second.aiReply);
+    assert.notStrictEqual(first.aiReply, second.aiReply);
+    assert.ok(!first.aiReply.includes('我理解你的思考。你提到了'));
+    assert.ok(!second.aiReply.includes('我理解你的思考。你提到了'));
+  });
+
   it('does not advance directiveRound for non-substantive responses', () => {
     const session = buildSession();
     const result = generateGentleResponse('不知道', session, strategy, true);
