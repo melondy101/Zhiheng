@@ -2,13 +2,13 @@ import { NextResponse } from 'next/server';
 import { loadHotlistForRoute, getHotlistRouteDependencies } from '@/lib/hotlist-route-wiring';
 import { readOwnerId } from '@/lib/owner-id';
 import { checkAndUpdateServerRefreshLimit } from '@/lib/hotlist-refresh-limiter';
+import { prefetchHotlistTopics } from '@/lib/zhihu-prefetch';
 
 export const runtime = 'nodejs';
 
 /**
- * Real hotlist retrieval: the provider caches data hourly by Beijing time
- * (refreshes at the top of every hour). If not on the hour (e.g. 8:30), the 8:00
- * cache is returned.
+ * Real hotlist retrieval: ordinary requests use a 30-minute Beijing-time cache
+ * window; the next request after a window expires refreshes the snapshot.
  *
  * Manual refresh is supported via ?refresh=true or ?force=true, with rate limiting
  * per client/owner. When the quota is exceeded, HTTP 429 is returned.
@@ -51,11 +51,13 @@ export async function GET(req: Request) {
       );
     } else {
       console.log(`[hotlist:manual_refresh] Live refresh succeeded (source=${result.source}, count=${result.items.length})`);
+      if (result.source !== 'demo') prefetchHotlistTopics(result.items);
     }
     return NextResponse.json(result);
   }
 
   const result = await loadHotlistForRoute(process.env, getHotlistRouteDependencies());
   console.log(`[hotlist:load] Served hotlist: source=${result.source}, stale=${result.stale ?? false}, count=${result.items.length}`);
+  if (result.source !== 'demo') prefetchHotlistTopics(result.items);
   return NextResponse.json(result);
 }

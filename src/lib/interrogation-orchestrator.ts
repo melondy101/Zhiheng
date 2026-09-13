@@ -1,4 +1,4 @@
-// Interrogation orchestrator for ticket #15.
+﻿// Interrogation orchestrator for ticket #15.
 //
 // This module is the single interrogation seam: every strategy decision
 // (round order, checkpoint gating, fallback, uncertain streak) is computed
@@ -9,7 +9,7 @@
 // The API owns the state, but the durable recovery source is the client's
 // persisted mirror of the API-returned session: if the server-side in-memory
 // store loses a session (dev-server restart), the client re-posts its saved
-// snapshot and orchestration resumes from that state — no orchestration
+// snapshot and orchestration resumes from that state 鈥?no orchestration
 // logic ever runs in the browser.
 
 import type {
@@ -18,7 +18,6 @@ import type {
   InterrogateResponseBody,
   InterrogationState,
   Message,
-  ResultCardAISummary,
   Session,
   StorageProvider,
   Viewpoint,
@@ -59,10 +58,13 @@ import {
   type StoryWorldId,
   generateStoryRun,
   makeStoryChoice,
+  makeStoryFreeformChoice,
   completeStory,
   endStoryEarly,
   bridgeStoryToInterrogation,
 } from './story-run';
+import { generateStoryAdvance } from './story-ai';
+import type { LLMProvider } from './providers';
 
 export interface HandleInterrogateInput {
   sessionId: string;
@@ -93,7 +95,7 @@ export interface HandleInterrogateInput {
    * #26/T3: the optimistic user message id sent by the client before the
    * API call. When present and matching a `pending` message, the server
    * confirms it as `sent` in the response session so the client can remove
-   * the optimistic insert. Absent or mismatched → the optimistic message
+   * the optimistic insert. Absent or mismatched 鈫?the optimistic message
    * stays `pending` and the client marks it as `failed`.
    */
   optimisticId?: string | null;
@@ -107,16 +109,12 @@ export interface HandleInterrogateInput {
   storage: StorageProvider;
   /** Question-text generator (wired to the server LLM provider by the route). */
   generateQuestion: (strategy: StrategyId, session: Session) => Promise<string>;
-  /**
-   * Optional AI initial/final position summarizer (wired to the server LLM
-   * provider by the route). Absent, throwing, or returning null all degrade
-   * the same way: the session completes with no `resultCardAISummary` —
-   * completion is never blocked or failed because the summary is unavailable.
-   */
+  storyLlm?: LLMProvider;
+  /** Optional best-effort summary generator used by the complete action. */
   summarizeUserPositions?: (args: {
     initialOpinion: string | null;
     answers: Array<{ id: string; text: string }>;
-  }) => Promise<ResultCardAISummary | null>;
+  }) => Promise<import('./providers').ResultCardAISummary | null>;
 }
 
 export type InterrogateResult =
@@ -186,8 +184,8 @@ function toResponseBody(
     // selected from the session's own report citations (empty when none).
     sources: selectRoundSources(session),
     suggestComplete,
-    // #17: the explicit 继续/结束 decision gate after the third uncertain
-    // answer — never an automatic completion.
+    // #17: the explicit 缁х画/缁撴潫 decision gate after the third uncertain
+    // answer 鈥?never an automatic completion.
     decisionPending: state.pendingDecision === true,
     completed: session.completed,
     session: {
@@ -293,28 +291,8 @@ function sanitizeSnapshot(raw: unknown, sessionId: string): Session | null {
  * The one interrogation entry point: load (or rehydrate) the session, apply
  * the requested action, persist everything, and return the full state.
  */
-/**
- * Best-effort AI initial/final position summary for the result card. Any
- * failure (no callback wired, provider throws, provider returns null)
- * degrades to `undefined` — the summary section is simply absent, exactly
- * like the LLM fallback path for strategy questions never blocks a round.
- */
-async function computeResultCardAISummary(
-  session: Session,
-  summarizeUserPositions: HandleInterrogateInput['summarizeUserPositions']
-): Promise<ResultCardAISummary | undefined> {
-  if (!summarizeUserPositions) return undefined;
-  try {
-    const answers = session.messages.filter(isRoundAnswer).map((m) => ({ id: m.id, text: m.text }));
-    const summary = await summarizeUserPositions({ initialOpinion: session.initialOpinion, answers });
-    return summary ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function handleInterrogate(input: HandleInterrogateInput): Promise<InterrogateResult> {
-  const { sessionId, action, storage, generateQuestion, summarizeUserPositions } = input;
+  const { sessionId, action, storage, generateQuestion } = input;
 
   let session = await storage.loadSession(sessionId);
   if (!session) {
@@ -329,7 +307,7 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
   // guard so re-posting complete on a finished session is an idempotent
   // success (the client retry path) rather than a dead end. The card is
   // built from the saved conversation by the pure result-card builder BEFORE
-  // the session is marked completed and persisted — a failed build/save
+  // the session is marked completed and persisted 鈥?a failed build/save
   // never corrupts the session.
   if (action === 'complete') {
     if (session.completed && session.resultCard) {
@@ -337,12 +315,26 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     }
     try {
       const card = buildSimpleResultCard(session);
-      const aiSummary = await computeResultCardAISummary(session, summarizeUserPositions);
+      let resultCardAISummary: Session['resultCardAISummary'];
+      if (input.summarizeUserPositions) {
+        try {
+          const answers = session.messages
+            .filter((message) => message.role === 'user' && message.uncertain !== true)
+            .map((message) => ({ id: message.id, text: message.text }));
+          const summary = await input.summarizeUserPositions({
+            initialOpinion: session.initialOpinion,
+            answers,
+          });
+          if (summary) resultCardAISummary = summary;
+        } catch {
+          // AI summary is advisory; completion must remain available.
+        }
+      }
       const completedSession: Session = {
         ...session,
         completed: true,
         resultCard: card,
-        ...(aiSummary ? { resultCardAISummary: aiSummary } : {}),
+        ...(resultCardAISummary ? { resultCardAISummary } : {}),
         updatedAt: Date.now(),
       };
       await storage.saveSession(completedSession);
@@ -424,12 +416,45 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     if (!session.storyRun || !input.choiceId || !input.optionId) {
       return { ok: false, status: 400, error: 'Missing storyRun, choiceId, or optionId' };
     }
-    const updatedStory = makeStoryChoice(session.storyRun, input.choiceId, input.optionId);
+    let updatedStory = makeStoryChoice(session.storyRun, input.choiceId, input.optionId);
+    if (input.storyLlm) {
+      const optionText = updatedStory.acts.flatMap((a) => a.choices).flatMap((c) => c.options).find((o) => o.id === input.optionId)?.text ?? input.optionId;
+      const ai = await generateStoryAdvance(input.storyLlm, updatedStory, optionText);
+      if (ai) {
+        const now = Date.now(); const actIndex = updatedStory.currentActIndex; const choiceId = `ai_choice_${now}`;
+        updatedStory = { ...updatedStory, acts: updatedStory.acts.map((act) => act.actIndex !== actIndex ? act : { ...act, narrative: ai.scene, dialogue: ai.dialogue, reasoningGoal: ai.reasoningGoal, choices: [{ id: choiceId, actIndex, title: 'next action', prompt: ai.reflection, selectedOptionId: null, options: ai.suggestions.map((option, index) => ({ id: `${choiceId}_${index}`, ...option, evidenceCitationIds: ai.citationIds ?? [], consequence: 'The consequence will unfold in the next turn.' })) }] }), dynamicTurns: [...(updatedStory.dynamicTurns ?? []), { ...ai, actIndex, createdAt: now }] };
+      }
+    }
     const updated: Session = {
       ...session,
       storyRun: updatedStory,
       updatedAt: Date.now(),
     };
+    await storage.saveSession(updated);
+    return { ok: true, body: toResponseBody(updated, null, false) };
+  }
+
+  if (action === 'story_freeform') {
+    if (!session.storyRun || !input.answer?.trim()) return { ok: false, status: 400, error: 'Missing storyRun or answer' };
+    let storyRun = makeStoryFreeformChoice(session.storyRun, input.answer);
+    const ai = input.storyLlm ? await generateStoryAdvance(input.storyLlm, storyRun, input.answer) : null;
+    if (ai) {
+      const now = Date.now();
+      const actIndex = storyRun.currentActIndex;
+      const choiceId = `ai_choice_${now}`;
+      storyRun = {
+        ...storyRun,
+        acts: storyRun.acts.map((act) => act.actIndex !== actIndex ? act : {
+          ...act,
+          narrative: ai.scene,
+          dialogue: ai.dialogue,
+          reasoningGoal: ai.reasoningGoal,
+          choices: [{ id: choiceId, actIndex, title: 'next action', prompt: ai.reflection, selectedOptionId: null, options: ai.suggestions.map((option, index) => ({ id: `${choiceId}_${index}`, ...option, evidenceCitationIds: ai.citationIds ?? [], consequence: 'The consequence will unfold in the next turn.' })) }],
+        }),
+        dynamicTurns: [...(storyRun.dynamicTurns ?? []), { ...ai, actIndex, createdAt: now }],
+      };
+    }
+    const updated: Session = { ...session, storyRun, updatedAt: Date.now() };
     await storage.saveSession(updated);
     return { ok: true, body: toResponseBody(updated, null, false) };
   }
@@ -440,12 +465,10 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     }
     const updatedStory = completeStory(session.storyRun);
     const card = buildSimpleResultCard(session);
-    const aiSummary = await computeResultCardAISummary(session, summarizeUserPositions);
     const updated: Session = {
       ...session,
       completed: true,
       resultCard: card,
-      ...(aiSummary ? { resultCardAISummary: aiSummary } : {}),
       storyRun: updatedStory,
       updatedAt: Date.now(),
     };
@@ -540,21 +563,21 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
       return { ok: true, body: toResponseBody(planned, null, false) };
     }
     if (state.pendingDecision) {
-      // #17: explicit continue after the third uncertain answer — the streak
+      // #17: explicit continue after the third uncertain answer 鈥?the streak
       // resets and a fresh question is planned for the SAME round (no round
       // was completed by uncertain inputs).
       const planned = await planNextRound(session, generateQuestion, 0);
       await storage.saveSession(planned);
       return { ok: true, body: toResponseBody(planned, null, false) };
     }
-    // #26/R3: PRD v4.2 §5.3 — the only continuation gate is the three-round
-    // summary gate (suggestSummary). When it is open, "继续聊" must always
+    // #26/R3: PRD v4.2 搂5.3 鈥?the only continuation gate is the three-round
+    // summary gate (suggestSummary). When it is open, "缁х画鑱? must always
     // succeed and return the current session unchanged so the client can
     // render the next AI turn. It is never 409.
     return { ok: true, body: toResponseBody(session, null, false) };
   }
 
-  // #26/T3: optimistic reconciliation — if the client sent an optimistic
+  // #26/T3: optimistic reconciliation 鈥?if the client sent an optimistic
   // message id, locate the matching `pending` message and confirm it. The
   // optimistic insert uses a `pending` status and a server-generated real id
   // replaces the optimistic id. If no match is found, the server produces
@@ -604,7 +627,7 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
   // server-generated id, then proceed with the normal answer flow.
   let currentSession = reconcileOptimistic(session, input.optimisticId);
 
-  // Every input is recorded — including uncertain ones (#17: an uncertain
+  // Every input is recorded 鈥?including uncertain ones (#17: an uncertain
   // input is persisted as an uncertain user message and never discarded).
   const withAnswer: Session = {
     ...currentSession,
@@ -620,7 +643,7 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
 
   // #17: uncertain answers NEVER advance the round. The first two stay in
   // the current round (1: narrowed question, 2: two directions); the third
-  // opens an explicit 继续/结束 decision gate — no auto-completion, no lost
+  // opens an explicit 缁х画/缁撴潫 decision gate 鈥?no auto-completion, no lost
   // input.
   if (streak > 0) {
     const hintForGate = uncertainResponse(streak, withAnswer, state.assistantQuestion);
@@ -705,7 +728,7 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
         orientationRounds,
         messages: [
           ...withAnswer.messages,
-          makeAssistantMessage('已为您梳理完本篇研报的关键脉络与核心争议。接下来，您想如何继续？'),
+          makeAssistantMessage('宸蹭负鎮ㄦ⒊鐞嗗畬鏈瘒鐮旀姤鐨勫叧閿剦缁滀笌鏍稿績浜夎銆傛帴涓嬫潵锛屾偍鎯冲浣曠户缁紵'),
         ],
         interrogation: {
           round: state.round + 1,
@@ -727,11 +750,11 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     }
   }
 
-  // #26/R3: PRD v4.2 §5.3 removed the v4.1 fixed 5/8/11 round checkpoints.
+  // #26/R3: PRD v4.2 搂5.3 removed the v4.1 fixed 5/8/11 round checkpoints.
   // The only legitimate gate is the three-round summary gate, surfaced as
   // `suggestSummary` after every 3rd directive round. Substantive answers
   // directly advance the round and may keep going; the user is free to
-  // tap 生成总结 at any moment via action='complete'.
+  // tap 鐢熸垚鎬荤粨 at any moment via action='complete'.
 
   // #5: for questions, the AI replies directly and provides a follow-up;
   // for substantive responses, the AI acknowledges and asks a strategy question.
@@ -768,7 +791,7 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
         },
       ];
 
-  // #26/R3: PRD v4.2 §4.1 — the AI's direct answer and the gentle follow-up
+  // #26/R3: PRD v4.2 搂4.1 鈥?the AI's direct answer and the gentle follow-up
   // MUST be persisted as a single assistant message. Saving them as two
   // separate messages causes the UI to render the AI reply twice and breaks
   // the round counter semantics.
@@ -811,3 +834,4 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     followUp: gentle.followUp,
   }) };
 }
+

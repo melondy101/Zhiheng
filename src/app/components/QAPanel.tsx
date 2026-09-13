@@ -53,6 +53,7 @@ interface QAPanelProps {
   session?: Session | null;
   onTransitionChoice?: (choice: TransitionActionId) => void;
   onStoryChoice?: (choiceId: string, optionId: string) => void;
+  onStoryFreeform?: (text: string) => void;
   onStoryEndEarly?: () => void;
   onStoryComplete?: () => void;
   onStoryBridge?: () => void;
@@ -147,6 +148,7 @@ export default function QAPanel({
   session = null,
   onTransitionChoice,
   onStoryChoice,
+  onStoryFreeform,
   onStoryEndEarly,
   onStoryComplete,
   onStoryBridge,
@@ -165,6 +167,7 @@ export default function QAPanel({
         storyRun={session.storyRun}
         sources={sources}
         onChoice={onStoryChoice ?? (() => {})}
+        onFreeform={onStoryFreeform ?? (() => {})}
         onComplete={onStoryComplete ?? (() => {})}
         onEndEarly={onStoryEndEarly ?? (() => {})}
         onBridge={onStoryBridge ?? (() => {})}

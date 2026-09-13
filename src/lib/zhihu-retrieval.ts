@@ -32,11 +32,13 @@ import { logStartupPath } from './startup-log';
 import { logRequest, maskSensitiveHeaders, nowMs, previewBody, redactQuery } from './request-log';
 import {
   isHotlistSnapshotFresh,
+  isHotlistSnapshotFreshEvery30Minutes,
   getBeijingHourSlot,
   getBeijingHourStart,
   getNextBeijingHourStart,
   BEIJING_TIMEZONE_OFFSET_MS,
   ONE_HOUR_MS,
+  THIRTY_MINUTES_MS,
 } from './hotlist-refresh-limiter';
 import { classifyZhihuError, type ServiceDiagnostic } from './service-diagnostics';
 
@@ -631,6 +633,8 @@ export interface LiveHotlistProviderOptions {
    */
   snapshotStore?: HotlistSnapshotStore;
   allowDemoFallback?: boolean;
+  persistFallbackSnapshot?: boolean;
+  freshness?: 'hourly' | 'thirty_minutes';
 }
 
 const HOTLIST_ENDPOINT = '/api/v1/content/hot_list';
@@ -660,6 +664,8 @@ export class LiveHotlistProvider {
   private readonly now: () => number;
   private readonly snapshotStore: HotlistSnapshotStore | null;
   private readonly allowDemoFallback: boolean;
+  private readonly persistFallbackSnapshot: boolean;
+  private readonly freshness: 'hourly' | 'thirty_minutes';
 
   constructor(options: LiveHotlistProviderOptions) {
     this.config = options.config;
@@ -669,6 +675,8 @@ export class LiveHotlistProvider {
     this.now = options.now ?? Date.now;
     this.snapshotStore = options.snapshotStore ?? null;
     this.allowDemoFallback = options.allowDemoFallback ?? true;
+    this.persistFallbackSnapshot = options.persistFallbackSnapshot ?? false;
+    this.freshness = options.freshness ?? 'hourly';
   }
 
   /** Fetch the hotlist with the full degradation chain; never throws. */
@@ -754,7 +762,10 @@ export class LiveHotlistProvider {
     const startedAt = this.now();
     const snapshot = await this.readSnapshotSafely(store);
 
-    if (snapshot && !options?.force && isHotlistSnapshotFresh(snapshot.updatedAt, startedAt)) {
+    const fresh = snapshot && (this.freshness === 'thirty_minutes'
+      ? isHotlistSnapshotFreshEvery30Minutes(snapshot.updatedAt, startedAt)
+      : isHotlistSnapshotFresh(snapshot.updatedAt, startedAt));
+    if (snapshot && !options?.force && fresh) {
       // Fresh within the same Beijing hour slot: return without touching external network.
       return {
         items: snapshot.items,
@@ -815,6 +826,10 @@ export class LiveHotlistProvider {
         refreshError,
         diagnostic,
       };
+    }
+
+    if (this.persistFallbackSnapshot && this.allowDemoFallback) {
+      try { await store.write({ items: DEMO_HOTLIST_ITEMS.map(item => ({ ...item })), updatedAt: this.now() }); } catch { /* best effort */ }
     }
 
     return {

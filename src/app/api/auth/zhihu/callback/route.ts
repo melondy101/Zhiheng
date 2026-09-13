@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { extractSessionFromRequest } from '@/lib/auth';
 import { getZhihuOAuthProvider } from '@/lib/zhihu-oauth';
-import { buildPublicAppUrl } from '@/lib/public-app-url';
 
 export const runtime = 'nodejs';
 
@@ -18,5 +17,5 @@ export async function GET(request: Request) {
   const profile = await provider.fetchProfile(token.accessToken);
   if (!profile) return NextResponse.json({ error: 'ZHIHU_OAUTH_PROFILE_FAILED' }, { status: 502 });
   provider.bindAuthorizedUser(session.userId, token.accessToken, profile);
-  return NextResponse.redirect(buildPublicAppUrl('/?zhihu=connected', request.url));
+  return NextResponse.redirect(new URL('/', request.url));
 }

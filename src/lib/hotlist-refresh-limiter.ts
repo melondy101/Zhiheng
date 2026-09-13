@@ -2,6 +2,7 @@
 
 export const BEIJING_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 export const ONE_HOUR_MS = 60 * 60 * 1000;
+export const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 export const DEFAULT_MANUAL_REFRESH_LIMIT_PER_HOUR = 10;
 
 /**
@@ -43,6 +44,13 @@ export function getMsUntilNextBeijingHour(now: number = Date.now()): number {
 export function isHotlistSnapshotFresh(snapshotUpdatedAt: number, now: number): boolean {
   if (!snapshotUpdatedAt || snapshotUpdatedAt > now) return false;
   return getBeijingHourSlot(snapshotUpdatedAt) === getBeijingHourSlot(now);
+}
+
+/** Freshness window for non-manual hotlist requests. */
+export function isHotlistSnapshotFreshEvery30Minutes(snapshotUpdatedAt: number, now: number): boolean {
+  if (!snapshotUpdatedAt || snapshotUpdatedAt > now) return false;
+  return Math.floor((snapshotUpdatedAt + BEIJING_TIMEZONE_OFFSET_MS) / THIRTY_MINUTES_MS) ===
+    Math.floor((now + BEIJING_TIMEZONE_OFFSET_MS) / THIRTY_MINUTES_MS);
 }
 
 export interface RefreshLimitStatus {

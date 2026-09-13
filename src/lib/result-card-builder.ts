@@ -2,7 +2,7 @@
 // Strictly traces each item to a user message or selected viewpoint.
 // Assistant messages cannot be misattributed as user views.
 
-import type { Session, Message, Viewpoint, ResultCard, ResultCardAISummary } from './providers';
+import type { Session, Message, Viewpoint, ResultCard } from './providers';
 import { isRoundAnswer } from './providers';
 
 interface MessageTrace {
@@ -33,13 +33,8 @@ export interface DetailedResultCard extends Omit<ResultCard, 'finalPosition' | '
   uncertainAnswers: MessageTrace[];
   /** #17: questions the user left unanswered (the pending question, if any). */
   unresolved: string[];
-  /**
-   * AI-generated initial/final position summary, passed through verbatim
-   * from `session.resultCardAISummary`. Null/absent when the session hasn't
-   * completed or the model output failed validation — the UI must omit the
-   * summary section rather than fabricate one.
-   */
-  aiSummary: ResultCardAISummary | null;
+  /** Best-effort AI summary, when one was generated at completion time. */
+  aiSummary: Session['resultCardAISummary'] | null;
 }
 
 const userMessages = (session: Session): Message[] =>
@@ -144,5 +139,6 @@ export function buildSimpleResultCard(session: Session): ResultCard {
     selectedStartingStance: detailed.selectedStartingStance,
     finalPosition: detailed.finalPosition ? detailed.finalPosition.text : null,
     messageIds: detailed.messageIds,
+    aiSummary: detailed.aiSummary,
   };
 }

@@ -65,7 +65,6 @@ export interface KnowledgeGraph {
 }
 
 const TARGET_NODE_COUNT = 8; // within 6-10 range
-const MAX_LLM_GRAPH_ATTEMPTS = 2;
 // Keep the graph readable while providing a genuinely connected evidence
 // network instead of a topic hub with only a thin chain between neighbors.
 const TARGET_EDGE_COUNT = 20;
@@ -200,11 +199,6 @@ export function isEntityNoise(raw: string): boolean {
 // e.g. “是否有点” must never become the corrupted label “否有点”.
 const ENTITY_FRAGMENT_PREFIX_REGEX = /^(?:是否|是不是|而不是|不是|并非|如果|因为|所以|但是|然而|不过|而且|以及|还是|也许|可能|可以|应该|需要|必须|已经|正在|将会|能够|不能|不会|没有|有点)/;
 
-// Deterministic extraction receives prose snippets rather than a typed entity
-// list. These discourse-led clauses are assertions or conversational context,
-// not standalone concepts/claims suitable for a graph node.
-const PROSE_FRAGMENT_REGEX = /^(?:其实|现有材料(?:显示|表明)|据(?:此|报道|研究)|老辈人所谓的|往往|毕业后|要(?:解释|说明|讨论))|(?:一样的|差不多的|各奔东西)$/;
-
 const INSTITUTIONAL_ACTOR_REGEX = /(?:机构|大学|学院|团队|公司|政府|联盟|协会|组织|委员会|实验室|研究所|研究院|科学院|工程院|中心|基金会|工作室|部门|局|University|Institute|Laboratory|Lab|Foundation|Council|Committee|Organization|Company|Government|Association|Alliance)$/i;
 
 /** Clean an entity string by stripping punctuation, question prefixes, and grammatical particles. */
@@ -227,14 +221,12 @@ export function cleanEntityLabel(raw: string): string {
 export function sanitizeGraphLabel(raw: string): string | null {
   if (!raw || typeof raw !== 'string') return null;
   if (ENTITY_FRAGMENT_PREFIX_REGEX.test(raw.trim())) return null;
-  if (PROSE_FRAGMENT_REGEX.test(raw.trim())) return null;
   // Check blacklist noise filter on raw input first (catches "观点 3", "刚刚", "邓煜等菲奖得主")
   if (isEntityNoise(raw)) return null;
 
   const text = cleanEntityLabel(raw);
   if (text.length < 2 || text.length > 20 || STOP_WORDS.has(text)) return null;
   if (ENTITY_FRAGMENT_PREFIX_REGEX.test(text)) return null;
-  if (PROSE_FRAGMENT_REGEX.test(text)) return null;
   // Re-check cleaned text against blacklist noise filter
   if (isEntityNoise(text)) return null;
 
@@ -649,10 +641,6 @@ export function validateGraph(
 /**
  * Builds a deterministic simplified fallback graph when full extraction fails.
  */
-function isFallbackNarrativeFragment(label: string): boolean {
-  return /(?:掌门人呼吁|隔一段时间|出来发|小区业主|筹备业委会|遭(?:住建局|[^\s]{0,8}辱骂)|目前涉事|已被停职|此事暴露|微信群里的官威)/.test(label);
-}
-
 export function buildFallbackGraph(report: Report, reason: string): KnowledgeGraph {
   const centralId = 'n0';
   const nodes: GraphNode[] = [
@@ -664,18 +652,16 @@ export function buildFallbackGraph(report: Report, reason: string): KnowledgeGra
     },
   ];
 
-  // Prefer report knowledge points: unlike viewpoint prose they are already
-  // structured concepts. A fallback must omit uncertain narrative fragments
-  // rather than display a misleading, sentence-like node.
+  // Derive up to 5 simple nodes from viewpoints or title
   const candidates = [
-    ...(report.knowledgePoints || []).map((kp) => ({ label: kp.slice(0, 16), type: 'concept' as const })),
     ...(report.viewpoints || []).map((v) => ({ label: v.slice(0, 16), type: 'claim' as const })),
-  ];
+    ...(report.knowledgePoints || []).map((kp) => ({ label: kp.slice(0, 16), type: 'concept' as const })),
+  ].slice(0, 5);
 
   candidates.flatMap((cand) => {
     const label = sanitizeGraphLabel(cand.label);
-    return label && !isFallbackNarrativeFragment(label) ? [{ ...cand, label }] : [];
-  }).slice(0, 5).forEach((cand, idx) => {
+    return label ? [{ ...cand, label }] : [];
+  }).forEach((cand, idx) => {
     nodes.push({
       id: `n${idx + 1}`,
       label: cand.label,
@@ -735,39 +721,24 @@ export async function safeBuildGraphAsync(
   sources: Source[],
   llmProvider?: import('./providers').LLMProvider | null
 ): Promise<KnowledgeGraph> {
-  let degradedReason = '知识图谱 LLM 未返回通过校验的结构化结果';
   if (llmProvider && typeof llmProvider.generateKnowledgeGraph === 'function') {
-    for (let attempt = 1; attempt <= MAX_LLM_GRAPH_ATTEMPTS; attempt++) {
-      try {
-        const llmGraph = await Promise.race([
-          llmProvider.generateKnowledgeGraph({ report, sources }),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
-        ]);
-        if (llmGraph) {
-          const check = validateGraph(llmGraph, report);
-          if (check.valid) {
-            return llmGraph;
-          }
-          degradedReason = check.reason ?? degradedReason;
-        } else {
-          degradedReason = '知识图谱 LLM 在 15 秒内未返回结果';
+    try {
+      const llmGraph = await Promise.race([
+        llmProvider.generateKnowledgeGraph({ report, sources }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
+      ]);
+      if (llmGraph) {
+        const check = validateGraph(llmGraph, report);
+        if (check.valid) {
+          return llmGraph;
         }
-      } catch (error) {
-        degradedReason = error instanceof Error ? error.message : String(error);
       }
-
-      if (attempt < MAX_LLM_GRAPH_ATTEMPTS) {
-        console.warn(`[knowledge-graph] LLM extraction attempt ${attempt} failed validation; retrying once`);
-      }
+    } catch {
+      // Degrade to deterministic graph extraction below
     }
   }
 
-  const graph = safeBuildGraph(report, sources);
-  return {
-    ...graph,
-    isFallback: true,
-    degradedReason: graph.degradedReason ?? degradedReason,
-  };
+  return safeBuildGraph(report, sources);
 }
 
 /** Required report graph path: only an LLM-produced, validated graph is valid. */

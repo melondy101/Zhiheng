@@ -14,6 +14,9 @@ import { NextResponse } from 'next/server';
 import { getServerStorage, StorageUnavailableError } from '@/lib/server-storage';
 import { readOwnerId } from '@/lib/owner-id';
 import type { UserProfile } from '@/lib/lifecycle';
+import { deriveThinkingProfileFromHistory, collectDecisionTraces, generateThinkingReview } from '@/lib/thinking-personality';
+import type { StoryRun } from '@/lib/story-run';
+import { getLLMProvider } from '@/lib/server-providers';
 
 export const runtime = 'nodejs';
 
@@ -41,13 +44,21 @@ function missingOwnerResponse() {
   );
 }
 
+const feedbackStore = new Map<string, { rating: 'accurate' | 'partial' | 'inaccurate'; note?: string; updatedAt: number }>();
+
 export async function GET(request: Request) {
   const ownerId = readOwnerId(request);
   if (!ownerId) return missingOwnerResponse();
   const serverStorage = await getServerStorage();
   try {
-    const profile = await serverStorage.forOwner(ownerId).loadProfile();
-    return NextResponse.json({ profile, storage: serverStorage.mode });
+    const scope = serverStorage.forOwner(ownerId);
+    const profile = await scope.loadProfile();
+    const sessions = await scope.sessions.listSessions();
+    const stories = sessions.map((s) => s.storyRun).filter((s): s is StoryRun => Boolean(s));
+    const thinkingProfile = stories.length ? deriveThinkingProfileFromHistory(stories) : null;
+    const decisionTraces = collectDecisionTraces(stories);
+    const aiReview = thinkingProfile ? await generateThinkingReview(getLLMProvider(), thinkingProfile, decisionTraces) : null;
+    return NextResponse.json({ profile, thinkingProfile, decisionTraces, aiReview, storage: serverStorage.mode });
   } catch (err) {
     if (err instanceof StorageUnavailableError) return storageUnavailableResponse();
     throw err;
@@ -82,6 +93,15 @@ export async function PUT(request: Request) {
     if (err instanceof StorageUnavailableError) return storageUnavailableResponse();
     throw err;
   }
+}
+
+export async function PATCH(request: Request) {
+  const ownerId = readOwnerId(request);
+  if (!ownerId) return missingOwnerResponse();
+  const body = await request.json().catch(() => null) as { rating?: string; note?: string } | null;
+  if (!body || !['accurate', 'partial', 'inaccurate'].includes(body.rating ?? '')) return NextResponse.json({ error: 'Invalid feedback' }, { status: 400 });
+  feedbackStore.set(ownerId, { rating: body.rating as 'accurate' | 'partial' | 'inaccurate', note: typeof body.note === 'string' ? body.note.slice(0, 500) : undefined, updatedAt: Date.now() });
+  return NextResponse.json({ ok: true, feedback: feedbackStore.get(ownerId) });
 }
 
 export async function DELETE(request: Request) {
