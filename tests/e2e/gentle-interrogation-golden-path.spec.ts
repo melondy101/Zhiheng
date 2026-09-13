@@ -73,6 +73,17 @@ test.describe('R3 gentle adaptive interrogation (PRD v4.2 §5)', () => {
     }
   });
 
+  test('scenario 1b: a failed answer request becomes retryable instead of staying pending', async ({ page }) => {
+    await seedReportAndStart(page);
+    await page.route('**/api/interrogate', (route) => route.abort('failed'));
+
+    await page.getByTestId('answer-input').fill('网络失败后这条回答应该可以重试。');
+    await page.getByRole('button', { name: /发送/ }).click();
+
+    await expect(page.getByRole('button', { name: '点击重试' })).toBeVisible();
+    await expect(page.getByText('发送中...')).toHaveCount(0);
+  });
+
   test('scenario 2: three substantive answers open the decision gate (3/6/9 summary gate)', async ({ page }) => {
     await seedReportAndStart(page);
     const input = page.getByTestId('answer-input');

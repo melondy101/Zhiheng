@@ -36,6 +36,9 @@ import type { ServiceDiagnostic } from '@/lib/service-diagnostics';
 
 const retrievalProvider = new FixtureRetrievalProvider();
 const storageProvider = new BrowserStorageProvider();
+// Leave five seconds for the client to receive the route's 60 s timeout
+// response instead of leaving an optimistic message pending indefinitely.
+const INTERROGATE_CLIENT_TIMEOUT_MS = 55_000;
 
 /** Browser storage is read here, then passed explicitly to the server route. */
 async function historySessionsForReport() {
@@ -205,11 +208,14 @@ async function postInterrogate(
     optionId?: string;
   }
 ): Promise<InterrogateCallResult> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), INTERROGATE_CLIENT_TIMEOUT_MS);
   try {
     const res = await fetch('/api/interrogate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
       body: JSON.stringify({ sessionId: sess.id, session: sess, ...payload }),
+      signal: controller.signal,
     });
     if (res.status === 503) {
       // Explicit server-storage degradation signal (#21).
@@ -223,6 +229,8 @@ async function postInterrogate(
   } catch (err) {
     console.error('Interrogate API failed:', err);
     return { ok: false, storageUnavailable: false };
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -547,9 +555,18 @@ export default function Home() {
           setDirectiveRound,
           setSuggestSummary,
         }, payload.optimisticId ?? null, () => setOptimisticMessageId(null));
-      } else if (res.storageUnavailable) {
-        // #21: explicit degradation — keep the local mirror, disclose honestly.
-        setStorageNotice(storageNoticeFor('unavailable'));
+      } else {
+        if (res.storageUnavailable) {
+          // #21: explicit degradation — keep the local mirror, disclose honestly.
+          setStorageNotice(storageNoticeFor('unavailable'));
+        }
+        // A failed request never returns a session to reconcile. Resolve the
+        // local optimistic bubble explicitly so it exposes its retry path.
+        if (payload.optimisticId) {
+          setMessages(prev => prev.map((message) =>
+            message.id === payload.optimisticId ? { ...message, status: 'failed' } : message
+          ));
+        }
         setOptimisticMessageId(null);
       }
     } finally {
