@@ -48,8 +48,10 @@ test('LLM failure degrades to the strategy template and preserves the round', as
   await expect(question).toBeVisible();
   await expect(question).toContainText('数据或例子');
 
-  // (b) The QAPanel degradation notice is visible.
-  await expect(page.getByText('AI 服务异常，已使用策略模板')).toBeVisible();
+  // (b) The QAPanel degradation notice is visible. The exact wording depends on
+  //     the failure reason (connection refused → network), so assert the shared
+  //     suffix rather than one specific branch.
+  await expect(page.getByText(/已使用策略模板/).first()).toBeVisible();
 
   // (c) Answer one round: the answer is kept, the round advances, and the
   //     round 2 question (前提追问) is template-degraded again.
