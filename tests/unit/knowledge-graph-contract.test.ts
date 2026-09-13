@@ -438,6 +438,30 @@ describe('Knowledge Graph Contract (KG-01, KG-02, KG-03)', () => {
   });
 
   describe('KG-05: Blacklist Filter for Entity Noise Removal', () => {
+    it('rejects question and contrast fragments without cutting Chinese words', () => {
+      assert.strictEqual(sanitizeGraphLabel('是否有点'), null);
+      assert.strictEqual(sanitizeGraphLabel('而不是诸葛亮'), null);
+      assert.strictEqual(sanitizeGraphLabel('诸葛亮'), '诸葛亮');
+    });
+
+    it('does not promote a source nickname into a graph concept', () => {
+      const source = makeSource('s1', 'zhihu', '人工智能治理机制', '模型治理需要可验证的评估标准。', '贝蒙斯坦');
+      const report = makeReport([source]);
+      const graph = buildGraph(report, [source]);
+
+      assert.ok(!graph.nodes.some((node) => node.label === '贝蒙斯坦'));
+      assert.ok(graph.nodes.some((node) => node.label === '人工智能治理机制' && node.type === 'concept'));
+    });
+
+    it('keeps an institutional source author as an actor without misclassifying its title', () => {
+      const source = makeSource('s1', 'web', '人工智能治理机制', '模型治理需要可验证的评估标准。', '清华大学研究团队');
+      const report = makeReport([source]);
+      const graph = buildGraph(report, [source]);
+
+      assert.ok(graph.nodes.some((node) => node.label === '清华大学研究团队' && node.type === 'actor'));
+      assert.ok(graph.nodes.some((node) => node.label === '人工智能治理机制' && node.type === 'concept'));
+    });
+
     it('correctly detects collective composite mentions as noise', () => {
       const compositeExamples = [
         '邓煜等菲奖得主',
@@ -543,6 +567,8 @@ describe('Knowledge Graph Contract (KG-01, KG-02, KG-03)', () => {
           { id: 'n3', label: '刚刚', type: 'concept', description: '时效修饰词' },
           { id: 'n4', label: '自适应学习系统', type: 'concept', description: '专业概念' },
           { id: 'n5', label: '清华大学团队', type: 'actor', description: '实证研究团队' },
+          { id: 'n6', label: '是否有点', type: 'concept', description: '残缺疑问短语' },
+          { id: 'n7', label: '而不是诸葛亮', type: 'claim', description: '残缺转折短语' },
         ],
         edges: [
           { id: 'e1', from: 'n0', to: 'n4', predicate: '依赖', type: 'inferred', description: '依赖机理' },
@@ -556,6 +582,8 @@ describe('Knowledge Graph Contract (KG-01, KG-02, KG-03)', () => {
       assert.ok(!labels.includes('邓煜等菲奖得主'), 'Must not include 邓煜等菲奖得主');
       assert.ok(!labels.includes('观点 3'), 'Must not include 观点 3');
       assert.ok(!labels.includes('刚刚'), 'Must not include 刚刚');
+      assert.ok(!labels.includes('否有点'), 'Must not corrupt 是否有点 into 否有点');
+      assert.ok(!labels.includes('而不是诸葛亮'), 'Must reject contrast fragments');
       assert.ok(labels.includes('自适应学习系统'), 'Must keep valid concept 自适应学习系统');
       assert.ok(labels.includes('清华大学团队'), 'Must keep valid actor 清华大学团队');
     });

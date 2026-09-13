@@ -194,8 +194,12 @@ export function isEntityNoise(raw: string): boolean {
   return isBlacklistedEntityLabel(raw).isNoise;
 }
 
-const GRAMMAR_PARTICLES_PREFIX = /^(已|能|将|要|会|在|从|到|把|被|让|使|这|那|哪|什么|怎么|怎样|如何|为|给|对|于|是|有|做|与|和|及|为什么|如何看待|这是否意味着|到底什么是)+/;
-const GRAMMAR_PARTICLES_SUFFIX = /(的|了|着|过|和|与|及|在|从|到|把|被|让|使|这|那|哪|什么|怎么|怎样|如何|为|给|对|于|是|有|等|吗|呢|吧|啊|呀)+$/;
+// These are sentence fragments, not standalone entities. Rejecting the
+// complete fragment is safer than stripping individual Chinese characters:
+// e.g. “是否有点” must never become the corrupted label “否有点”.
+const ENTITY_FRAGMENT_PREFIX_REGEX = /^(?:是否|是不是|而不是|不是|并非|如果|因为|所以|但是|然而|不过|而且|以及|还是|也许|可能|可以|应该|需要|必须|已经|正在|将会|能够|不能|不会|没有|有点)/;
+
+const INSTITUTIONAL_ACTOR_REGEX = /(?:机构|大学|学院|团队|公司|政府|联盟|协会|组织|委员会|实验室|研究所|研究院|科学院|工程院|中心|基金会|工作室|部门|局|University|Institute|Laboratory|Lab|Foundation|Council|Committee|Organization|Company|Government|Association|Alliance)$/i;
 
 /** Clean an entity string by stripping punctuation, question prefixes, and grammatical particles. */
 export function cleanEntityLabel(raw: string): string {
@@ -210,19 +214,19 @@ export function cleanEntityLabel(raw: string): string {
   text = text.replace(/^(为什么|如何看待|这是否意味着|到底什么是|如何实现|怎么做|浅谈|探讨|浅析|论)\s*/i, '');
   // Strip punctuation and special chars
   text = text.replace(/[?？!！:：,，。;；"“”'‘’()[\]【】`~<>《》]/g, ' ').trim();
-  // Remove leading and trailing particles
-  text = text.replace(GRAMMAR_PARTICLES_PREFIX, '').replace(GRAMMAR_PARTICLES_SUFFIX, '').trim();
   return text;
 }
 
 /** Shared admission gate for deterministic, LLM, and fallback graph labels. */
 export function sanitizeGraphLabel(raw: string): string | null {
   if (!raw || typeof raw !== 'string') return null;
+  if (ENTITY_FRAGMENT_PREFIX_REGEX.test(raw.trim())) return null;
   // Check blacklist noise filter on raw input first (catches "观点 3", "刚刚", "邓煜等菲奖得主")
   if (isEntityNoise(raw)) return null;
 
   const text = cleanEntityLabel(raw);
   if (text.length < 2 || text.length > 20 || STOP_WORDS.has(text)) return null;
+  if (ENTITY_FRAGMENT_PREFIX_REGEX.test(text)) return null;
   // Re-check cleaned text against blacklist noise filter
   if (isEntityNoise(text)) return null;
 
@@ -237,19 +241,14 @@ export function sanitizeGraphLabel(raw: string): string | null {
   return text;
 }
 
-/** Extract candidate entity labels from a source. */
+/** Extract candidate labels from source content; authors are handled separately. */
 function extractEntities(source: Source): string[] {
   const title = source.title ?? '';
   const excerpt = source.excerpt ?? '';
   const candidates: string[] = [];
 
-  // Extract author if organization or research team
-  if (source.author && source.author.length >= 2 && source.author.length <= 16 && !STOP_WORDS.has(source.author)) {
-    candidates.push(source.author);
-  }
-
   // Split title and excerpt by clauses
-  const chunks = `${title} ${excerpt}`.split(/[:：\-_|/，,、\s。；;\t\n]+/);
+  const chunks = `${title} ${excerpt}`.split(/[?？!！:：\-_|/，,、\s。；;\t\n]+/);
   for (const chunk of chunks) {
     const cleaned = sanitizeGraphLabel(chunk);
     if (cleaned && cleaned.length <= 16) {
@@ -320,7 +319,8 @@ export function buildGraph(report: Report, sources: Source[]): KnowledgeGraph {
     }
   }
 
-  // 4. Add actors and entities from sources with citation linkage
+  // 4. Add institutional authors as actors, then derive concepts from source
+  // content. A source nickname is provenance, not a graph concept.
   sources.forEach((src, idx) => {
     if (nodes.length >= TARGET_NODE_COUNT) return;
     const cid =
@@ -328,15 +328,15 @@ export function buildGraph(report: Report, sources: Source[]): KnowledgeGraph {
         .map(Number)
         .find((k) => report.citations[k] === src) ?? (idx + 1);
 
-    const isActor =
-      /(?:机构|大学|团队|作者|公司|政府|联盟|学者|协会|组织|委员会|实验室|所|局)$/.test(src.author ?? '') ||
-      /(?:机构|大学|团队|作者|公司|政府|联盟|学者|协会|组织|委员会|实验室|所|局)$/.test(src.title ?? '');
+    const author = src.author?.trim() ?? '';
+    if (INSTITUTIONAL_ACTOR_REGEX.test(author)) {
+      addNode(author, 'actor', `来自文献 [${cid}] 的关键主体: ${author}`, cid);
+    }
 
     const entities = extractEntities(src);
     for (const ent of entities) {
       if (nodes.length >= TARGET_NODE_COUNT) break;
-      const entIsActor =
-        isActor || /(?:机构|大学|团队|作者|公司|政府|联盟|学者|协会|组织|委员会|实验室|所|局)$/.test(ent);
+      const entIsActor = INSTITUTIONAL_ACTOR_REGEX.test(ent);
       addNode(
         ent,
         entIsActor ? 'actor' : 'concept',
