@@ -296,6 +296,46 @@ describe('isValidQuestionText', () => {
   });
 });
 
+describe('DeepSeek request safeguards', () => {
+  it('disables thinking for an interactive strategy question', async () => {
+    const { provider, calls } = makeProvider(
+      () => jsonResponse(chatResponse(VALID_QUESTION)),
+      { baseUrl: 'https://api.deepseek.com/v1' }
+    );
+
+    await provider.generateStrategyQuestion('M1_evidence', makeSession());
+
+    const request = JSON.parse(calls[0]!.options.body) as Record<string, unknown>;
+    assert.deepStrictEqual(request.thinking, { type: 'disabled' });
+  });
+
+  it('requires JSON output and disables thinking for graph extraction', async () => {
+    const graphJson = JSON.stringify({
+      nodes: [
+        { id: 'n0', label: 'AI与创造力', type: 'topic', description: '讨论人工智能对创造力的影响' },
+        { id: 'n1', label: '创作工具', type: 'concept', description: '人工智能可辅助人类完成创作任务' },
+        { id: 'n2', label: '创造力提升', type: 'claim', description: '适当使用工具可以提高创作效率' },
+      ],
+      edges: [
+        { id: 'e1', from: 'n0', to: 'n1', predicate: '依赖', type: 'inferred', description: '议题围绕创作工具展开' },
+        { id: 'e2', from: 'n1', to: 'n2', predicate: '影响', type: 'inferred', description: '工具使用影响创造力提升' },
+      ],
+    });
+    const { provider, calls } = makeProvider(
+      () => jsonResponse(chatResponse(graphJson)),
+      { baseUrl: 'https://api.deepseek.com/v1' }
+    );
+    const session = makeSession();
+    if (!session.report) throw new Error('test session must include a report');
+
+    await provider.generateKnowledgeGraph({ report: session.report, sources: session.report.references });
+
+    const request = JSON.parse(calls[0]!.options.body) as Record<string, unknown>;
+    assert.deepStrictEqual(request.response_format, { type: 'json_object' });
+    assert.deepStrictEqual(request.thinking, { type: 'disabled' });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // extractChoiceContent — untrusted response mapped field-by-field
 // ---------------------------------------------------------------------------

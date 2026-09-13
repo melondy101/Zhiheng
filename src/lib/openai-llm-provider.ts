@@ -327,6 +327,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         messages,
         temperature: 0.7,
         max_tokens: 1024,
+        ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
       })
     );
     const content = extractChoiceContent(body);
@@ -428,6 +429,8 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         messages,
         temperature: 0.3,
         max_tokens: 1536,
+        response_format: { type: 'json_object' },
+        ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
       }),
       this.config.synthesisTimeoutMs
     );

@@ -434,6 +434,7 @@ describe('Knowledge Graph Contract (KG-01, KG-02, KG-03)', () => {
       const g2 = await safeBuildGraphAsync(report, sources, mockThrowingLLM);
       assert.ok(g2);
       assert.strictEqual(g2.nodes[0].id, 'n0');
+      assert.strictEqual(g2.isFallback, true, 'a graph built after LLM failure must disclose degradation');
     });
   });
 
@@ -442,6 +443,21 @@ describe('Knowledge Graph Contract (KG-01, KG-02, KG-03)', () => {
       assert.strictEqual(sanitizeGraphLabel('是否有点'), null);
       assert.strictEqual(sanitizeGraphLabel('而不是诸葛亮'), null);
       assert.strictEqual(sanitizeGraphLabel('诸葛亮'), '诸葛亮');
+    });
+
+    it('rejects conversational and evidentiary sentence fragments from the diagnostic report', () => {
+      for (const fragment of [
+        '其实人都是一样的',
+        '老辈人所谓的同学聚会',
+        '往往也都是阶层差不多的',
+        '毕业后各奔东西',
+        '要解释这个本能',
+        '现有材料显示',
+      ]) {
+        assert.strictEqual(sanitizeGraphLabel(fragment), null, `${fragment} must not become a graph node`);
+      }
+      assert.strictEqual(sanitizeGraphLabel('社会资本'), '社会资本');
+      assert.strictEqual(sanitizeGraphLabel('同侪比较机制'), '同侪比较机制');
     });
 
     it('does not promote a source nickname into a graph concept', () => {
