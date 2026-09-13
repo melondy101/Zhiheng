@@ -28,7 +28,9 @@ test('LLM failure degrades to the strategy template and preserves the round', as
   await page.fill('[data-testid="initial-opinion-input"]', '我认为大模型幻觉被夸大了');
   await page.click('button[type="submit"]');
   await expect(page).toHaveURL(/session=\w+/);
-  await expect(page.getByTestId('report-viewpoints-heading')).toBeVisible({ timeout: 15000 });
+  // 该配置下 LLM 恒失败，报告不会产出综合观点（report-viewpoints-heading
+  // 不渲染）。用 stance-selector 作为「报告已就绪」的锚点。
+  await expect(page.getByTestId('stance-selector')).toBeVisible({ timeout: 30_000 });
   await page.waitForLoadState('networkidle');
 
   // Select a stance -> the round 1 question is generated (LLM fails twice).
