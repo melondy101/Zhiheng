@@ -11,7 +11,7 @@ interface UserNavProps {
 }
 
 export default function UserNav({ className = '', compact = false }: UserNavProps) {
-  const { user, loading, openAuthModal, logout } = useCurrentUser();
+  const { user, loading, openAuthModal, logout, zhihuStatus } = useCurrentUser();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mode, setMode] = useState<'local' | 'web'>('web');
@@ -110,6 +110,9 @@ export default function UserNav({ className = '', compact = false }: UserNavProp
                 </span>
               </div>
               <p className="text-[11px] text-content-tertiary truncate">{user.email}</p>
+              {zhihuStatus?.authorized && (
+                <p className="mt-1 text-[11px] text-brand truncate">已连接知乎{zhihuStatus.profile?.name ? `：${zhihuStatus.profile.name}` : ''}</p>
+              )}
             </div>
             <button
               id="user-logout-btn"

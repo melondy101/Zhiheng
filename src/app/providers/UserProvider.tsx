@@ -11,6 +11,17 @@ export interface CurrentUser {
   isGuest: boolean;
 }
 
+export interface ZhihuAuthStatus {
+  configured: boolean;
+  authorized: boolean;
+  profile?: {
+    id: string;
+    name: string;
+    avatarUrl: string | null;
+    headline: string | null;
+  };
+}
+
 interface UserContextValue {
   user: CurrentUser | null;
   loading: boolean;
@@ -23,6 +34,8 @@ interface UserContextValue {
   sendCode: (email: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  zhihuStatus: ZhihuAuthStatus | null;
+  refreshZhihuStatus: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextValue | null>(null);
@@ -38,6 +51,16 @@ export function UserProvider({
   const [loading, setLoading] = useState<boolean>(!initialUser);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('register');
+  const [zhihuStatus, setZhihuStatus] = useState<ZhihuAuthStatus | null>(null);
+
+  const refreshZhihuStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/zhihu/status');
+      if (res.ok) setZhihuStatus(await res.json() as ZhihuAuthStatus);
+    } catch {
+      // OAuth status is optional; a transient failure must not block account login.
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -48,6 +71,7 @@ export function UserProvider({
         if (data.user) {
           setUser(data.user);
           setOwnerId(data.user.id);
+          await refreshZhihuStatus();
         }
       }
     } catch (err) {
@@ -55,7 +79,7 @@ export function UserProvider({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshZhihuStatus]);
 
   useEffect(() => {
     if (!initialUser) {
@@ -103,13 +127,14 @@ export function UserProvider({
         }
         setUser(data.user);
         setOwnerId(data.user.id);
+        await refreshZhihuStatus();
         closeAuthModal();
         return { ok: true };
       } catch {
         return { ok: false, error: '网络异常，请稍后重试' };
       }
     },
-    [closeAuthModal]
+    [closeAuthModal, refreshZhihuStatus]
   );
 
   const register = useCallback(
@@ -126,13 +151,14 @@ export function UserProvider({
         }
         setUser(data.user);
         setOwnerId(data.user.id);
+        await refreshZhihuStatus();
         closeAuthModal();
         return { ok: true };
       } catch {
         return { ok: false, error: '网络异常，请稍后重试' };
       }
     },
-    [closeAuthModal]
+    [closeAuthModal, refreshZhihuStatus]
   );
 
   const logout = useCallback(async () => {
@@ -143,6 +169,7 @@ export function UserProvider({
         if (data.user) {
           setUser(data.user);
           setOwnerId(data.user.id);
+          setZhihuStatus(null);
         }
       }
     } catch (err) {
@@ -164,6 +191,8 @@ export function UserProvider({
         sendCode,
         logout,
         refresh,
+        zhihuStatus,
+        refreshZhihuStatus,
       }}
     >
       {children}
@@ -175,6 +204,7 @@ export function UserProvider({
         onRegister={register}
         onSendCode={sendCode}
         isGuest={Boolean(user?.isGuest)}
+        zhihuStatus={zhihuStatus}
       />
     </UserContext.Provider>
   );
