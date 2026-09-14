@@ -11,7 +11,7 @@
 // — the client keeps its localStorage mirror and never assumes the write
 // was persisted remotely.
 import { NextResponse } from 'next/server';
-import { llmProvider } from '@/lib/server-providers';
+import { getLLMProvider } from '@/lib/server-providers';
 import { getServerStorage, StorageUnavailableError } from '@/lib/server-storage';
 import { readOwnerId } from '@/lib/owner-id';
 import { handleInterrogate } from '@/lib/interrogation-orchestrator';
@@ -31,6 +31,7 @@ const ACTIONS: InterrogateAction[] = [
   'transition',
   'set_target',
   'story_choice',
+  'story_freeform',
   'story_end_early',
   'story_complete',
   'story_bridge',
@@ -41,6 +42,7 @@ function isInterrogateAction(value: unknown): value is InterrogateAction {
 }
 
 export async function POST(request: Request) {
+  const llmProvider = getLLMProvider();
   const ownerId = readOwnerId(request);
   if (!ownerId) {
     return NextResponse.json(
@@ -93,7 +95,6 @@ export async function POST(request: Request) {
     result = await handleInterrogate({
       sessionId: body.sessionId,
       action: body.action,
-      answer: typeof body.answer === 'string' ? body.answer : undefined,
       viewpoint: (body.viewpoint ?? undefined) as Viewpoint | undefined,
       sessionSnapshot: (body.session ?? null) as Session | null,
       optimisticId: typeof body.optimisticId === 'string' ? body.optimisticId : null,
@@ -107,12 +108,11 @@ export async function POST(request: Request) {
       world: typeof body.world === 'string' ? (body.world as StoryWorldId) : undefined,
       choiceId: typeof body.choiceId === 'string' ? body.choiceId : undefined,
       optionId: typeof body.optionId === 'string' ? body.optionId : undefined,
+      answer: typeof body.answer === 'string' ? body.answer : undefined,
       storage: scope.sessions,
       generateQuestion: (strategy, session) =>
         llmProvider.generateStrategyQuestion(strategy, session),
-      summarizeUserPositions: llmProvider.summarizeUserPositions
-        ? (args) => llmProvider.summarizeUserPositions!(args)
-        : undefined,
+      storyLlm: llmProvider,
     });
   } catch (err) {
     if (err instanceof StorageUnavailableError) {

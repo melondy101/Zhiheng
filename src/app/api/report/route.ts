@@ -7,8 +7,11 @@ import { HistorySearchProvider, type HistorySessionSnapshot } from '@/lib/histor
 import { defaultKnowledgeBaseProvider } from '@/lib/knowledge-base';
 import { buildReport } from '@/lib/report-builder';
 import { safeBuildGraphAsync, safeBuildGraph } from '@/lib/knowledge-graph';
-import { graphLlmProvider, llmProvider } from '@/lib/server-providers';
+import { getGraphLLMProvider, getLLMProvider } from '@/lib/server-providers';
 import { classifyLLMError, classifyZhihuError, type ServiceDiagnostic } from '@/lib/service-diagnostics';
+import { getPrefetchedZhihuSources } from '@/lib/zhihu-prefetch';
+import { crawlZhihuSources } from '@/lib/zhihu-crawler';
+import { runScrapling } from '@/lib/scrapling-bridge';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -79,6 +82,8 @@ function parseHistorySessions(value: unknown): HistorySessionSnapshot[] {
 export async function POST(request: Request) {
   const requestStartedAt = Date.now();
   try {
+    const llmProvider = getLLMProvider();
+    const graphLlmProvider = getGraphLLMProvider();
     // #21: every storage-touching request must carry the anonymous ownership
     // header; the session is stored under that owner and is invisible to
     // other owners.
@@ -106,12 +111,36 @@ export async function POST(request: Request) {
     const parsedHistorySessions = parseHistorySessions(historySessions);
 
     const retrievalStartedAt = Date.now();
-    const [zhihuResult, webResult, historyResult, kbResults] = await Promise.all([
-      zhihuProvider.search(question),
+    const prefetchedZhihu = getPrefetchedZhihuSources(question);
+    const [zhihuResultRaw, webResult, historyResult, kbResults, crawledSources, scraplingSources] = await Promise.all([
+      prefetchedZhihu ?? zhihuProvider.search(question),
       webProvider.search(question),
       historyProvider.search(question, parsedHistorySessions, excludedHistoryIds as string[]),
       defaultKnowledgeBaseProvider.search(question, { limit: 2 }),
+      prefetchedZhihu ? Promise.resolve([]) : crawlZhihuSources(question, SEARCH_TIMEOUT_MS),
+      prefetchedZhihu ? Promise.resolve([]) : runScrapling(question, 20_000),
     ]);
+    // Supplement official results with low-volume public-page extraction.
+    // Keep the existing source-state vocabulary: crawler material is treated
+    // as cached Zhihu evidence and never exposed as a new UI transport label.
+    const seen = new Set<string>();
+    const fingerprint = (s: Source) => {
+      const url = (s.url || '').trim().toLowerCase().replace(/[?#].*$/, '');
+      const body = (s.excerpt || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 2000);
+      return url ? `url:${url}` : `body:${body}`;
+    };
+    for (const source of zhihuResultRaw.sources) { seen.add(fingerprint(source)); }
+    const mergedCrawl = [...crawledSources, ...scraplingSources].filter((s) => {
+      const k = fingerprint(s);
+      if (seen.has(k)) return false;
+      seen.add(k); return true;
+    });
+    const zhihuResult = mergedCrawl.length === 0 ? zhihuResultRaw : {
+      ...zhihuResultRaw,
+      sources: [...zhihuResultRaw.sources, ...mergedCrawl],
+      source: zhihuResultRaw.sources.length > 0 ? zhihuResultRaw.source : 'cache' as const,
+      updatedAt: zhihuResultRaw.sources.length > 0 ? zhihuResultRaw.updatedAt : Date.now(),
+    };
     const retrievalDurationMs = Date.now() - retrievalStartedAt;
     console.log('[report] Retrieval completed:', {
       durationMs: retrievalDurationMs,

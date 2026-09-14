@@ -262,6 +262,9 @@ export function classifyLLMError(
 ): ServiceDiagnostic {
   const errMsg = err instanceof Error ? err.message : String(err ?? '');
   const combined = errMsg.toLowerCase();
+  const errorStatus = typeof err === 'object' && err !== null && 'status' in err && typeof (err as { status?: unknown }).status === 'number'
+    ? (err as { status: number }).status
+    : undefined;
   const serviceName = SERVICE_NAMES[service];
   const now = Date.now();
 
@@ -285,7 +288,9 @@ export function classifyLLMError(
       reason: 'unconfigured',
       reasonLabel: REASON_LABELS.unconfigured,
       message: `未配置大模型 API 秘钥或模型 (LLM_API_KEY / LLM_MODEL)`,
-      detail: errMsg,
+      detail: typeof err === 'object' && err !== null && 'responsePreview' in err
+        ? `${errMsg}; response=${String((err as { responsePreview?: unknown }).responsePreview ?? '')}`
+        : errMsg,
       timestamp: now,
     };
   }
@@ -383,7 +388,8 @@ export function classifyLLMError(
   }
 
   // Server error
-  if ((status && status >= 500) || combined.includes('500') || combined.includes('502') || combined.includes('503')) {
+  const effectiveStatus = status ?? errorStatus;
+  if ((effectiveStatus && effectiveStatus >= 500) || combined.includes('500') || combined.includes('502') || combined.includes('503')) {
     return {
       service,
       serviceName,
@@ -392,7 +398,7 @@ export function classifyLLMError(
       reasonLabel: REASON_LABELS.server_error,
       message: `AI 模型服务提供商异常 (HTTP ${status ?? 500})`,
       detail: errMsg,
-      statusCode: status,
+      statusCode: effectiveStatus,
       timestamp: now,
     };
   }
@@ -447,4 +453,3 @@ export function buildServiceDiagnostics(
     summary,
   };
 }
-

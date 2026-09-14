@@ -6,6 +6,7 @@
 // tests can observe the wiring without touching a real database or network.
 
 import { createHotlistSnapshotStoreFromEnv, type HotlistSnapshotStore } from './db/hotlist-snapshot-store';
+import type { HotlistSnapshot } from './db/hotlist-snapshot-store';
 import {
   createHotlistProvider,
   type LiveHotlistProvider,
@@ -29,7 +30,13 @@ export interface HotlistRouteDependencies {
 /** Production wiring: the real env factory and the real route provider. */
 export const defaultHotlistRouteDependencies: HotlistRouteDependencies = {
   createSnapshotStore: createHotlistSnapshotStoreFromEnv,
-  createProvider: (overrides) => createHotlistProvider(overrides),
+  createProvider: (overrides) => createHotlistProvider({ allowDemoFallback: true, persistFallbackSnapshot: true, freshness: 'thirty_minutes', ...overrides }),
+};
+
+let memoryHotlistSnapshot: HotlistSnapshot | null = null;
+const memoryHotlistSnapshotStore: HotlistSnapshotStore = {
+  async read() { return memoryHotlistSnapshot; },
+  async write(snapshot) { memoryHotlistSnapshot = snapshot; },
 };
 
 let activeDependencies: HotlistRouteDependencies | null = null;
@@ -45,9 +52,8 @@ export function getHotlistRouteDependencies(): HotlistRouteDependencies {
 
 /**
  * env → snapshot store → provider → result. The store may legitimately be
- * null (no DATABASE_URL, or an unavailable database) — the provider then runs
- * its live/demo chain without a persistent cache, which is the honest
- * degradation instead of a fabricated cache hit.
+ * null (no DATABASE_URL, or an unavailable database) — production uses a
+ * process-local snapshot fallback so ordinary requests remain quota-friendly.
  */
 export async function loadHotlistForRoute(
   env: Record<string, string | undefined> = process.env,
@@ -55,6 +61,6 @@ export async function loadHotlistForRoute(
   options?: { force?: boolean }
 ): Promise<RetrievalHotlistResult> {
   const snapshotStore = await deps.createSnapshotStore(env);
-  const provider = deps.createProvider({ snapshotStore: snapshotStore ?? undefined });
+  const provider = deps.createProvider({ snapshotStore: snapshotStore ?? (deps === defaultHotlistRouteDependencies ? memoryHotlistSnapshotStore : undefined) });
   return provider.fetchHotlist(options);
 }

@@ -26,7 +26,7 @@
 // Secrets are read from the server environment only. No NEXT_PUBLIC_ variable
 // is used anywhere in this module, so nothing here can reach the browser.
 
-import type { LLMProvider, ReportSynthesis, ResultCardAISummary, Session, Report, Source } from './providers';
+import type { LLMProvider, ReportSynthesis, Session, Report, Source } from './providers';
 import type { KnowledgeGraph } from './knowledge-graph';
 import {
   buildGraphExtractionMessages,
@@ -50,7 +50,6 @@ import {
 } from './question-rewriter';
 import { logStartupPath } from './startup-log';
 import { LLMRequestError } from './llm-fallback';
-import { buildSummaryMessages, parseSummaryResponse, type SummaryAnswerInput } from './result-card-summary';
 
 // Log environment configuration on module load (once).
 logStartupPath();
@@ -95,6 +94,7 @@ export function readOpenAILLMConfig(
   const model = env.LLM_MODEL?.trim();
   if (!apiKey || !model) return null;
   const baseUrl = (env.LLM_BASE_URL?.trim() || DEFAULT_LLM_BASE_URL).replace(/\/+$/, '');
+  // Preserve provider-specific model ids exactly; aliases are not rewritten.
   const readTimeout = (value: string | undefined, fallback: number) => {
     const timeout = Number(value?.trim());
     return Number.isFinite(timeout) && timeout > 0 ? timeout : fallback;
@@ -307,6 +307,12 @@ export interface OpenAICompatibleLLMProviderOptions {
 }
 
 export class OpenAICompatibleLLMProvider implements LLMProvider {
+  async generateStructuredJson(system: string, user: string): Promise<unknown | null> {
+    const raw = await this.postChatCompletion(JSON.stringify({ model: this.config.model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.7, response_format: { type: 'json_object' }, max_tokens: 1800 }));
+    const content = extractChoiceContent(raw);
+    if (!content) return null;
+    try { return JSON.parse(content); } catch { return null; }
+  }
   private readonly config: OpenAILLMConfig;
   private readonly transport: LLMHttpTransport;
 
@@ -327,7 +333,6 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         model: this.config.model,
         messages,
         temperature: 0.7,
-        ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
         max_tokens: 1024,
       })
     );
@@ -429,8 +434,6 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         model: this.config.model,
         messages,
         temperature: 0.3,
-        response_format: { type: 'json_object' },
-        ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
         max_tokens: 1536,
       }),
       this.config.synthesisTimeoutMs
@@ -478,43 +481,6 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     }
 
     return parseQuestionRewriteResponse(content, question);
-  }
-
-  /**
-   * Summarize the user's initial and final positions via LLM (result-card
-   * AI summary). Unlike the question path there is no template to degrade
-   * into: a non-conforming or unparseable response throws, and the caller
-   * (withFallback-style wiring in the orchestrator) leaves the summary
-   * absent rather than publishing an ungrounded guess.
-   */
-  async summarizeUserPositions(args: {
-    initialOpinion: string | null;
-    answers: SummaryAnswerInput[];
-  }): Promise<ResultCardAISummary | null> {
-    if (!args.initialOpinion?.trim() && args.answers.length === 0) return null;
-
-    const messages = buildSummaryMessages(args.initialOpinion, args.answers);
-    const body = await this.postChatCompletion(
-      JSON.stringify({
-        model: this.config.model,
-        messages,
-        temperature: 0.3,
-        response_format: { type: 'json_object' },
-        ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
-        max_tokens: 768,
-      })
-    );
-
-    const content = extractChoiceContent(body);
-    if (content === null) {
-      throw new Error('LLM API returned an unexpected response shape for result-card summary');
-    }
-
-    const summary = parseSummaryResponse(content, args.initialOpinion, args.answers);
-    if (!summary) {
-      throw new Error('LLM result-card summary response was not parseable JSON');
-    }
-    return summary;
   }
 
   /**
@@ -635,7 +601,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
           error: `LLM API HTTP ${response.status}`,
           responsePreview,
         });
-        throw new LLMRequestError('http', `LLM API HTTP ${response.status}`);
+        throw new LLMRequestError('http', `LLM API HTTP ${response.status} (model=${model})`, response.status, responsePreview);
       }
       let parsed: unknown;
       try {

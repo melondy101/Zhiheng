@@ -20,6 +20,12 @@ export const retrievalProvider = new FixtureRetrievalProvider();
  */
 export const llmProvider: LLMProvider = createLLMProviderFromEnv() ?? new FixtureLLMProvider();
 export const graphLlmProvider: LLMProvider | null = createGraphLLMProviderFromEnv();
+export function getLLMProvider(): LLMProvider {
+  return createLLMProviderFromEnv() ?? new FixtureLLMProvider();
+}
+export function getGraphLLMProvider(): LLMProvider | null {
+  return createGraphLLMProviderFromEnv();
+}
 
 // ---------------------------------------------------------------------------
 // Server-side in-memory storage.

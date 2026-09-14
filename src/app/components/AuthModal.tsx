@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Mail, Lock, User, ShieldCheck, CheckCircle2, AlertCircle, ArrowRight, Loader2, MessageCircle } from 'lucide-react';
-import type { ZhihuAuthStatus } from '../providers/UserProvider';
+import { X, Mail, Lock, User, ShieldCheck, CheckCircle2, AlertCircle, ArrowRight, Loader2 } from 'lucide-react';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -12,7 +11,6 @@ interface AuthModalProps {
   onRegister: (email: string, password: string, code: string, name?: string) => Promise<{ ok: boolean; error?: string }>;
   onSendCode: (email: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
   isGuest: boolean;
-  zhihuStatus: ZhihuAuthStatus | null;
 }
 
 export function AuthModal({
@@ -23,7 +21,6 @@ export function AuthModal({
   onRegister,
   onSendCode,
   isGuest,
-  zhihuStatus,
 }: AuthModalProps) {
   const [tab, setTab] = useState<'login' | 'register'>(initialTab);
   const [email, setEmail] = useState('');
@@ -363,34 +360,6 @@ export function AuthModal({
             )}
           </button>
         </form>
-
-        {tab === 'login' && (
-          <div className="mt-5">
-            <div className="relative mb-4 text-center before:absolute before:inset-x-0 before:top-1/2 before:border-t before:border-zinc-200 dark:before:border-zinc-700">
-              <span className="relative bg-white px-3 text-[11px] text-zinc-400 dark:bg-zinc-900">或</span>
-            </div>
-            {zhihuStatus?.authorized ? (
-              <div id="auth-zhihu-connected" className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                <span>已连接知乎账号{zhihuStatus.profile?.name ? `：${zhihuStatus.profile.name}` : ''}</span>
-              </div>
-            ) : (
-              <button
-                id="auth-btn-zhihu-login"
-                type="button"
-                onClick={() => { window.location.assign('/api/auth/zhihu/start'); }}
-                disabled={zhihuStatus?.configured === false}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-4 py-2.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-800 dark:bg-zinc-900 dark:text-blue-300 dark:hover:bg-blue-950/30"
-              >
-                <MessageCircle className="h-4 w-4" />
-                使用知乎登录
-              </button>
-            )}
-            {zhihuStatus?.configured === false && (
-              <p className="mt-2 text-center text-[11px] text-zinc-400">知乎登录暂未配置，请稍后再试。</p>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

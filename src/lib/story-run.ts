@@ -11,6 +11,7 @@
 // - Strictly non-judgmental: fictional outcomes are never attributed as user moral flaws or personality scores.
 
 import type { Report, Session, Viewpoint } from './providers';
+import { deriveThinkingProfile } from './thinking-personality';
 
 export type StoryWorldId = 'future_city' | 'fantasy_realm' | 'alternate_campus';
 export type StoryStatus = 'in_progress' | 'completed' | 'ended_early';
@@ -52,6 +53,19 @@ export interface StoryAct {
   sceneDescription: string;
   narrative: string;
   choices: StoryCriticalChoice[];
+  dialogue?: { speaker: string; text: string; role: 'support' | 'oppose' | 'neutral' }[];
+  reasoningGoal?: 'fact_check' | 'premise' | 'counterargument' | 'tradeoff';
+}
+
+export interface GeneratedStoryTurn {
+  scene: string;
+  dialogue: { speaker: string; text: string; role: 'support' | 'oppose' | 'neutral' }[];
+  reasoningGoal: NonNullable<StoryAct['reasoningGoal']>;
+  suggestions: Array<{ text: string; premise: string; benefit: string; cost: string }>;
+  revealedAssumptions: string[];
+  uncertainties: string[];
+  reflection: string;
+  citationIds?: number[];
 }
 
 export interface StoryRun {
@@ -69,6 +83,26 @@ export interface StoryRun {
   reflectionSummary: string | null;
   createdAt: number;
   updatedAt: number;
+  freeformResponses?: { actIndex: number; text: string; createdAt: number }[];
+  thinkingProfile?: import('./thinking-personality').ThinkingProfile;
+  decisionTraces?: DecisionTrace[];
+  aiScene?: string;
+  aiDialogue?: { speaker: string; text: string; role: 'support' | 'oppose' | 'neutral' }[];
+  aiReflection?: string;
+  dynamicTurns?: Array<GeneratedStoryTurn & { actIndex: number; createdAt: number }>;
+}
+
+export interface DecisionTrace {
+  id: string;
+  actIndex: number;
+  choiceId?: string;
+  optionId?: string;
+  freeformText?: string;
+  premise?: string;
+  benefit?: string;
+  cost?: string;
+  evidenceCitationIds: number[];
+  createdAt: number;
 }
 
 export const STORY_WORLDS: Record<StoryWorldId, StoryWorld> = {
@@ -205,6 +239,11 @@ export function generateStoryRun(
       sceneDescription: `${world.name} 议事厅。关于"${topic}"的公开辩论正式启幕。`,
       narrative: `聚光灯下，来自不同阵营的学者与代表各执一词。报告汇集的各类数据与案例在全息幕墙上交替闪现。你作为特别调查员步入中央席位，必须为最初的研判奠定基石。`,
       choices: [act1Choice],
+      reasoningGoal: 'fact_check',
+      dialogue: [
+        { speaker: '数据审计员', text: '我们先确认哪些信息已经被证据支持，哪些只是预测。', role: 'neutral' },
+        { speaker: '项目负责人', text: '如果现在不行动，窗口期可能会关闭。', role: 'support' },
+      ],
     },
     {
       actIndex: 2,
@@ -212,6 +251,11 @@ export function generateStoryRun(
       sceneDescription: `议程深入，核心矛盾浮出水面，质疑与反例相继登场。`,
       narrative: `第一阶段的举措平息了表面的喧嚣，但更尖锐的深层矛盾随之暴露。反方代表提交了详实的文献索引，直击方案的核心假设。此时退缩将前功尽弃，草率敷衍则后患无穷。`,
       choices: [act2Choice1],
+      reasoningGoal: 'counterargument',
+      dialogue: [
+        { speaker: '反方代表', text: '你的方案是否把一个局部成功，误当成了普遍规律？', role: 'oppose' },
+        { speaker: '观察员', text: '请明确：哪些条件改变时，你会修正判断？', role: 'neutral' },
+      ],
     },
     {
       actIndex: 3,
@@ -219,6 +263,11 @@ export function generateStoryRun(
       sceneDescription: `终局审议。全城屏息凝神，等待最终裁决与制度框架落成。`,
       narrative: `所有证据链条均已展开，各方的代价、收益与前提在阳光下昭然若揭。这不仅是一场虚拟推演，更是对思考严密性与包容度的真正考验。随着最后钟声敲响，你落下了定案的符印。`,
       choices: [act3Choice1],
+      reasoningGoal: 'tradeoff',
+      dialogue: [
+        { speaker: '执行负责人', text: '任何方案都会留下代价，问题是由谁承担、能否撤回。', role: 'neutral' },
+        { speaker: '市民代表', text: '我们需要看到你的优先级，而不只是一个漂亮的结论。', role: 'oppose' },
+      ],
     },
   ];
 
@@ -237,7 +286,33 @@ export function generateStoryRun(
     reflectionSummary: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    freeformResponses: [],
+    decisionTraces: [],
   };
+}
+
+/** Record an open-ended decision and move to the next scene without judging it. */
+export function makeStoryFreeformChoice(story: StoryRun, text: string): StoryRun {
+  const value = text.trim();
+  if (story.status !== 'in_progress' || !value) return story;
+  const now = Date.now();
+  const responses = [...(story.freeformResponses ?? []), { actIndex: story.currentActIndex, text: value, createdAt: now }];
+  const traces = [...(story.decisionTraces ?? []), { id: `trace_${now}_${responses.length}`, actIndex: story.currentActIndex, freeformText: value, evidenceCitationIds: [], createdAt: now }];
+  const nextAct = story.acts.find((a) => a.actIndex === story.currentActIndex + 1);
+  if (!nextAct) {
+    const index = story.currentActIndex + 1;
+    const continuation: StoryAct = {
+      actIndex: index,
+      title: `继续推演：第 ${index} 轮`,
+      sceneDescription: '新的信息和利益相关方进入现场，冲突仍未收束。',
+      narrative: '你可以继续提出自己的方案，也可以要求重新检查证据、反方观点或执行代价。推演没有预设轮数，直到你主动结束。',
+      reasoningGoal: index % 2 === 0 ? 'counterargument' : 'tradeoff',
+      dialogue: [{ speaker: '推演主持人', text: '基于刚才的决定，新的约束出现了。你准备如何回应？', role: 'neutral' }],
+      choices: [],
+    };
+    return { ...story, acts: [...story.acts, continuation], freeformResponses: responses, decisionTraces: traces, currentActIndex: index, currentChoiceId: null, updatedAt: now };
+  }
+  return { ...story, freeformResponses: responses, decisionTraces: traces, currentActIndex: nextAct.actIndex, currentChoiceId: nextAct.choices[0]?.id ?? null, updatedAt: now };
 }
 
 /**
@@ -267,6 +342,9 @@ export function makeStoryChoice(
   }));
 
   const chosenOptionIds = Array.from(new Set([...story.chosenOptionIds, optionId]));
+  const selected = acts.flatMap((a) => a.choices).find((c) => c.id === choiceId)?.options.find((o) => o.id === optionId);
+  const now = Date.now();
+  const decisionTraces = [...(story.decisionTraces ?? []), { id: `trace_${now}_${chosenOptionIds.length}`, actIndex: story.currentActIndex, choiceId, optionId, premise: selected?.premise, benefit: selected?.benefit, cost: selected?.cost, evidenceCitationIds: selected?.evidenceCitationIds ?? [], createdAt: now }];
 
   // Determine next act and choice
   let currentActIndex = story.currentActIndex;
@@ -285,15 +363,17 @@ export function makeStoryChoice(
         const firstChoiceInNext = nextAct.choices.find((c) => !c.selectedOptionId);
         nextChoiceId = firstChoiceInNext ? firstChoiceInNext.id : null;
       } else {
-        // All acts completed!
-        return completeStory({
-          ...story,
-          acts,
-          chosenOptionIds,
-          currentActIndex: 3,
-          currentChoiceId: null,
-          updatedAt: Date.now(),
-        });
+        const index = currentActIndex + 1;
+        const continuation: StoryAct = {
+          actIndex: index,
+          title: `继续推演：第 ${index} 轮`,
+          sceneDescription: '选择带来了新的约束。',
+          narrative: '新的后果正在显现。你可以提出自己的方案，或等待系统给出新的取舍路径。',
+          reasoningGoal: index % 2 === 0 ? 'counterargument' : 'tradeoff',
+          dialogue: [{ speaker: '推演主持人', text: '下一轮将检验这一决定的边界和代价。', role: 'neutral' }],
+          choices: [],
+        };
+        return { ...story, acts: [...acts, continuation], chosenOptionIds, currentActIndex: index, currentChoiceId: null, updatedAt: now, decisionTraces };
       }
     }
   }
@@ -305,6 +385,7 @@ export function makeStoryChoice(
     currentActIndex,
     currentChoiceId: nextChoiceId,
     updatedAt: Date.now(),
+    decisionTraces,
   };
 }
 
@@ -331,7 +412,7 @@ export function completeStory(story: StoryRun): StoryRun {
     `【情境推演回顾】你完成了全部三幕关键抉择，涉及 ${chosenOptions.length} 个核心权衡点。` +
     `推演全程严格基于研报文献支持，未引入虚构偏差。你可以将本次剧情中暴露的未明说前提，一键桥接至深度诘问继续严密推敲。`;
 
-  return {
+  const completed: StoryRun = {
     ...story,
     status: 'completed',
     outcomeNarrative,
@@ -339,6 +420,8 @@ export function completeStory(story: StoryRun): StoryRun {
     currentChoiceId: null,
     updatedAt: Date.now(),
   };
+  completed.thinkingProfile = deriveThinkingProfile(completed);
+  return completed;
 }
 
 /**

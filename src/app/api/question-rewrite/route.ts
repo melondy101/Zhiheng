@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rewriteQuestionAndSubtitle } from '@/lib/question-rewriter';
-import { llmProvider } from '@/lib/server-providers';
+import { getLLMProvider } from '@/lib/server-providers';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -11,6 +11,7 @@ export const maxDuration = 60;
  * inquiry-oriented core question along with an elegant 4-14 char subtitle.
  */
 export async function POST(req: NextRequest) {
+  const llmProvider = getLLMProvider();
   try {
     const body = await req.json();
     const { question } = body;

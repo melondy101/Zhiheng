@@ -5,7 +5,7 @@ import { buildDetailedResultCard, type DetailedResultCard } from '@/lib/result-c
 import type { Session } from '@/lib/providers';
 import CognitiveTrajectoryView from './CognitiveTrajectoryView';
 import { buildSessionMarkdown } from '@/lib/session-export';
-import { Sparkles, Share2, ArrowRight, BookOpen, CheckCircle, RefreshCw, HelpCircle } from 'lucide-react';
+import { Sparkles, Share2, ArrowRight, BookOpen, CheckCircle, RefreshCw, HelpCircle, FileText } from 'lucide-react';
 
 interface ResultCardViewProps {
   card: DetailedResultCard;
@@ -32,45 +32,6 @@ function TraceLink({ id }: { id: string }) {
     <span className="text-[10px] text-content-tertiary ml-1.5 font-mono" title={`来源: ${id}`}>
       [{id.slice(0, 12)}]
     </span>
-  );
-}
-
-function AISummaryBadge() {
-  return (
-    <span className="inline-block px-2 py-0.5 text-[10px] rounded-md bg-accent-light text-accent border border-accent/20 font-mono">
-      AI 总结
-    </span>
-  );
-}
-
-function AISummaryBlock({ label, item }: { label: string; item: { text: string; sourceMessageIds: string[] } }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <section className="mb-4">
-      <h4 className="text-xs font-semibold text-content-secondary mb-1.5 uppercase tracking-wider">{label}</h4>
-      <div className="text-xs sm:text-sm bg-surface p-3.5 rounded-xl border border-line leading-relaxed font-serif">
-        {item.text}
-      </div>
-      <div className="flex items-center gap-2 mt-1.5">
-        <AISummaryBadge />
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="text-[10px] text-content-tertiary hover:text-content-secondary font-mono"
-        >
-          {expanded ? '收起依据 ▾' : `依据 ${item.sourceMessageIds.length} 条消息 ▸`}
-        </button>
-      </div>
-      {expanded && (
-        <ul className="mt-1.5 space-y-1">
-          {item.sourceMessageIds.map((id) => (
-            <li key={id} className="text-[10px] text-content-tertiary font-mono">
-              [{id.slice(0, 12)}]
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }
 
@@ -105,6 +66,7 @@ export function ResultCardViewFromSession({ session, onNewSession }: {
 
 export default function ResultCardView({ card, session, onNewSession }: ResultCardViewProps) {
   const [shareNotice, setShareNotice] = useState(false);
+  const [obsidianNotice, setObsidianNotice] = useState<string | null>(null);
   const trajectory = session?.cognitiveTrajectory;
   const storyRun = session?.storyRun;
   const handleShare = async () => {
@@ -125,6 +87,19 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
       console.error('Failed to generate share link:', error);
     }
   };
+  const handleObsidianExport = async () => {
+    if (!session) return;
+    try {
+      const response = await fetch('/api/obsidian/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session }) });
+      const data = await response.json() as { ok?: boolean; backupPath?: string; error?: string };
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Obsidian 导出失败');
+      setObsidianNotice(data.backupPath ? '已导出到 Obsidian，并已备份旧文件' : '已导出到 Obsidian');
+      window.setTimeout(() => setObsidianNotice(null), 3000);
+    } catch (error) {
+      setObsidianNotice(error instanceof Error ? error.message : 'Obsidian 导出失败');
+      window.setTimeout(() => setObsidianNotice(null), 4000);
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-surface-elevated text-content-primary">
@@ -134,6 +109,10 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
           <h3 className="text-lg sm:text-xl font-bold text-brand font-serif">思辨成果卡</h3>
         </div>
         {session && (
+          <div className="flex items-center gap-2">
+          <button type="button" onClick={() => void handleObsidianExport()} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-line bg-surface hover:bg-surface-subtle text-xs font-medium text-content-primary shadow-2xs transition-all" title="导出为 Obsidian Markdown" aria-label="导出为 Obsidian Markdown" data-testid="obsidian-export-button">
+            <FileText className="w-3.5 h-3.5 text-accent" /><span>导出到 Obsidian</span>
+          </button>
           <button
             type="button"
             onClick={() => void handleShare()}
@@ -145,6 +124,7 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
             <Share2 className="w-3.5 h-3.5 text-accent" />
             <span>分享成果</span>
           </button>
+          </div>
         )}
       </div>
       {shareNotice && (
@@ -152,6 +132,7 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
           已复制分享链接
         </div>
       )}
+      {obsidianNotice && <div role="status" aria-live="polite" className="fixed right-5 top-20 z-50 rounded-xl border border-line bg-surface-elevated px-4 py-3 text-xs font-medium text-content-primary shadow-lg">{obsidianNotice}</div>}
 
       <CognitiveTrajectoryView events={trajectory ?? []}>
 
@@ -186,10 +167,6 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
           </div>
           <SourceLabel source="user_authored" />
         </section>
-      )}
-
-      {card.aiSummary?.initial && (
-        <AISummaryBlock label="AI 总结：初始观点" item={card.aiSummary.initial} />
       )}
 
       {card.startingStance && (
@@ -241,10 +218,6 @@ export default function ResultCardView({ card, session, onNewSession }: ResultCa
             <TraceLink id={card.finalPosition.messageId} />
           </div>
         </section>
-      )}
-
-      {card.aiSummary?.final && (
-        <AISummaryBlock label="AI 总结：最终观点" item={card.aiSummary.final} />
       )}
 
       {card.uncertainAnswers.length > 0 && (

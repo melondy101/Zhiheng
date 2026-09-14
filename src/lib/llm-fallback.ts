@@ -19,7 +19,7 @@ export interface FallbackEvent {
 export type LLMFailureReason = 'timeout' | 'network' | 'http' | 'invalid_response' | 'invalid_synthesis' | 'unknown';
 
 export class LLMRequestError extends Error {
-  constructor(public readonly reason: LLMFailureReason, message: string) {
+  constructor(public readonly reason: LLMFailureReason, message: string, public readonly status?: number, public readonly responsePreview?: string) {
     super(message);
     this.name = 'LLMRequestError';
   }

@@ -177,16 +177,9 @@ function buildQuestionFollowUp(session: Session, _questionText: string): string 
  * their selected viewpoint.
  */
 function buildAcknowledgment(session: Session, answerText: string): string {
+  const stance = session.selectedViewpoint?.text;
   const fragment = answerText.length > 20 ? answerText.slice(0, 20) + '…' : answerText;
-  const completedRounds = completedDirectiveRounds(session);
-  const templates = [
-    `你把重点放在「${fragment}」上，这给我们一个具体的切入点。`,
-    `「${fragment}」让你的依据更清楚了，我们可以顺着它继续拆开看。`,
-    `这里的「${fragment}」值得停一下：它可能正是这件事的关键条件。`,
-    `你补充的「${fragment}」把讨论推进到了更可检验的层面。`,
-  ];
-  const answerSeed = Array.from(answerText).reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return templates[(completedRounds + answerSeed) % templates.length]!;
+  return `我理解你的思考。你提到了「${fragment}」，这很有价值。`;
 }
 
 /**

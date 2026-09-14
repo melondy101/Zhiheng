@@ -912,6 +912,10 @@ export default function Home() {
     if (!session) return;
     await runInterrogate(session, { action: 'story_choice', choiceId, optionId });
   };
+  const handleStoryFreeform = async (text: string) => {
+    if (!session) return;
+    await runInterrogate(session, { action: 'story_freeform', answer: text });
+  };
 
   const handleStoryEndEarly = async () => {
     if (!session) return;
@@ -1169,6 +1173,7 @@ export default function Home() {
               session={session}
               onTransitionChoice={handleTransitionChoice}
               onStoryChoice={handleStoryChoice}
+              onStoryFreeform={handleStoryFreeform}
               onStoryEndEarly={handleStoryEndEarly}
               onStoryComplete={handleStoryComplete}
               onStoryBridge={handleStoryBridge}
