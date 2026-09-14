@@ -320,9 +320,16 @@ async function retrieveWithDegradation<T>(call: DegradedCall<T>): Promise<Degrad
       liveError = err;
       // #19 honest degradation: surface the real failure so we never silently
       // claim 'live' succeeded. Operators need to see 401/timeout/parse errors.
-      console.warn(
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const isAuthDegrade =
+        errMsg.includes('20001') ||
+        errMsg.includes('Authorization failed') ||
+        errMsg.includes('401') ||
+        errMsg.includes('403');
+      const logFn = isAuthDegrade ? console.info : console.warn;
+      logFn(
         `[zhihu-retrieval] live ${call.kind} failed — degrading:`,
-        err instanceof Error ? err.message : String(err)
+        errMsg
       );
     }
   } else if (!call.config) {

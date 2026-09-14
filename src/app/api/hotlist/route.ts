@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { loadHotlistForRoute, getHotlistRouteDependencies } from '@/lib/hotlist-route-wiring';
 import { readOwnerId } from '@/lib/owner-id';
 import { checkAndUpdateServerRefreshLimit } from '@/lib/hotlist-refresh-limiter';
-import { prefetchHotlistTopics } from '@/lib/zhihu-prefetch';
+import { prefetchHotlistTopics, recordZhihuAuthFailure, isZhihuAuthFailed } from '@/lib/zhihu-prefetch';
 
 export const runtime = 'nodejs';
 
@@ -46,18 +46,26 @@ export async function GET(req: Request) {
     }
     const result = await loadHotlistForRoute(process.env, getHotlistRouteDependencies(), { force: true });
     if (result.refreshError) {
+      if (result.refreshError.reason === 'auth_failed') {
+        recordZhihuAuthFailure();
+      }
       console.warn(
         `[hotlist:manual_refresh] Upstream live update failed: reason=${result.refreshError.reason}, message=${result.refreshError.message}, detail=${result.refreshError.detail ?? 'none'}`
       );
     } else {
       console.log(`[hotlist:manual_refresh] Live refresh succeeded (source=${result.source}, count=${result.items.length})`);
-      if (result.source !== 'demo') prefetchHotlistTopics(result.items);
+      if (result.source !== 'demo' && !isZhihuAuthFailed()) prefetchHotlistTopics(result.items);
     }
     return NextResponse.json(result);
   }
 
   const result = await loadHotlistForRoute(process.env, getHotlistRouteDependencies());
   console.log(`[hotlist:load] Served hotlist: source=${result.source}, stale=${result.stale ?? false}, count=${result.items.length}`);
-  if (result.source !== 'demo') prefetchHotlistTopics(result.items);
+  if (result.refreshError?.reason === 'auth_failed') {
+    recordZhihuAuthFailure();
+  }
+  if (result.source !== 'demo' && !isZhihuAuthFailed()) {
+    prefetchHotlistTopics(result.items);
+  }
   return NextResponse.json(result);
 }

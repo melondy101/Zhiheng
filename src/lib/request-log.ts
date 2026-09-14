@@ -98,7 +98,13 @@ export function logRequest(line: RequestLogLine): void {
     });
     return;
   }
-  console.warn(`${tag} × ${line.error} (after ${line.durationMs}ms)`, {
+  const isAuthDegrade =
+    line.status === 401 ||
+    line.status === 403 ||
+    line.error?.includes('20001') ||
+    line.error?.includes('Authorization failed');
+  const logFn = isAuthDegrade ? console.info : console.warn;
+  logFn(`${tag} × ${line.error} (after ${line.durationMs}ms)`, {
     status: line.status,
     responsePreview: line.responsePreview,
   });

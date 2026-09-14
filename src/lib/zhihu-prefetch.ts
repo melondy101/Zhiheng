@@ -2,6 +2,7 @@ import type { HotlistItem } from './hotlist-providers';
 import {
   createZhihuSearchProvider,
   normalizeQuery,
+  readZhihuApiConfig,
   type RetrievalResult,
 } from './zhihu-retrieval';
 
@@ -10,6 +11,28 @@ const PREFETCH_TTL_MS = 45 * 60 * 1000;
 const MAX_CONCURRENCY = 2;
 const prefetched = new Map<string, { result: RetrievalResult; expiresAt: number }>();
 const inFlight = new Map<string, Promise<void>>();
+
+let authFailedSecret: string | null = null;
+
+/** Check if the currently configured Zhihu secret is known to have failed authentication */
+export function isZhihuAuthFailed(): boolean {
+  const current = process.env.ZHIHU_ACCESS_SECRET?.trim();
+  if (!current) return false;
+  return current === authFailedSecret;
+}
+
+/** Record that a specific Zhihu secret failed upstream authentication (e.g. 20001) */
+export function recordZhihuAuthFailure(secret?: string): void {
+  const s = secret ?? process.env.ZHIHU_ACCESS_SECRET?.trim();
+  if (s) {
+    authFailedSecret = s;
+  }
+}
+
+/** Reset recorded auth failure state (e.g. for testing or when secret is updated) */
+export function clearZhihuAuthFailure(): void {
+  authFailedSecret = null;
+}
 
 export function getPrefetchedZhihuSources(question: string): RetrievalResult | null {
   const key = normalizeQuery(question);
@@ -24,7 +47,9 @@ export function getPrefetchedZhihuSources(question: string): RetrievalResult | n
 
 async function prefetchOne(title: string): Promise<{ authFailed?: boolean }> {
   const key = normalizeQuery(title);
-  if (!key || prefetched.has(key) || inFlight.has(key)) return {};
+  if (!key || prefetched.has(key) || inFlight.has(key) || isZhihuAuthFailed()) {
+    return { authFailed: isZhihuAuthFailed() };
+  }
   let isAuthFailed = false;
   const task = (async () => {
     try {
@@ -36,13 +61,17 @@ async function prefetchOne(title: string): Promise<{ authFailed?: boolean }> {
       }
       if (result.diagnostic?.reason === 'auth_failed') {
         isAuthFailed = true;
+        recordZhihuAuthFailure();
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg.includes('20001') || msg.includes('Authorization failed') || msg.includes('401') || msg.includes('403')) {
         isAuthFailed = true;
+        recordZhihuAuthFailure();
+        console.info('[zhihu-prefetch] topic auth failed, stopping prefetch:', title);
+      } else {
+        console.warn('[zhihu-prefetch] topic failed:', title, msg);
       }
-      console.warn('[zhihu-prefetch] topic failed:', title, msg);
     } finally {
       inFlight.delete(key);
     }
@@ -54,15 +83,23 @@ async function prefetchOne(title: string): Promise<{ authFailed?: boolean }> {
 
 /** Best-effort background preparation; never blocks the hotlist response. */
 export function prefetchHotlistTopics(items: HotlistItem[]): void {
+  const config = readZhihuApiConfig();
+  if (!config || isZhihuAuthFailed()) {
+    return;
+  }
+
   const titles = Array.from(new Set(items.map((item) => normalizeQuery(item.title)).filter(Boolean)));
+  if (titles.length === 0) return;
+
   void (async () => {
     let cursor = 0;
     let authFailed = false;
     const worker = async () => {
-      while (cursor < titles.length && !authFailed) {
+      while (cursor < titles.length && !authFailed && !isZhihuAuthFailed()) {
         const title = titles[cursor++];
+        if (!title) break;
         const res = await prefetchOne(title);
-        if (res.authFailed) {
+        if (res.authFailed || isZhihuAuthFailed()) {
           authFailed = true;
           break;
         }

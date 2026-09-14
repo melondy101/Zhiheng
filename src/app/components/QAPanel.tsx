@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { LLMFailureReason } from '@/lib/llm-fallback';
 
 import type { CitedSource, Message, Session } from '@/lib/providers';
@@ -11,7 +11,7 @@ import { TRANSITION_ACTIONS, type TransitionActionId } from '@/lib/mode-config';
 import SessionFeedbackCue from './SessionFeedbackCue';
 import StoryView from './StoryView';
 import CognitiveTrajectoryView from './CognitiveTrajectoryView';
-import { Sparkles, Send, ArrowRight, AlertCircle, HelpCircle, Compass } from 'lucide-react';
+import { Sparkles, Send, ArrowRight, AlertCircle, HelpCircle, Compass, Loader2, Clock, RotateCw, CheckCircle2 } from 'lucide-react';
 
 function fallbackMessage(reason?: LLMFailureReason): string {
   if (reason === 'timeout') return 'AI 响应超时，已使用策略模板';
@@ -33,6 +33,35 @@ function requestFailureMessage(reason?: Message['failureReason']): string {
   if (reason === 'network') return '网络连接失败，未发送成功。';
   if (reason === 'storage_unavailable') return '服务暂时无法保存本次对话，请重试。';
   return '服务未能处理本次请求，请重试。';
+}
+
+function getThinkingPhase(seconds: number): { title: string; hint: string; progress: number } {
+  if (seconds < 2.0) {
+    return {
+      title: '正在解析论点与核心前提',
+      hint: '识别论述核心断言与前提假设...',
+      progress: Math.min(30, (seconds / 2.0) * 30),
+    };
+  }
+  if (seconds < 5.0) {
+    return {
+      title: '组织苏格拉底式思辨策略',
+      hint: '结合上下文检索论据，设计反诘逻辑...',
+      progress: 30 + Math.min(35, ((seconds - 2.0) / 3.0) * 35),
+    };
+  }
+  if (seconds < 9.0) {
+    return {
+      title: '润色深度追问与启发约束',
+      hint: '校验问句结构与论证张力...',
+      progress: 65 + Math.min(25, ((seconds - 5.0) / 4.0) * 25),
+    };
+  }
+  return {
+    title: '深度推演中',
+    hint: '模型正在完善问句结构（若遇网络波动将自动降级保底）...',
+    progress: 92,
+  };
 }
 
 interface QAPanelProps {
@@ -171,11 +200,58 @@ export default function QAPanel({
 }: QAPanelProps) {
   const scrollTargetRef = useRef<HTMLDivElement | null>(null);
 
+  // Timing and loading state feedback
+  const [loadingSeconds, setLoadingSeconds] = useState(0);
+  const [loadingActionType, setLoadingActionType] = useState<'answer' | 'retry_question' | 'general' | null>(null);
+  const [lastCompletion, setLastCompletion] = useState<{
+    duration: string;
+    type: 'answer' | 'retry_question' | 'general';
+    usedFallback: boolean;
+  } | null>(null);
+  const startTimeRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (formLoading) {
+      startTimeRef.current = performance.now();
+      setLoadingSeconds(0);
+      const interval = window.setInterval(() => {
+        if (startTimeRef.current) {
+          const elapsed = (performance.now() - startTimeRef.current) / 1000;
+          setLoadingSeconds(elapsed);
+        }
+      }, 100);
+      return () => window.clearInterval(interval);
+    } else {
+      if (startTimeRef.current) {
+        const elapsed = ((performance.now() - startTimeRef.current) / 1000).toFixed(1);
+        setLastCompletion({
+          duration: elapsed,
+          type: loadingActionType ?? 'general',
+          usedFallback: Boolean(usedFallback),
+        });
+        startTimeRef.current = null;
+      }
+      setLoadingActionType(null);
+    }
+  }, [formLoading, usedFallback, loadingActionType]);
+
+  const handleRetryQuestionClick = () => {
+    if (!onRetryQuestion || formLoading) return;
+    setLoadingActionType('retry_question');
+    onRetryQuestion();
+  };
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    if (formLoading) return;
+    setLoadingActionType('answer');
+    onSubmit(e);
+  };
+
   useEffect(() => {
     if (scrollTargetRef.current) {
       scrollTargetRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages.length]);
+  }, [messages.length, formLoading]);
 
   if (session?.mode === 'story' && session?.storyRun) {
     return (
@@ -336,9 +412,52 @@ export default function QAPanel({
                   <AlertCircle className="w-3.5 h-3.5" />
                   <span>{fallbackMessage(fallbackReason)}</span>
                   {onRetryQuestion && (
-                    <button type="button" onClick={onRetryQuestion} disabled={formLoading} className="font-medium underline underline-offset-2 disabled:opacity-60">
-                      重新请求 AI
+                    <button
+                      type="button"
+                      onClick={handleRetryQuestionClick}
+                      disabled={formLoading}
+                      className="inline-flex items-center gap-1.5 font-medium underline underline-offset-2 disabled:opacity-60 text-xs hover:opacity-80"
+                    >
+                      {formLoading && loadingActionType === 'retry_question' ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin text-brand" />
+                          <span>正在重新构思 ({loadingSeconds.toFixed(1)}s)...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RotateCw className="w-3 h-3" />
+                          <span>重新请求 AI</span>
+                        </>
+                      )}
                     </button>
+                  )}
+                </div>
+              )}
+              {formLoading && loadingActionType === 'retry_question' && (
+                <div className="mt-3 p-3 bg-brand-light/60 border border-brand-subtle rounded-xl text-xs flex items-center justify-between gap-2 text-brand">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-brand shrink-0" />
+                    <span>正在连接大模型生成新追问...</span>
+                  </div>
+                  <span className="font-mono text-[11px] bg-surface px-2 py-0.5 rounded border border-line shrink-0">
+                    已耗时 {loadingSeconds.toFixed(1)}s
+                  </span>
+                </div>
+              )}
+              {!formLoading && lastCompletion && (
+                <div className="mt-2.5 flex items-center gap-2 flex-wrap text-[11px] text-content-tertiary">
+                  <span className="inline-flex items-center gap-1 bg-surface-subtle px-2 py-0.5 rounded font-mono text-[10px] text-content-secondary border border-line">
+                    <Clock className="w-3 h-3 text-content-tertiary" />
+                    <span>时效 {lastCompletion.duration}s</span>
+                  </span>
+                  {usedFallback ? (
+                    <span className="text-[10px] text-semantic-warning bg-semantic-warning-light/40 px-1.5 py-0.5 rounded border border-semantic-warning/20">
+                      策略模板降级
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-brand bg-brand-light/50 px-1.5 py-0.5 rounded border border-brand-subtle">
+                      AI 实时生成
+                    </span>
                   )}
                 </div>
               )}
@@ -386,9 +505,52 @@ export default function QAPanel({
                             <AlertCircle className="w-3.5 h-3.5" />
                             <span>{fallbackMessage(fallbackReason)}</span>
                             {onRetryQuestion && (
-                              <button type="button" onClick={onRetryQuestion} disabled={formLoading} className="font-medium underline underline-offset-2 disabled:opacity-60">
-                                重新请求 AI
+                              <button
+                                type="button"
+                                onClick={handleRetryQuestionClick}
+                                disabled={formLoading}
+                                className="inline-flex items-center gap-1.5 font-medium underline underline-offset-2 disabled:opacity-60 text-xs hover:opacity-80"
+                              >
+                                {formLoading && loadingActionType === 'retry_question' ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin text-brand" />
+                                    <span>正在重新构思 ({loadingSeconds.toFixed(1)}s)...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <RotateCw className="w-3 h-3" />
+                                    <span>重新请求 AI</span>
+                                  </>
+                                )}
                               </button>
+                            )}
+                          </div>
+                        )}
+                        {formLoading && loadingActionType === 'retry_question' && (
+                          <div className="mt-3 p-3 bg-brand-light/60 border border-brand-subtle rounded-xl text-xs flex items-center justify-between gap-2 text-brand">
+                            <div className="flex items-center gap-2">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-brand shrink-0" />
+                              <span>正在连接大模型生成新追问...</span>
+                            </div>
+                            <span className="font-mono text-[11px] bg-surface px-2 py-0.5 rounded border border-line shrink-0">
+                              已耗时 {loadingSeconds.toFixed(1)}s
+                            </span>
+                          </div>
+                        )}
+                        {!formLoading && lastCompletion && (
+                          <div className="mt-2.5 flex items-center gap-2 flex-wrap text-[11px] text-content-tertiary">
+                            <span className="inline-flex items-center gap-1 bg-surface-subtle px-2 py-0.5 rounded font-mono text-[10px] text-content-secondary border border-line">
+                              <Clock className="w-3 h-3 text-content-tertiary" />
+                              <span>时效 {lastCompletion.duration}s</span>
+                            </span>
+                            {usedFallback ? (
+                              <span className="text-[10px] text-semantic-warning bg-semantic-warning-light/40 px-1.5 py-0.5 rounded border border-semantic-warning/20">
+                                策略模板降级
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-brand bg-brand-light/50 px-1.5 py-0.5 rounded border border-brand-subtle">
+                                AI 实时生成
+                              </span>
                             )}
                           </div>
                         )}
@@ -397,6 +559,37 @@ export default function QAPanel({
                   </div>
                 );
               })}
+
+              {/* AI Thinking and Elapsed Time Feedback */}
+              {formLoading && loadingActionType === 'answer' && (
+                <div
+                  data-testid="ai-thinking-feedback"
+                  className="bg-surface border border-brand/20 rounded-2xl rounded-bl-xs p-4 mr-8 sm:mr-12 shadow-xs transition-all animate-pulse"
+                >
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-3.5 h-3.5 text-brand animate-spin" style={{ animationDuration: '3s' }} />
+                      <span className="text-xs font-semibold text-brand">知研 AI 深度思辨分析中</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-content-secondary flex items-center gap-1 bg-surface-subtle px-2 py-0.5 rounded border border-line">
+                      <Clock className="w-3 h-3 text-content-tertiary" />
+                      <span>{loadingSeconds.toFixed(1)}s</span>
+                    </span>
+                  </div>
+                  <p className="text-xs text-content-primary font-medium">
+                    {getThinkingPhase(loadingSeconds).title}
+                  </p>
+                  <p className="text-[11px] text-content-secondary mt-0.5">
+                    {getThinkingPhase(loadingSeconds).hint}
+                  </p>
+                  <div className="mt-2.5 w-full bg-surface-subtle rounded-full h-1 overflow-hidden border border-line">
+                    <div
+                      className="bg-brand h-full rounded-full transition-all duration-300"
+                      style={{ width: `${getThinkingPhase(loadingSeconds).progress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
               {lastAssistantIndex === -1 && (
                 <SourcesSection sources={sources} />
@@ -542,14 +735,20 @@ export default function QAPanel({
 
       {/* Input Form */}
       {!isCheckpoint && !pendingDecision && (
-        <form onSubmit={onSubmit} className="p-3 sm:p-4 border-t border-line bg-surface-elevated">
+        <form onSubmit={handleFormSubmit} className="p-3 sm:p-4 border-t border-line bg-surface-elevated">
           <div className="flex gap-2 items-center">
             <input
               type="text"
               data-testid="answer-input"
               value={answer}
               onChange={(e) => onAnswerChange(e.target.value)}
-              placeholder={formLoading ? '正在发送...' : '输入你的观点或论述...'}
+              placeholder={
+                formLoading
+                  ? loadingActionType === 'retry_question'
+                    ? `正在重新生成问句 (${loadingSeconds.toFixed(1)}s)...`
+                    : `正在思考追问 (${loadingSeconds.toFixed(1)}s)...`
+                  : '输入你的观点或论述...'
+              }
               disabled={formLoading}
               className="flex-1 px-3.5 py-2.5 border border-line bg-surface rounded-xl text-xs sm:text-sm text-content-primary placeholder:text-content-tertiary focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand disabled:opacity-50 transition-all leading-relaxed"
             />
@@ -560,7 +759,14 @@ export default function QAPanel({
               className="px-4 py-2.5 bg-brand hover:bg-brand-hover text-content-inverse rounded-xl text-xs sm:text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed shadow-xs transition-all flex items-center gap-1.5 shrink-0 active:scale-[0.98]"
             >
               {formLoading ? (
-                <span>发送中...</span>
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>
+                    {loadingActionType === 'retry_question'
+                      ? `重试 (${loadingSeconds.toFixed(1)}s)`
+                      : `思考中 (${loadingSeconds.toFixed(1)}s)`}
+                  </span>
+                </>
               ) : (
                 <>
                   <span>发送</span>
