@@ -110,6 +110,38 @@ describe('evaluateStreak (#15 streak math, #10 semantics)', () => {
   });
 });
 
+describe('handleInterrogate: retry_question action', () => {
+  it('replaces a template question with a fresh question without advancing the round', async () => {
+    const session = makeSession(0, 1);
+    session.interrogation = {
+      round: 1,
+      strategy: 'M1_evidence',
+      assistantQuestion: '【策略模板降级】请举一个数据或例子？',
+      usedFallback: true,
+      fallbackReason: 'question_validation_failed',
+      pendingCheckpoint: false,
+      uncertainStreak: 0,
+    };
+    session.messages[0] = { id: 'a0', role: 'assistant', text: session.interrogation.assistantQuestion!, timestamp: 0 };
+    const { storage, snapshot } = makeStorage(session);
+
+    const result = await handleInterrogate({
+      sessionId: session.id,
+      action: 'retry_question',
+      storage,
+      generateQuestion: async () => '新的 AI 问题：你能举一个具体例子吗？',
+    });
+
+    assert.ok(result.ok);
+    assert.strictEqual(result.body.round, 1);
+    assert.strictEqual(result.body.question, '新的 AI 问题：你能举一个具体例子吗？');
+    assert.strictEqual(result.body.usedFallback, false);
+    assert.strictEqual(result.body.session.messages.filter((message) => message.role === 'assistant').length, 1);
+    assert.strictEqual(result.body.session.messages[0]?.text, result.body.question);
+    assert.strictEqual(snapshot()?.interrogation?.assistantQuestion, result.body.question);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Ticket #17: the explicit complete action. A failed completion must never
 // corrupt the stored session.

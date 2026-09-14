@@ -14,11 +14,25 @@ import CognitiveTrajectoryView from './CognitiveTrajectoryView';
 import { Sparkles, Send, ArrowRight, AlertCircle, HelpCircle, Compass } from 'lucide-react';
 
 function fallbackMessage(reason?: LLMFailureReason): string {
-  if (reason === 'timeout') return 'AI 响应较慢，已使用策略模板';
-  if (reason === 'network') return 'AI 连接失败，已使用策略模板';
-  if (reason === 'http') return 'AI 服务暂时拒绝请求，已使用策略模板';
-  if (reason === 'invalid_response' || reason === 'invalid_synthesis') return 'AI 返回内容未通过校验，已使用策略模板';
-  return 'AI 服务异常，已使用策略模板';
+  if (reason === 'timeout') return 'AI 响应超时，已使用策略模板';
+  if (reason === 'network') return '无法连接 AI 服务，已使用策略模板';
+  if (reason === 'authentication_failed') return 'AI 服务授权失败，已使用策略模板';
+  if (reason === 'rate_limited') return 'AI 服务请求过于频繁，已使用策略模板';
+  if (reason === 'provider_unavailable') return 'AI 服务暂时不可用，已使用策略模板';
+  if (reason === 'http_error') return 'AI 服务拒绝了本次请求，已使用策略模板';
+  if (reason === 'response_not_json') return 'AI 返回了无法解析的数据，已使用策略模板';
+  if (reason === 'response_schema_invalid') return 'AI 返回数据结构不完整，已使用策略模板';
+  if (reason === 'response_empty') return 'AI 没有返回可用内容，已使用策略模板';
+  if (reason === 'reasoning_leaked') return 'AI 返回了思考过程而非最终问题，已使用策略模板';
+  if (reason === 'question_validation_failed') return 'AI 返回内容不符合提问规则，已使用策略模板';
+  return 'AI 出现未分类异常，已使用策略模板';
+}
+
+function requestFailureMessage(reason?: Message['failureReason']): string {
+  if (reason === 'client_timeout') return '等待服务响应超时，未发送成功。';
+  if (reason === 'network') return '网络连接失败，未发送成功。';
+  if (reason === 'storage_unavailable') return '服务暂时无法保存本次对话，请重试。';
+  return '服务未能处理本次请求，请重试。';
 }
 
 interface QAPanelProps {
@@ -41,6 +55,7 @@ interface QAPanelProps {
   onDecisionContinue?: () => void;
   onRetryComplete?: () => void;
   onRetryMessage?: (msgId: string) => void;
+  onRetryQuestion?: () => void;
   onExit?: () => void;
   onSummaryContinue?: () => void;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
@@ -139,6 +154,7 @@ export default function QAPanel({
   onDecisionContinue,
   onRetryComplete,
   onRetryMessage,
+  onRetryQuestion,
   onExit,
   messagesEndRef,
   formLoading = false,
@@ -316,10 +332,15 @@ export default function QAPanel({
               </p>
               <SourcesSection sources={sources} />
               {usedFallback && (
-                <p className="text-xs text-semantic-warning mt-2 flex items-center gap-1">
+                <div className="text-xs text-semantic-warning mt-2 flex items-center gap-2 flex-wrap">
                   <AlertCircle className="w-3.5 h-3.5" />
                   <span>{fallbackMessage(fallbackReason)}</span>
-                </p>
+                  {onRetryQuestion && (
+                    <button type="button" onClick={onRetryQuestion} disabled={formLoading} className="font-medium underline underline-offset-2 disabled:opacity-60">
+                      重新请求 AI
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -346,22 +367,30 @@ export default function QAPanel({
                       <p className="text-[11px] text-brand-light mt-1">发送中...</p>
                     )}
                     {msg.status === 'failed' && onRetryMessage && (
-                      <button
-                        type="button"
-                        onClick={() => onRetryMessage(msg.id)}
-                        className="text-xs text-semantic-error hover:underline mt-1 block"
-                      >
-                        点击重试
-                      </button>
+                      <div className="mt-1">
+                        <p className="text-[11px] text-semantic-error">{requestFailureMessage(msg.failureReason)}</p>
+                        <button
+                          type="button"
+                          onClick={() => onRetryMessage(msg.id)}
+                          className="text-xs text-semantic-error hover:underline mt-1 block"
+                        >
+                          点击重试
+                        </button>
+                      </div>
                     )}
                     {isLastAssistant && (
                       <div className="mt-2.5 pt-2.5 border-t border-line">
                         <SourcesSection sources={sources} />
                         {usedFallback && (
-                          <p className="text-xs text-semantic-warning mt-2 flex items-center gap-1">
+                          <div className="text-xs text-semantic-warning mt-2 flex items-center gap-2 flex-wrap">
                             <AlertCircle className="w-3.5 h-3.5" />
                             <span>{fallbackMessage(fallbackReason)}</span>
-                          </p>
+                            {onRetryQuestion && (
+                              <button type="button" onClick={onRetryQuestion} disabled={formLoading} className="font-medium underline underline-offset-2 disabled:opacity-60">
+                                重新请求 AI
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     )}

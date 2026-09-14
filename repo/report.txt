@@ -1,0 +1,27 @@
+✅ 已结合腾讯云云托管日志与 GitHub 仓库（melondy101/Zhiheng）定位到降级根因，并复测了快速对话的降级频率。
+
+## 一、降级频率（快速对话/快速思辨，跨会话）
+| 会话 | 助手生成轮次 | 降级次数 |
+|---|---|---|
+| 广汽停牌 | 3 | 3 |
+| 远程办公 | 4 | 3 |
+| **合计** | **7** | **6（≈86%）** |
+
+稳定复现、非偶发抖动；降级问句还会被写进成果卡「未解决问题」。报告生成与推演剧本均无降级，问题只集中在对话提问链路。
+
+## 二、根因（代码 + 日志双重证据）
+1. **问题出在出题路径，不是超时。** `generateStrategyQuestion`（`openai-llm-provider.ts:328-350`）请求体**没有传 `thinking:{type:'disabled'}`、也没有 `response_format`**，而报告/图谱路径都传了（`:401`、`:472`、`:515`）。日志显示应用实际调用 `deepseek-v4-flash`，HTTP **200** 但 `responsePreview` 是**思维链文本**（"We need answer as 知研追问助手…"）。
+2. **校验必然失败。** `extractChoiceContent`（`:278-296`）在 `content` 为空时会回退取 `reasoning_content`；而 `isValidQuestionText`（`:257-268`）要求：非空、≤500 字、**不含换行**、**恰好 1 个问号**、**以 ？/? 结尾**、非判词式——思维链文本一定不满足 → 抛普通 `Error`。
+3. **降级原因被贴错标签。** `classifyLLMFailure`（`llm-fallback.ts:28-33`）把普通 `Error` 一律归为 `'unknown'`；`withFallback` 重试 1 次后走模板兜底（`usedFallback:true, failureReason:'unknown'`）。
+4. **前端把真实原因吞掉。** 前端 `ek(reason)` 只映射 `timeout/network/http/invalid_response/invalid_synthesis`，`unknown` **无分支** → 落到 else「AI 服务异常，已使用策略模板」。
+5. **为什么"加 Timeout"无效。** 出题路径默认超时 `DEFAULT_LLM_TIMEOUT_MS = 10_000`（`:62`），但真正触发的是**内容校验失败（unknown）**而非 timeout；若是 timeout，页面会显示「AI 响应较慢」，而实际显示的是 else 兜底。
+
+## 三、修复建议
+- 出题路径补 `thinking:{type:'disabled'}`（可选加 `response_format`），与报告路径对齐；
+- 结构性校验失败改用 `LLMRequestError('invalid_response')` 而非普通 `Error`，让前端显示真实原因；
+- 前端 `ek()` 补全 `unknown` 等分支；
+- 出题超时 10s 与模型能力不匹配，建议先禁用 thinking 再调至 20-30s。
+
+来源：腾讯云云托管日志（`/api/interrogate` 调用 `deepseek-v4-flash`，200 但返回思维链）[云托管服务日志](https://tcb.cloud.tencent.com/dev?envId=dae-d3g1pq9igc83322ae#/platform-run/service/detail?serverName=zhiheng&tabId=log&envId=dae-d3g1pq9igc83322ae)；GitHub 仓库 [melondy101/Zhiheng](https://github.com/melondy101/Zhiheng)。
+
+需要我把「出题路径禁用 thinking」这条改动直接提交成 PR 吗？

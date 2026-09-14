@@ -120,7 +120,11 @@ interface InterrogateViewHooks {
  */
 type InterrogateCallResult =
   | { ok: true; data: InterrogateResponseBody }
-  | { ok: false; storageUnavailable: boolean };
+  | {
+      ok: false;
+      storageUnavailable: boolean;
+      failureReason: 'client_timeout' | 'network' | 'api_error' | 'storage_unavailable';
+    };
 
 /**
  * Fetch one of this browser owner's stored sessions from the server (#21).
@@ -219,16 +223,20 @@ async function postInterrogate(
     });
     if (res.status === 503) {
       // Explicit server-storage degradation signal (#21).
-      return { ok: false, storageUnavailable: true };
+      return { ok: false, storageUnavailable: true, failureReason: 'storage_unavailable' };
     }
     if (!res.ok) {
       console.error('Interrogate API error:', res.status);
-      return { ok: false, storageUnavailable: false };
+      return { ok: false, storageUnavailable: false, failureReason: 'api_error' };
     }
     return { ok: true, data: (await res.json()) as InterrogateResponseBody };
   } catch (err) {
     console.error('Interrogate API failed:', err);
-    return { ok: false, storageUnavailable: false };
+    return {
+      ok: false,
+      storageUnavailable: false,
+      failureReason: err instanceof DOMException && err.name === 'AbortError' ? 'client_timeout' : 'network',
+    };
   } finally {
     window.clearTimeout(timeout);
   }
@@ -564,7 +572,9 @@ export default function Home() {
         // local optimistic bubble explicitly so it exposes its retry path.
         if (payload.optimisticId) {
           setMessages(prev => prev.map((message) =>
-            message.id === payload.optimisticId ? { ...message, status: 'failed' } : message
+            message.id === payload.optimisticId
+              ? { ...message, status: 'failed', failureReason: res.failureReason }
+              : message
           ));
         }
         setOptimisticMessageId(null);
@@ -976,10 +986,15 @@ export default function Home() {
     const msg = messages.find(m => m.id === msgId)!;
     if (msg.status !== 'failed') return;
     // Retry: mark as pending and re-submit
-    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'pending' } : m));
+    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'pending', failureReason: undefined } : m));
     setOptimisticMessageId(msgId);
     void runInterrogate(session, { action: 'answer', answer: msg.text, optimisticId: msgId });
   }, [session, messages]);
+
+  const handleRetryQuestion = useCallback(() => {
+    if (!session || !session.interrogation?.usedFallback) return;
+    void runInterrogate(session, { action: 'retry_question' });
+  }, [session]);
 
   const handleNewSession = () => {
     setSession(null);
@@ -1162,6 +1177,7 @@ export default function Home() {
               onDecisionContinue={handleCheckpointContinue}
               onRetryComplete={() => { void handleCompleteNow(); }}
               onRetryMessage={handleRetryMessage}
+              onRetryQuestion={handleRetryQuestion}
               onExit={() => { void handleCompleteNow(); }}
               messagesEndRef={messagesEndRef}
               formLoading={formLoading}

@@ -132,7 +132,7 @@ export interface LLMChatMessage {
  * Safety constraints embedded into every request: the model only asks, it
  * never answers for the user, never judges, and outputs exactly one question.
  */
-const SAFETY_CONSTRAINTS = '只提一个开放式问题（问号结尾）；不替用户作答；不输出观点裁决、正确性判断、评分或礼貌性认同（如“很有价值”“我很认同”）。';
+const SAFETY_CONSTRAINTS = '只提一个开放式问题（问号结尾）；不替用户作答；不输出观点裁决、正确性判断或评分。';
 
 const INTENSITY_GUIDANCE = {
   gentle: '低强度：从一个具体例子或直觉切入，不要求完整论证。',
@@ -229,8 +229,6 @@ const JUDGMENT_PATTERNS: RegExp[] = [
   /你(必须|应该|需要)?\s*(接受|拒绝|放弃|改变)\s*(这个|该)?\s*(观点|立场|看法)/,
   /对.*(打|评)\s*[0-9]+\s*分/,
   /评级[:：]\s*[0-9]+/,
-  /(?:很有价值|非常有价值|值得肯定|很有道理)/,
-  /(?:我很认同|我认同你(?:的)?(?:观点|说法|看法)?)/,
 ];
 
 /**
@@ -298,36 +296,6 @@ export function extractChoiceContent(body: unknown): string | null {
   return typeof content === 'string' ? content : null;
 }
 
-type InteractiveQuestionContent =
-  | { ok: true; content: string }
-  | { ok: false; reason: Extract<LLMRequestError['reason'], 'response_schema_invalid' | 'response_empty' | 'reasoning_leaked'>; message: string };
-
-/** Interactive questions must use final `content`, never reasoning_content. */
-function extractInteractiveQuestionContent(body: unknown): InteractiveQuestionContent {
-  if (typeof body !== 'object' || body === null) {
-    return { ok: false, reason: 'response_schema_invalid', message: 'LLM API returned a non-object response' };
-  }
-  const choices = (body as Record<string, unknown>).choices;
-  if (!Array.isArray(choices) || choices.length === 0 || typeof choices[0] !== 'object' || choices[0] === null) {
-    return { ok: false, reason: 'response_schema_invalid', message: 'LLM API response is missing choices[0]' };
-  }
-  const message = (choices[0] as Record<string, unknown>).message;
-  if (typeof message !== 'object' || message === null) {
-    return { ok: false, reason: 'response_schema_invalid', message: 'LLM API response is missing choices[0].message' };
-  }
-  const fields = message as Record<string, unknown>;
-  const content = fields.content;
-  const reasoning = fields.reasoning_content;
-  if (typeof content === 'string' && content.trim()) return { ok: true, content };
-  if (typeof reasoning === 'string' && reasoning.trim()) {
-    return { ok: false, reason: 'reasoning_leaked', message: 'LLM returned reasoning_content without final content' };
-  }
-  if (typeof content === 'string' || content === null || content === undefined) {
-    return { ok: false, reason: 'response_empty', message: 'LLM API returned empty final content' };
-  }
-  return { ok: false, reason: 'response_schema_invalid', message: 'LLM API returned non-string final content' };
-}
-
 // ---------------------------------------------------------------------------
 // Provider — one attempt per call; retry/template degradation is withFallback's
 // job (llm-fallback.ts), so this class always throws on failure.
@@ -366,19 +334,15 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         messages,
         temperature: 0.7,
         max_tokens: 1024,
-        // DeepSeek enables reasoning by default. An interactive question must
-        // be its final answer, never a reasoning trace that fails validation.
-        ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
       })
     );
-    const parsed = extractInteractiveQuestionContent(body);
-    if (!parsed.ok) {
-      throw new LLMRequestError(parsed.reason, parsed.message);
+    const content = extractChoiceContent(body);
+    if (content === null) {
+      throw new Error('LLM API returned an unexpected response shape');
     }
-    const question = parsed.content.trim();
+    const question = content.trim();
     if (!isValidQuestionText(question)) {
-      throw new LLMRequestError(
-        'question_validation_failed',
+      throw new Error(
         'LLM response failed question validation (empty, overlong, multi-question, or verdict-like)'
       );
     }
@@ -470,8 +434,6 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
         model: this.config.model,
         messages,
         temperature: 0.3,
-        response_format: { type: 'json_object' },
-        ...(this.isDeepSeekEndpoint() ? { thinking: { type: 'disabled' } } : {}),
         max_tokens: 1536,
       }),
       this.config.synthesisTimeoutMs
@@ -639,14 +601,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
           error: `LLM API HTTP ${response.status}`,
           responsePreview,
         });
-        const reason = response.status === 401 || response.status === 403
-          ? 'authentication_failed'
-          : response.status === 429
-          ? 'rate_limited'
-          : response.status >= 500
-          ? 'provider_unavailable'
-          : 'http_error';
-        throw new LLMRequestError(reason, `LLM API HTTP ${response.status} (model=${model})`, response.status, responsePreview);
+        throw new LLMRequestError('http', `LLM API HTTP ${response.status} (model=${model})`, response.status, responsePreview);
       }
       let parsed: unknown;
       try {
@@ -665,7 +620,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
           error: `LLM API returned non-JSON body: ${err instanceof Error ? err.message : String(err)}`,
           responsePreview,
         });
-        throw new LLMRequestError('response_not_json', 'LLM API returned non-JSON body');
+        throw new LLMRequestError('invalid_response', 'LLM API returned non-JSON body');
       }
       const content = extractChoiceContent(parsed);
       logRequest({

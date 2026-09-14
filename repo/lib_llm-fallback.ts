@@ -16,19 +16,7 @@ export interface FallbackEvent {
 }
 
 /** Stable, user-safe classification for a failed LLM attempt. */
-export type LLMFailureReason =
-  | 'timeout'
-  | 'network'
-  | 'authentication_failed'
-  | 'rate_limited'
-  | 'provider_unavailable'
-  | 'http_error'
-  | 'response_not_json'
-  | 'response_schema_invalid'
-  | 'response_empty'
-  | 'reasoning_leaked'
-  | 'question_validation_failed'
-  | 'unknown';
+export type LLMFailureReason = 'timeout' | 'network' | 'http' | 'invalid_response' | 'invalid_synthesis' | 'unknown';
 
 export class LLMRequestError extends Error {
   constructor(public readonly reason: LLMFailureReason, message: string, public readonly status?: number, public readonly responsePreview?: string) {
@@ -157,22 +145,14 @@ export async function withFallback(
       log({ type: 'success', strategy, attempts: 1, timestamp: Date.now() });
       return { question: q.trim(), usedFallback: false, events };
     }
-    throw new LLMRequestError('response_empty', 'LLM returned an empty question');
+    throw new Error('empty question');
   } catch (err) {
-    const reason = classifyLLMFailure(err);
-    console.warn('[interrogate] LLM question attempt failed', {
-      strategy,
-      attempt: 1,
-      reason,
-      message: err instanceof Error ? err.message.slice(0, 300) : 'Non-Error failure',
-      status: err instanceof LLMRequestError ? err.status : undefined,
-    });
     log({
       type: 'retry',
       strategy,
       attempts: 1,
       error: err instanceof Error ? err.message : String(err),
-      reason,
+      reason: classifyLLMFailure(err),
       timestamp: Date.now(),
     });
   }
@@ -184,22 +164,14 @@ export async function withFallback(
       log({ type: 'success', strategy, attempts: 2, timestamp: Date.now() });
       return { question: q.trim(), usedFallback: false, events };
     }
-    throw new LLMRequestError('response_empty', 'LLM returned an empty question on retry');
+    throw new Error('empty question on retry');
   } catch (err) {
-    const reason = classifyLLMFailure(err);
-    console.warn('[interrogate] LLM question degraded to strategy template', {
-      strategy,
-      attempt: 2,
-      reason,
-      message: err instanceof Error ? err.message.slice(0, 300) : 'Non-Error failure',
-      status: err instanceof LLMRequestError ? err.status : undefined,
-    });
     log({
       type: 'template',
       strategy,
       attempts: 2,
       error: err instanceof Error ? err.message : String(err),
-      reason,
+      reason: classifyLLMFailure(err),
       timestamp: Date.now(),
     });
   }

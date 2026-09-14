@@ -19,8 +19,6 @@ export interface Message {
    * - 'failed': server rejected; the user can click to retry.
    */
   status?: 'sent' | 'pending' | 'failed';
-  /** Why a browser-to-interrogation API request failed; distinct from an LLM template fallback. */
-  failureReason?: 'client_timeout' | 'network' | 'api_error' | 'storage_unavailable';
   /**
    * True when this user input was recorded while the user was uncertain
    * (#17). Uncertain inputs stay traceable in the conversation but never
@@ -283,8 +281,6 @@ export interface InterrogationState {
 /** Actions accepted by the interrogation orchestration API (#15, #17, #Q-02). */
 export type InterrogateAction =
   | 'start'
-  /** Re-request the current template-degraded AI question without advancing the round. */
-  | 'retry_question'
   | 'answer'
   | 'continue'
   | 'complete'

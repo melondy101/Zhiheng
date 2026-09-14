@@ -354,6 +354,36 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
 
   const state = interrogationStateOf(session);
 
+  if (action === 'retry_question') {
+    if (!state.usedFallback || !state.strategy || !state.assistantQuestion) {
+      return { ok: false, status: 409, error: 'No template-degraded question to retry' };
+    }
+    const previousQuestion = state.assistantQuestion;
+    const retry = await withFallback(state.strategy, session, () =>
+      generateQuestion(state.strategy!, session)
+    );
+    const lastAssistantIndex = session.messages.map((message) => message.role).lastIndexOf('assistant');
+    const messages = lastAssistantIndex >= 0 && session.messages[lastAssistantIndex]?.text === previousQuestion
+      ? session.messages.map((message, index) =>
+          index === lastAssistantIndex ? { ...message, text: retry.question } : message
+        )
+      : [...session.messages, makeAssistantMessage(retry.question)];
+    const updated: Session = {
+      ...session,
+      messages,
+      interrogation: {
+        ...state,
+        assistantQuestion: retry.question,
+        usedFallback: retry.usedFallback,
+        ...(retry.failureReason ? { fallbackReason: retry.failureReason } : {}),
+      },
+      updatedAt: Date.now(),
+    };
+    if (!retry.failureReason) delete updated.interrogation!.fallbackReason;
+    await storage.saveSession(updated);
+    return { ok: true, body: toResponseBody(updated, null, false) };
+  }
+
   if (action === 'start') {
     const viewpoint = input.viewpoint;
     if (

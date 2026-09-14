@@ -34,7 +34,7 @@ import {
   type LLMHttpTransport,
   type OpenAILLMConfig,
 } from '../../src/lib/openai-llm-provider';
-import { withFallback } from '../../src/lib/llm-fallback';
+import { LLMRequestError, withFallback } from '../../src/lib/llm-fallback';
 import { STRATEGIES } from '../../src/lib/strategy-engine';
 import type { Session, Source } from '../../src/lib/providers';
 
@@ -333,6 +333,40 @@ describe('DeepSeek request safeguards', () => {
     const request = JSON.parse(calls[0]!.options.body) as Record<string, unknown>;
     assert.deepStrictEqual(request.response_format, { type: 'json_object' });
     assert.deepStrictEqual(request.thinking, { type: 'disabled' });
+  });
+});
+
+describe('interactive question response classification', () => {
+  const expectsReason = (reason: string) => (error: unknown) =>
+    error instanceof LLMRequestError && String(error.reason) === reason;
+
+  it('distinguishes authentication, rate-limit, and upstream availability failures', async () => {
+    for (const [status, reason] of [[401, 'authentication_failed'], [429, 'rate_limited'], [503, 'provider_unavailable']] as const) {
+      const { provider } = makeProvider(() => jsonResponse({ error: 'upstream failure' }, status));
+      await assert.rejects(provider.generateStrategyQuestion('M1_evidence', makeSession()), expectsReason(reason));
+    }
+  });
+
+  it('distinguishes non-JSON, malformed, empty, and reasoning-only responses', async () => {
+    const cases: Array<[string, () => Response, string]> = [
+      ['non-JSON', () => new Response('gateway unavailable', { status: 200 }), 'response_not_json'],
+      ['malformed shape', () => jsonResponse({ choices: [] }), 'response_schema_invalid'],
+      ['empty final content', () => jsonResponse(chatResponse('')), 'response_empty'],
+      ['reasoning-only content', () => jsonResponse({ choices: [{ message: { content: '', reasoning_content: '先分析这个问题' } }] }), 'reasoning_leaked'],
+    ];
+    for (const [, handler, reason] of cases) {
+      const { provider } = makeProvider(handler);
+      await assert.rejects(provider.generateStrategyQuestion('M1_evidence', makeSession()), expectsReason(reason));
+    }
+  });
+
+  it('classifies a compliment-only interactive response as question_validation_failed', async () => {
+    const { provider } = makeProvider(() => jsonResponse(chatResponse('你的说法很有价值，我很认同。')));
+
+    await assert.rejects(
+      provider.generateStrategyQuestion('M1_evidence', makeSession()),
+      (error: unknown) => error instanceof LLMRequestError && error.reason === 'question_validation_failed'
+    );
   });
 });
 
@@ -664,6 +698,7 @@ describe('OpenAICompatibleLLMProvider: invalid model responses', () => {
     ['multiple questions', { choices: [{ message: { content: '第一问？第二问？' } }] }],
     ['multi-line output', { choices: [{ message: { content: '第一个想法？\n另一个想法？' } }] }],
     ['an overlong answer', { choices: [{ message: { content: `${'长'.repeat(600)}？` } }] }],
+    ['a templated compliment', { choices: [{ message: { content: '你的说法很有价值，我很认同。' } }] }],
   ];
 
   for (const [name, body] of invalidBodies) {

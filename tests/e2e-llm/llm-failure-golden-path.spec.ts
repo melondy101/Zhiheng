@@ -53,6 +53,12 @@ test('LLM failure degrades to the strategy template and preserves the round', as
   //     suffix rather than one specific branch.
   await expect(page.getByText(/已使用策略模板/).first()).toBeVisible();
 
+  // A template is recoverable: retry the same pending question rather than
+  // forcing the user to answer it or advancing the interrogation round.
+  await page.getByRole('button', { name: '重新请求 AI' }).first().click();
+  await expect(page.getByText('第 1 轮').first()).toBeVisible();
+  await expect(page.getByText('【策略模板降级】').first()).toBeVisible();
+
   // (c) Answer one round: the answer is kept, the round advances, and the
   //     round 2 question (前提追问) is template-degraded again.
   await page.fill('[data-testid="answer-input"]', ANSWER_1);

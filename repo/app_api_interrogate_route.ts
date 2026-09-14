@@ -25,7 +25,6 @@ export const maxDuration = 60;
 
 const ACTIONS: InterrogateAction[] = [
   'start',
-  'retry_question',
   'answer',
   'continue',
   'complete',
