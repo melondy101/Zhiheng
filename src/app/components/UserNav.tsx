@@ -4,7 +4,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useCurrentUser } from '../providers/UserProvider';
-import { LogOut, LogIn, Sparkles, ChevronDown, User as UserIcon, Settings, X, Check, Image as ImageIcon } from 'lucide-react';
+import { LogOut, LogIn, Sparkles, ChevronDown, User as UserIcon, Settings, X, Check, Image as ImageIcon, Link2 } from 'lucide-react';
 
 interface UserNavProps {
   className?: string;
@@ -158,17 +158,77 @@ export default function UserNav({ className = '', compact = false }: UserNavProp
             />
           </div>
 
-          {/* 账号信息展示 */}
-          <div className="rounded-xl border border-line bg-surface p-3.5 space-y-2 text-xs">
-            <div className="flex justify-between items-center">
-              <span className="text-content-secondary">绑定邮箱</span>
-              <span className="font-medium text-content-primary">{user?.email || '未绑定'}</span>
+          {/* 账号与绑定信息 */}
+          <div className="rounded-xl border border-line bg-surface p-3.5 space-y-3 text-xs">
+            <div className="flex justify-between items-center pb-2.5 border-b border-line/60">
+              <span className="text-content-secondary font-medium">绑定邮箱</span>
+              <span className="font-mono text-content-primary">{user?.email || '未绑定'}</span>
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-content-secondary">知乎连接状态</span>
-              <span className={`font-medium ${zhihuStatus?.authorized ? 'text-brand' : 'text-content-tertiary'}`}>
-                {zhihuStatus?.authorized ? (zhihuStatus.profile?.name ? `已连接 (${zhihuStatus.profile.name})` : '已连接') : '未连接'}
-              </span>
+
+            {/* 知乎账号连接与绑定 */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 font-bold text-xs">
+                    知
+                  </span>
+                  <span className="text-content-secondary font-medium">知乎账号绑定</span>
+                </div>
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium ${
+                  zhihuStatus?.authorized
+                    ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-900/40'
+                    : 'bg-surface-subtle text-content-tertiary'
+                }`}>
+                  {zhihuStatus?.authorized ? '已绑定' : '未绑定'}
+                </span>
+              </div>
+
+              {zhihuStatus?.authorized ? (
+                <div className="flex items-center justify-between p-2.5 rounded-lg bg-surface-subtle border border-line">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {zhihuStatus.profile?.avatarUrl ? (
+                      <img src={zhihuStatus.profile.avatarUrl} alt="知乎头像" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <div className="w-7 h-7 rounded-full bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs shrink-0">
+                        {zhihuStatus.profile?.name ? zhihuStatus.profile.name.charAt(0) : '知'}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-medium text-content-primary text-xs truncate">
+                        {zhihuStatus.profile?.name || '已授权知乎账号'}
+                      </p>
+                      {zhihuStatus.profile?.headline && (
+                        <p className="text-[10px] text-content-tertiary truncate">{zhihuStatus.profile.headline}</p>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { window.location.assign('/api/auth/zhihu/start'); }}
+                    className="shrink-0 ml-2 px-2.5 py-1 text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-md transition-colors cursor-pointer"
+                  >
+                    重新授权
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1.5 pt-1">
+                  <button
+                    id="settings-bind-zhihu-btn"
+                    type="button"
+                    onClick={() => { window.location.assign('/api/auth/zhihu/start'); }}
+                    disabled={zhihuStatus?.configured === false}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border border-blue-200 dark:border-blue-900/60 bg-blue-50/50 hover:bg-blue-50 dark:bg-blue-950/20 dark:hover:bg-blue-950/40 text-blue-600 dark:text-blue-400 font-medium text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <Link2 className="w-3.5 h-3.5" />
+                    <span>前往授权绑定知乎账号</span>
+                  </button>
+                  {zhihuStatus?.configured === false && (
+                    <p className="text-[11px] text-content-tertiary text-center">
+                      知乎 OAuth 服务未配置，请联系管理员或在环境变量中配置
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
