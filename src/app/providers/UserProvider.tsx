@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { AuthModal } from '../components/AuthModal';
-import { setOwnerId } from '@/lib/owner-id';
+import { setOwnerId, getOrCreateOwnerId, ownerHeaders } from '@/lib/owner-id';
 
 export interface CurrentUser {
   id: string;
@@ -65,17 +65,49 @@ export function UserProvider({
   const refresh = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/auth/me');
-      if (res.ok) {
+      let res: Response | null = null;
+      try {
+        res = await fetch('/api/auth/me', {
+          headers: ownerHeaders(),
+        });
+      } catch {
+        // Network blip or server starting up: retry once after 500ms
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        try {
+          res = await fetch('/api/auth/me', {
+            headers: ownerHeaders(),
+          });
+        } catch {
+          // Both fetch attempts failed (offline or unreachable)
+        }
+      }
+
+      if (res && res.ok) {
         const data = await res.json();
         if (data.user) {
           setUser(data.user);
           setOwnerId(data.user.id);
           await refreshZhihuStatus();
+          return;
         }
       }
-    } catch (err) {
-      console.error('[UserProvider] Failed to fetch current user:', err);
+
+      // If server returned non-200 or no user, safely fall back to local guest identity
+      const fallbackId = getOrCreateOwnerId();
+      setUser((prev) => prev ?? {
+        id: fallbackId,
+        name: `访客 ${fallbackId.slice(0, 4)}`,
+        email: `guest-${fallbackId.slice(0, 6)}@anon.local`,
+        isGuest: true,
+      });
+    } catch {
+      const fallbackId = getOrCreateOwnerId();
+      setUser((prev) => prev ?? {
+        id: fallbackId,
+        name: `访客 ${fallbackId.slice(0, 4)}`,
+        email: `guest-${fallbackId.slice(0, 6)}@anon.local`,
+        isGuest: true,
+      });
     } finally {
       setLoading(false);
     }
@@ -173,7 +205,7 @@ export function UserProvider({
         }
       }
     } catch (err) {
-      console.error('[UserProvider] Logout error:', err);
+      console.warn('[UserProvider] Logout error:', err);
     }
   }, []);
 

@@ -80,6 +80,40 @@ export const MIGRATION_STATEMENTS: readonly string[] = [
     markdown TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`,
+
+  // User accounts and authentication tables
+  `CREATE TABLE IF NOT EXISTS zhiyan_users (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    email_lower TEXT NOT NULL,
+    password_hash TEXT NOT NULL DEFAULT '',
+    is_guest BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_zhiyan_users_email_lower
+    ON zhiyan_users (email_lower)`,
+
+  `CREATE TABLE IF NOT EXISTS zhiyan_email_verifications (
+    id TEXT NOT NULL PRIMARY KEY,
+    email_lower TEXT NOT NULL,
+    code TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_zhiyan_verifications_email
+    ON zhiyan_email_verifications (email_lower)`,
+
+  `CREATE TABLE IF NOT EXISTS zhiyan_auth_attempts (
+    id TEXT NOT NULL PRIMARY KEY,
+    ip_address TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_zhiyan_auth_attempts_lookup
+    ON zhiyan_auth_attempts (ip_address, action_type, attempted_at)`,
 ];
 
 /**

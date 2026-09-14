@@ -22,9 +22,10 @@ export function getPrefetchedZhihuSources(question: string): RetrievalResult | n
   return { ...entry.result, source: 'cache' };
 }
 
-async function prefetchOne(title: string): Promise<void> {
+async function prefetchOne(title: string): Promise<{ authFailed?: boolean }> {
   const key = normalizeQuery(title);
-  if (!key || prefetched.has(key) || inFlight.has(key)) return;
+  if (!key || prefetched.has(key) || inFlight.has(key)) return {};
+  let isAuthFailed = false;
   const task = (async () => {
     try {
       const result = await createZhihuSearchProvider({ count: 10 }).search(title);
@@ -33,14 +34,22 @@ async function prefetchOne(title: string): Promise<void> {
       if (result.sources.length > 0 && result.source !== 'demo' && result.source !== 'unavailable') {
         prefetched.set(key, { result, expiresAt: Date.now() + PREFETCH_TTL_MS });
       }
+      if (result.diagnostic?.reason === 'auth_failed') {
+        isAuthFailed = true;
+      }
     } catch (error) {
-      console.warn('[zhihu-prefetch] topic failed:', title, error instanceof Error ? error.message : String(error));
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('20001') || msg.includes('Authorization failed') || msg.includes('401') || msg.includes('403')) {
+        isAuthFailed = true;
+      }
+      console.warn('[zhihu-prefetch] topic failed:', title, msg);
     } finally {
       inFlight.delete(key);
     }
   })();
   inFlight.set(key, task);
   await task;
+  return { authFailed: isAuthFailed };
 }
 
 /** Best-effort background preparation; never blocks the hotlist response. */
@@ -48,10 +57,15 @@ export function prefetchHotlistTopics(items: HotlistItem[]): void {
   const titles = Array.from(new Set(items.map((item) => normalizeQuery(item.title)).filter(Boolean)));
   void (async () => {
     let cursor = 0;
+    let authFailed = false;
     const worker = async () => {
-      while (cursor < titles.length) {
+      while (cursor < titles.length && !authFailed) {
         const title = titles[cursor++];
-        await prefetchOne(title);
+        const res = await prefetchOne(title);
+        if (res.authFailed) {
+          authFailed = true;
+          break;
+        }
       }
     };
     await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENCY, titles.length) }, worker));

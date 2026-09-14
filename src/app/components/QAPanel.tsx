@@ -166,6 +166,7 @@ export default function QAPanel({
       <StoryView
         storyRun={session.storyRun}
         sources={sources}
+        loading={formLoading}
         onChoice={onStoryChoice ?? (() => {})}
         onFreeform={onStoryFreeform ?? (() => {})}
         onComplete={onStoryComplete ?? (() => {})}

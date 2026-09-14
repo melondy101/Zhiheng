@@ -1,4 +1,4 @@
-﻿// Interrogation orchestrator for ticket #15.
+// Interrogation orchestrator for ticket #15.
 //
 // This module is the single interrogation seam: every strategy decision
 // (round order, checkpoint gating, fallback, uncertain streak) is computed
@@ -419,10 +419,45 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
     let updatedStory = makeStoryChoice(session.storyRun, input.choiceId, input.optionId);
     if (input.storyLlm) {
       const optionText = updatedStory.acts.flatMap((a) => a.choices).flatMap((c) => c.options).find((o) => o.id === input.optionId)?.text ?? input.optionId;
-      const ai = await generateStoryAdvance(input.storyLlm, updatedStory, optionText);
-      if (ai) {
-        const now = Date.now(); const actIndex = updatedStory.currentActIndex; const choiceId = `ai_choice_${now}`;
-        updatedStory = { ...updatedStory, acts: updatedStory.acts.map((act) => act.actIndex !== actIndex ? act : { ...act, narrative: ai.scene, dialogue: ai.dialogue, reasoningGoal: ai.reasoningGoal, choices: [{ id: choiceId, actIndex, title: 'next action', prompt: ai.reflection, selectedOptionId: null, options: ai.suggestions.map((option, index) => ({ id: `${choiceId}_${index}`, ...option, evidenceCitationIds: ai.citationIds ?? [], consequence: 'The consequence will unfold in the next turn.' })) }] }), dynamicTurns: [...(updatedStory.dynamicTurns ?? []), { ...ai, actIndex, createdAt: now }] };
+      try {
+        const ai = await generateStoryAdvance(input.storyLlm, updatedStory, optionText);
+        if (ai) {
+          const now = Date.now();
+          const actIndex = updatedStory.currentActIndex;
+          const choiceId = `ai_choice_${now}`;
+          updatedStory = {
+            ...updatedStory,
+            currentChoiceId: choiceId,
+            acts: updatedStory.acts.map((act) =>
+              act.actIndex !== actIndex
+                ? act
+                : {
+                    ...act,
+                    narrative: ai.scene,
+                    dialogue: ai.dialogue,
+                    reasoningGoal: ai.reasoningGoal,
+                    choices: [
+                      {
+                        id: choiceId,
+                        actIndex,
+                        title: '关键决断',
+                        prompt: ai.reflection,
+                        selectedOptionId: null,
+                        options: ai.suggestions.map((option, index) => ({
+                          id: `${choiceId}_${index}`,
+                          ...option,
+                          evidenceCitationIds: ai.citationIds ?? [],
+                          consequence: '选择后果正在显现。',
+                        })),
+                      },
+                    ],
+                  }
+            ),
+            dynamicTurns: [...(updatedStory.dynamicTurns ?? []), { ...ai, actIndex, createdAt: now }],
+          };
+        }
+      } catch (err) {
+        console.warn('Story AI generation error:', err);
       }
     }
     const updated: Session = {
@@ -525,15 +560,22 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
         transitionChoice: choice,
         updatedAt: Date.now(),
       };
+      if (state.round === 0 || !state.assistantQuestion) {
+        const planned = await planNextRound(updated, generateQuestion, state.uncertainStreak);
+        await storage.saveSession(planned);
+        return { ok: true, body: toResponseBody(planned, null, false) };
+      }
       await storage.saveSession(updated);
       return { ok: true, body: toResponseBody(updated, null, false) };
-    } else if (choice === 'start_challenge') {
+    } else if (choice === 'start_challenge' || choice === 'challenge_claim') {
       mode = 'deep';
       phase = 'interrogation';
     } else if (choice === 'inspect_evidence') {
       target = 'clarify_position';
+      phase = 'orientation';
     } else if (choice === 'inspect_counterargument') {
       target = 'weigh_decision';
+      phase = 'orientation';
     }
 
     const updated: Session = {
@@ -545,8 +587,8 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
       updatedAt: Date.now(),
     };
 
-    // If no round was planned yet, plan round 1 now
-    if (state.round === 0 || !state.assistantQuestion) {
+    // If no round was planned yet, or transitioning to next step without a pending question, plan question now
+    if (state.round === 0 || !state.assistantQuestion || phase === 'interrogation') {
       const planned = await planNextRound(updated, generateQuestion, state.uncertainStreak);
       await storage.saveSession(planned);
       return { ok: true, body: toResponseBody(planned, null, false) };

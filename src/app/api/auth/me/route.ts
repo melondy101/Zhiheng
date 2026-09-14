@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
-import { requireAuth, createGuestSession, buildSessionCookieString } from '@/lib/auth';
+import { requireAuth, createGuestSession, buildSessionCookieString, generateGuestIdentity } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
   try {
     const auth = await requireAuth(request);
+    const cookieHeader = request.headers.get('cookie');
+    const hasSessionCookie = cookieHeader && (cookieHeader.includes('zhiyan_session') || cookieHeader.includes('__Host-session'));
+
     const response = NextResponse.json({
       user: {
         id: auth.userId,
@@ -16,8 +19,7 @@ export async function GET(request: Request) {
     });
 
     // If request had no session cookie and we created a fresh guest, set the cookie header
-    const cookieHeader = request.headers.get('cookie');
-    if (!cookieHeader || (!cookieHeader.includes('zhiyan_session') && !cookieHeader.includes('__Host-session'))) {
+    if (!hasSessionCookie) {
       const guest = await createGuestSession();
       response.headers.set('Set-Cookie', buildSessionCookieString(guest.token));
       return NextResponse.json({
@@ -32,7 +34,15 @@ export async function GET(request: Request) {
 
     return response;
   } catch (err) {
-    console.error('[auth/me] error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.warn('[auth/me] error during session resolution, returning fallback guest:', err);
+    const guestIdentity = generateGuestIdentity();
+    return NextResponse.json({
+      user: {
+        id: guestIdentity.id,
+        name: guestIdentity.name,
+        email: guestIdentity.email,
+        isGuest: true,
+      },
+    });
   }
 }
