@@ -280,3 +280,61 @@ describe('handleInterrogate: complete action AI summary wiring', () => {
     assert.strictEqual(result.body.session.resultCardAISummary, undefined);
   });
 });
+
+describe('handleInterrogate: clean assistant message composition without repetitive prefixes', () => {
+  it('does not prepend repetitive template praise to assistant question on substantive answer', async () => {
+    const modes: Array<'deep' | 'quick' | 'fun'> = ['deep', 'quick', 'fun'];
+
+    for (const mode of modes) {
+      const base = makeSession(0, 1);
+      const session: Session = {
+        ...base,
+        id: `sess_clean_${mode}`,
+        mode,
+        character: mode === 'fun' ? 'relaxed_friend' : undefined,
+        question: '人工智能是否会取代基础教育教师？',
+        selectedViewpoint: {
+          id: 'vp1',
+          text: '基础教育阶段教师的情感连接不可替代',
+          source: 'user_authored',
+          selectedAt: Date.now(),
+        },
+        messages: [
+          {
+            id: 'm0',
+            role: 'assistant',
+            text: '针对教师的情感连接不可替代这一论点，核心依据是什么？',
+            timestamp: Date.now() - 1000,
+          },
+        ],
+        interrogation: {
+          round: 1,
+          strategy: 'M1_evidence',
+          assistantQuestion: '针对教师的情感连接不可替代这一论点，核心依据是什么？',
+          usedFallback: false,
+          pendingCheckpoint: false,
+          uncertainStreak: 0,
+        },
+      };
+
+      const { storage } = makeStorage(session);
+      const expectedQuestion = '如果机器能通过微表情识别提供更高频的情感反馈，这种连接是否依然独属于人类？';
+
+      const result = await handleInterrogate({
+        sessionId: session.id,
+        action: 'answer',
+        answer: '我认为教师具有机器不具备的同理心和临场体察能力。',
+        storage,
+        generateQuestion: async () => expectedQuestion,
+      });
+
+      assert.ok(result.ok, `Should succeed for mode ${mode}`);
+      const lastMsg = result.body.session.messages[result.body.session.messages.length - 1];
+      assert.strictEqual(lastMsg.role, 'assistant');
+      assert.ok(!lastMsg.text.includes('我理解你的思考。你提到了'), `Mode ${mode} must not include repetitive praise prefix`);
+      assert.ok(!lastMsg.text.includes('这很有价值'), `Mode ${mode} must not include value judgments`);
+      assert.ok(lastMsg.text.includes(expectedQuestion) || lastMsg.text.includes('老铁') || lastMsg.text.includes('呢'), `Should contain the question`);
+    }
+  });
+});
+

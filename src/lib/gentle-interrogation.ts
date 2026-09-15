@@ -174,12 +174,21 @@ function buildQuestionFollowUp(session: Session, _questionText: string): string 
 
 /**
  * Build an acknowledgment for a user's substantive response, referencing
- * their selected viewpoint.
+ * their response fragment and varied across directive rounds.
  */
 function buildAcknowledgment(session: Session, answerText: string): string {
-  const stance = session.selectedViewpoint?.text;
-  const fragment = answerText.length > 20 ? answerText.slice(0, 20) + '…' : answerText;
-  return `我理解你的思考。你提到了「${fragment}」，这很有价值。`;
+  const round = completedDirectiveRounds(session);
+  const fragment = answerText.length > 24 ? answerText.slice(0, 24) + '…' : answerText;
+
+  const variations = [
+    `围绕「${fragment}」这一论述，我们可以进一步检验其背后的支撑逻辑。`,
+    `顺着关于「${fragment}」的切入点，让我们继续辨析其适用边界。`,
+    `从「${fragment}」这一角度出发，不妨深入考察是否有其他潜在因素。`,
+    `针对「${fragment}」的具体考量，我们需要进一步推演其推导链条。`,
+  ];
+
+  const index = Math.abs(round) % variations.length;
+  return variations[index]!;
 }
 
 /**

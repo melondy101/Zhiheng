@@ -863,12 +863,12 @@ export async function handleInterrogate(input: HandleInterrogateInput): Promise<
         },
       ];
 
-  // #26/R3: PRD v4.2 搂4.1 鈥?the AI's direct answer and the gentle follow-up
-  // MUST be persisted as a single assistant message. Saving them as two
-  // separate messages causes the UI to render the AI reply twice and breaks
-  // the round counter semantics.
+  // #26/R3: PRD v4.2 §4.1 — For questions, the AI's direct answer and gentle follow-up
+  // MUST be persisted as a single assistant message.
+  // For substantive responses, the assistant message directly presents the strategy question
+  // (with character formatting in fun mode) without prepending repetitive acknowledgment templates.
   const gentleMessages: Message[] = [];
-  const directAnswer = gentle.aiReply;
+  const directAnswer = gentle.intent === 'question' ? gentle.aiReply : null;
   let nextAssistantQuestion =
     gentle.intent === 'question' ? gentle.followUp : fb.question;
   if (withAnswer.mode === 'fun' && withAnswer.character && nextAssistantQuestion) {
